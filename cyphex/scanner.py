@@ -117,7 +117,15 @@ LANGUAGE_PATTERNS: dict[str, dict] = {
                 "name": "SQL Injection (Template Literal)",
                 "cwe": "CWE-89",
                 "severity": "Critical",
-                "pattern": r'(?:query|execute|raw)\s*\(\s*`[^`]*\$\{',
+                "pattern": r'(?:query|execute|raw)\s*\(\s*(?:`[^`]*\$\{|[a-zA-Z0-9_]+)',
+                "fix_hint": "Use parameterized queries with ? placeholders",
+            },
+            {
+                "id": "js-sqli-concat",
+                "name": "SQL Injection (String Concatenation)",
+                "cwe": "CWE-89",
+                "severity": "Critical",
+                "pattern": r'(?:SELECT|INSERT|UPDATE|DELETE).*\$\{',
                 "fix_hint": "Use parameterized queries with ? placeholders",
             },
             {
@@ -127,6 +135,14 @@ LANGUAGE_PATTERNS: dict[str, dict] = {
                 "severity": "High",
                 "pattern": r'\.innerHTML\s*=\s*(?![\'"]\s*$)',
                 "fix_hint": "Use .textContent or sanitize with DOMPurify",
+            },
+            {
+                "id": "js-xss-send",
+                "name": "Reflected XSS (res.send)",
+                "cwe": "CWE-79",
+                "severity": "High",
+                "pattern": r'res\.send\s*\(\s*`[^`]*\$\{',
+                "fix_hint": "Escape user input before sending HTML responses",
             },
             {
                 "id": "js-eval",
@@ -141,7 +157,7 @@ LANGUAGE_PATTERNS: dict[str, dict] = {
                 "name": "Command Injection (child_process)",
                 "cwe": "CWE-78",
                 "severity": "Critical",
-                "pattern": r'(?:exec|execSync|spawn)\s*\([^)]*(?:req\.|request\.|params\.|query\.|body\.)',
+                "pattern": r'(?:exec|execSync|spawn)\s*\(\s*`[^`]*\$\{',
                 "fix_hint": "Use execFile with argument arrays, never shell strings",
             },
             {

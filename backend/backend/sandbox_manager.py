@@ -169,8 +169,11 @@ async def deploy_sandbox(zip_path: str, sandbox_id: Optional[str] = None) -> dic
                 pass
 
         npm_cmd = shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
+        # Do not quote when passing as a list with shell=False
+        npm_cmd_clean = npm_cmd.strip('"')
+
         install_result = await _run_cmd(
-            f"{npm_cmd} install --no-audit --no-fund",
+            [npm_cmd_clean, "install", "--no-audit", "--no-fund"],
             cwd=sandbox_dir,
             timeout=180,
         )
@@ -186,7 +189,7 @@ async def deploy_sandbox(zip_path: str, sandbox_id: Optional[str] = None) -> dic
                 pkg_data = json.load(f)
             deps = {**pkg_data.get("dependencies", {}), **pkg_data.get("devDependencies", {})}
             if "prisma" in deps:
-                await _run_cmd(f"{npm_cmd} exec prisma generate", cwd=sandbox_dir, timeout=120)
+                await _run_cmd([npm_cmd_clean, "exec", "prisma", "generate"], cwd=sandbox_dir, timeout=120)
         except Exception:
             pass
 
@@ -194,9 +197,9 @@ async def deploy_sandbox(zip_path: str, sandbox_id: Optional[str] = None) -> dic
     # For Python sandboxes
     requirements = os.path.join(sandbox_dir, "requirements.txt")
     if os.path.exists(requirements):
-        await _run_cmd(f"{sys.executable} -m pip install -r requirements.txt", cwd=sandbox_dir, timeout=120)
+        await _run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=sandbox_dir, timeout=120)
     elif app_file and app_file.endswith(".py"):
-        await _run_cmd(f"{sys.executable} -m pip install flask requests", cwd=sandbox_dir, timeout=120)
+        await _run_cmd([sys.executable, "-m", "pip", "install", "flask", "requests"], cwd=sandbox_dir, timeout=120)
 
     # ── Patch entry file to respect PORT env var ─────────────
     _patch_port_in_entry(sandbox_dir, app_file, port)
@@ -206,21 +209,23 @@ async def deploy_sandbox(zip_path: str, sandbox_id: Optional[str] = None) -> dic
     env["PORT"] = str(port)
 
     npm_cmd = shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
+    npm_cmd_clean = npm_cmd.strip('"')
+        
     if app_file == "__NPM_RUN_START_DEV__":
-        cmd = f"{npm_cmd} run start:dev"
+        cmd = [npm_cmd_clean, "run", "start:dev"]
     elif app_file == "__NPM_RUN_DEV__":
-        cmd = f"{npm_cmd} run dev"
+        cmd = [npm_cmd_clean, "run", "dev"]
     elif app_file == "__NPM_RUN_START__":
-        cmd = f"{npm_cmd} run start"
+        cmd = [npm_cmd_clean, "run", "start"]
     elif app_file.endswith(".js"):
-        cmd = f"node {app_file}"
+        cmd = ["node", app_file]
     elif app_file.endswith(".py"):
-        cmd = f"{sys.executable} {app_file}"
+        cmd = [sys.executable, app_file]
     else:
-        cmd = f"node {app_file}"
+        cmd = ["node", app_file]
 
     proc = subprocess.Popen(
-        cmd, shell=True,
+        cmd, shell=False,
         cwd=sandbox_dir,
         env=env,
         stdout=subprocess.PIPE,
@@ -444,9 +449,10 @@ async def _run_cmd(cmd: str, cwd: str, timeout: int = 60) -> dict:
     import traceback
 
     def _sync_run():
+        is_shell = isinstance(cmd, str)
         return subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            cwd=cwd, env=_NODE_ENV, shell=True, timeout=timeout
+            cwd=cwd, env=_NODE_ENV, shell=is_shell, timeout=timeout
         )
 
     try:

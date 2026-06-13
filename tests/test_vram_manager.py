@@ -14,7 +14,11 @@ class TestVRAMManager:
 
     @pytest.fixture
     def vram(self):
-        return VRAMManager()
+        v = VRAMManager()
+        # Pin to 5.5 GB (the no-GPU fallback) so tests are deterministic
+        # regardless of the host machine's physical GPU memory.
+        v.VRAM_LIMIT = 5.5
+        return v
 
     @pytest.mark.asyncio
     async def test_deepseek_and_phi3_fit_together(self, vram):

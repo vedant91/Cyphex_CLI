@@ -12,6 +12,28 @@ OLLAMA_BASE = "http://localhost:11434"
 console = Console()
 
 
+def ctx_for_tier() -> dict:
+    """
+    Return tier-appropriate num_ctx and num_predict based on detected hardware.
+    Respects the cyphex-patch fine-tuned model's training context (4096).
+    """
+    try:
+        from cyphex.hardware import detect_mode
+        mode = detect_mode()
+    except Exception:
+        mode = "mid"  # safe fallback
+
+    tier_config = {
+        "ultra":   {"num_ctx": 8192, "num_predict": 4096},
+        "high":    {"num_ctx": 6144, "num_predict": 2048},
+        "mid":     {"num_ctx": 4096, "num_predict": 2048},
+        "low":     {"num_ctx": 4096, "num_predict": 1536},
+        "minimal": {"num_ctx": 4096, "num_predict": 1024},
+        "cloud":   {"num_ctx": 4096, "num_predict": 2048},
+    }
+    return tier_config.get(mode, tier_config["mid"])
+
+
 def _detect_vram_limit() -> float:
     """
     Detect actual VRAM/unified memory and set a safe limit.
@@ -167,7 +189,7 @@ class VRAMManager:
                     "prompt": prompt,
                     "stream": stream,
                     "keep_alive": "10m",
-                    "options": {"temperature": 0.1, "top_p": 0.9, "num_ctx": 4096}
+                    "options": {"temperature": 0.1, "top_p": 0.9, **ctx_for_tier()}
                 }
             )
             return r.json()["response"]
@@ -224,8 +246,7 @@ ANTI-HALLUCINATION RULES — apply on every response:
                                 "options": {
                                     "temperature": 0.1,
                                     "top_p": 0.9,
-                                    "num_predict": 1024,  # Enough headroom to complete JSON without truncation
-                                    "num_ctx": 2048,      # Smaller context = faster inference
+                                    **ctx_for_tier(),     # Tier-aware: 4096 (low) → 8192 (ultra)
                                 }
                             }
                         )

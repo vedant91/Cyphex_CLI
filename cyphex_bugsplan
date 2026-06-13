@@ -1,0 +1,222 @@
+# Fix: AI Patch Loop Introducing New Vulnerabilities on Re-Scan
+
+## Problem Statement
+
+When Cyphex patches vulnerabilities and you re-scan, it finds **new vulnerabilities** — even though all the original ones should have been fixed. Your suspicion is correct: **the AI models are introducing new vulnerabilities while patching old ones**. This is a well-known problem called **"patch regression"** or **"vulnerability whack-a-mole"**.
+
+## Root Cause Analysis
+
+After deep analysis of [cli_engine.py](file:///d:/datab/cyphex%20cli/cli_engine.py), [patch_council.py](file:///d:/datab/cyphex%20cli/backend/council/patch_council.py), and the [scan output](file:///d:/datab/cyphex%20cli/cyphex_output2.0.txt), I found **6 root causes**:
+
+### 1. 🔴 Destructive Patch Application (Lines 2073-2078 of cli_engine.py)
+
+This is the **worst bug**. The patching code blanks out ALL lines in the snippet range and dumps the AI's output into line 1:
+
+```python
+lines = p["lines"]
+for j in range(p["start_l"], p["end_l"]):
+    lines[j] = ""           # ← Blanks out lines BEFORE and AFTER the vuln
+lines[p["start_l"]] = fixed + "\n"  # ← AI-generated code replaces it
+```
+
+The snippet spans `line_num - 3` to `line_num + 2` (5 lines). This means **context lines that are NOT vulnerable get destroyed** — removing error handlers, closing braces, valid logic — which introduces syntax errors and new vulnerabilities. The output confirms this with multiple `SyntaxError` rejections.
+
+### 2. 🔴 No Post-Patch Verification Against the Scanner
+
+After applying a patch, Cyphex **never re-runs the static scanner on the patched file** to verify the patch didn't introduce new issues. The flow is:
+
+```
+Scan → Find vulns → Generate patches → Apply → Done
+                                          ↑ No re-check!
+```
+
+### 3. 🔴 Duplicate Vulnerability Entries on Same Line
+
+The same code line gets flagged multiple times (e.g., "SQL Injection (Template Literal)" AND "SQL Injection (String Concatenation)" both on `auth.js:16`). When both patches get applied sequentially to the **same line**, the second patch overwrites the first patch's fix — and since it was generated against the *original* code (not the patched version), it may reintroduce the vulnerability or break the file.
+
+### 4. 🟡 AI Model Hallucinations During Patching
+
+The output shows the small local models (qwen2.5-coder:7b) frequently:
+- Return code with **syntax errors** (multiple `SyntaxError: Unexpected token` rejections)
+- Generate patches that **don't address the vulnerability** (reviewers reject with "does not address the vulnerability at all")
+- Add `require()` imports mid-function instead of at top of file
+- Remove important code like error handlers or catch blocks
+- The patch for command injection (#43) literally **re-adds the exact same vulnerable code** with just an extra `require` statement
+
+### 5. 🟡 No Patch Idempotency Tracking
+
+There is no tracking of which files/lines have already been patched. On re-scan:
+- The patched code matches different regex patterns (new patterns the AI introduced)
+- The genome/scanner doesn't know this code was already patched
+- New findings get generated for the AI's own output
+
+### 6. 🟡 LLM Only Sees a Narrow Context Window
+
+The patch model only receives 5 lines of context (`line_num ± 2`). It doesn't see:
+- The full file structure (imports, exports, middleware chain)
+- Other functions that interact with the patched code
+- Whether its fix breaks surrounding code
+
+---
+
+## Proposed Changes
+
+### Component 1: Patch Application Engine (cli_engine.py)
+
+#### [MODIFY] [cli_engine.py](file:///d:/datab/cyphex%20cli/cli_engine.py)
+
+**Change 1: Precision patch application (replace lines 2073-2078)**
+
+Instead of blanking a 5-line range and dumping AI output, use a **diff-based replacement** that only replaces the exact vulnerable line(s) while preserving surrounding context.
+
+```python
+# NEW: Precision patch — only replace the vulnerable line, not the entire snippet
+vuln_line_idx = p["line_num"] - 1  # 0-indexed
+original_line = lines[vuln_line_idx]
+
+# The AI's fixed_code should replace ONLY the vulnerable portion
+# Split fixed_code into lines and replace the range intelligently
+fixed_lines = fixed.split("\n")
+if len(fixed_lines) == 1:
+    # Single-line fix: replace just the vulnerable line
+    lines[vuln_line_idx] = fixed_lines[0] + "\n"
+else:
+    # Multi-line fix: replace vulnerable line range with fixed lines
+    # But preserve lines OUTSIDE the actual vulnerable code
+    lines[p["start_l"]:p["end_l"]] = [fl + "\n" for fl in fixed_lines]
+```
+
+**Change 2: Deduplicate vulnerabilities before patching (before line 1877)**
+
+Group vulnerabilities by `(file_path, line_number)` so the same line only gets patched once:
+
+```python
+# Deduplicate: only keep the highest-severity vuln per (file, line)
+seen_locations = {}
+for v in vulns:
+    endpoint = v.endpoint or ""
+    if ":" in endpoint and not endpoint.startswith("http"):
+        key = endpoint.split(":")[0] + ":" + endpoint.split(":")[1].split()[0]
+        if key not in seen_locations or _sev_rank(v.severity) > _sev_rank(seen_locations[key].severity):
+            seen_locations[key] = v
+    # Dynamic vulns kept as-is
+```
+
+**Change 3: Post-patch verification loop (after line 2080)**
+
+After each patch is applied, re-run the static scanner on JUST that file:
+
+```python
+# Verify the patch didn't introduce new issues
+new_vulns = self._analyze_single_file(p["filepath"], self.source_dir)
+if new_vulns:
+    console.print(f"[red][WARNING] Patch introduced {len(new_vulns)} new issue(s)![/red]")
+    for nv in new_vulns:
+        console.print(f"  [red]• {nv.name} at line {nv.endpoint}[/red]")
+    # ROLLBACK the patch
+    with open(p["filepath"], "w", encoding="utf-8") as f:
+        f.writelines(p["lines_backup"])
+    console.print(f"[yellow][ROLLED BACK] Patch reverted to prevent regression[/yellow]")
+    skipped += 1
+    continue
+```
+
+**Change 4: Expand context window for LLM (modify lines 1912-1914)**
+
+Give the model 15 lines of context instead of 5:
+
+```python
+start_l = max(0, line_num - 8)    # Was line_num - 3
+end_l = min(len(lines), line_num + 7)  # Was line_num + 2
+```
+
+---
+
+### Component 2: Patch Council Prompts (patch_council.py)
+
+#### [MODIFY] [patch_council.py](file:///d:/datab/cyphex%20cli/backend/council/patch_council.py)
+
+**Change 5: Strengthen the patch generation prompt to prevent regression**
+
+Add explicit anti-regression rules to `PATCH_GENERATION_SYSTEM`:
+
+```
+ANTI-REGRESSION RULES:
+7. NEVER remove error handling (try/catch/finally blocks) that exists in the original code.
+8. NEVER remove closing braces, parentheses, or brackets.
+9. NEVER add require/import statements inside function bodies.
+10. Your fix must preserve the EXACT structure of surrounding code — only change the vulnerable expression.
+11. The fixed_code must be SYNTACTICALLY VALID. It will be checked with a parser.
+12. Do NOT output the entire file. Only output the exact lines being replaced.
+```
+
+**Change 6: Add a "no-regression" check to the review prompt**
+
+Add to `PATCH_REVIEW_SYSTEM`:
+
+```
+5. REJECT if the patch removes error handling (catch blocks, try/finally).
+6. REJECT if the patch changes more code than necessary to fix the vulnerability.
+7. REJECT if the patch introduces new unsafe patterns (e.g., adds eval(), exec(), innerHTML, dangerouslySetInnerHTML).
+```
+
+---
+
+### Component 3: New Patch Tracking System (cli_engine.py)
+
+#### [MODIFY] [cli_engine.py](file:///d:/datab/cyphex%20cli/cli_engine.py)
+
+**Change 7: Patch manifest tracking**
+
+Create a `.cyphex_patches.json` manifest in the source directory that records what was patched:
+
+```python
+def _save_patch_manifest(self, source_dir, patched_entries):
+    manifest_path = os.path.join(source_dir, ".cyphex_patches.json")
+    existing = {}
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            existing = json.load(f)
+    
+    for entry in patched_entries:
+        key = f"{entry['file']}:{entry['line']}"
+        existing[key] = {
+            "vuln_type": entry["vuln_type"],
+            "patched_at": datetime.now(timezone.utc).isoformat(),
+            "original_hash": entry["original_hash"],
+            "patched_hash": entry["patched_hash"],
+        }
+    
+    with open(manifest_path, "w") as f:
+        json.dump(existing, f, indent=2)
+```
+
+On re-scan, skip vulns at locations that were already patched (unless the code hash changed, indicating the patch was reverted).
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Q1**: Should rejected/rolled-back patches be retried with a different model, or should they be left for manual fixing? Retrying with a fallback model could help, but it also risks generating another bad patch.
+
+> [!IMPORTANT]
+> **Q2**: For the post-patch verification, should we also re-run the Semgrep scanner on the file (slower but more thorough), or just the built-in regex scanner (faster)?
+
+> [!IMPORTANT]
+> **Q3**: Some patches in the output were applied even though the council **REJECTED** them (e.g., patches #43 and #44 for Command Injection — both rejected by council reviewers but applied anyway because the user typed "y"). Should we **block** application of council-rejected patches entirely, or keep the current behavior where the user can override?
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- After implementation, run Cyphex twice against the same target repo (target_3)
+- Compare scan results: second scan should find ≤5% new vulnerabilities vs first scan
+- Count syntax errors in patches: should be 0 (all syntactically validated)
+- Count rolled-back patches: these represent prevented regressions
+
+### Manual Verification
+- Review the `.cyphex_patches.json` manifest after a scan
+- Inspect 5 random patched files to verify surrounding code is preserved
+- Verify the before/after security score improves on re-scan (doesn't regress)

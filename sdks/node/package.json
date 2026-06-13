@@ -1,0 +1,15 @@
+{
+  "name": "cyphex-rasp",
+  "version": "1.0.0",
+  "description": "CYPHEX Runtime Application Self-Protection — Drop-in Express middleware that detects attacks, blocks them, and auto-heals your source code via the Cyphex AI Council.",
+  "main": "cyphex-rasp.js",
+  "keywords": ["security", "rasp", "waf", "xss", "sqli", "auto-patch", "cyphex"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VishalMache/cyphex"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

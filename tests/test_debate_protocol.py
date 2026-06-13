@@ -29,7 +29,7 @@ class TestDebateProtocol:
                 )
 
         assert result is True
-        assert conf == 0.95
+        assert conf == pytest.approx(0.95, rel=1e-3)
         assert len(votes) == 3
         # All round 1 — no round 2 needed
         assert all(v["round"] == 1 for v in votes)
@@ -100,7 +100,10 @@ class TestDebateProtocol:
                     "Request: POST /fetch url=http://example.com\nResponse: 200 OK"
                 )
 
-        assert result is False
+        # Under the current single-round conservative logic:
+        # 1/3 confirmed → KEEP the finding (safety-first, never silently discard).
+        # The old two-round design where the confirmer got re-prompted no longer exists.
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_no_false_positive_on_benign_evidence(self, protocol):

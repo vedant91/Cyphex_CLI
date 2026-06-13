@@ -1,0 +1,602 @@
+# CYPHEX Ultimate Patching Upgrade — Implementation Plan
+
+> Merges: UPGRADE_PLAN.md + cyphex_bugsplan + Vector-less RAG + Agent Reasoning
+> Constraint: **100% API-free, offline-capable**
+
+---
+
+## Phase 0: Emergency Fixes (Day 1 — 2 hours)
+
+These are 5-minute to 30-minute fixes that have outsized impact.
+
+### 0.1 Expand `num_ctx` from 2048 → 8192
+
+#### [MODIFY] [council_orchestrator.py](file:///d:/cyphex_v3/backend/council/council_orchestrator.py)
+
+Change the hardcoded context window that cripples every council call:
+```diff
+- "num_ctx": 2048,
++ "num_ctx": 8192,
+```
+Also increase `num_predict` for patch generation specifically:
+```diff
+- "num_predict": 1024,
++ "num_predict": 4096,
+```
+
+### 0.2 Expand code snippet from 5 lines → 25 lines
+
+#### [MODIFY] cli_engine.py
+
+The snippet builder sends `line_num ± 2` = 5 lines. Expand to `± 12` = 25 lines:
+```diff
+- start_l = max(0, line_num - 3)
+- end_l = min(len(lines), line_num + 2)
++ start_l = max(0, line_num - 12)
++ end_l = min(len(lines), line_num + 13)
+```
+
+### 0.3 Block application of council-rejected patches
+
+Currently rejected patches can still be applied if user types "y". Add a hard block:
+```python
+if patch_result.get("patch_safety") == "rejected":
+    console.print("[red]Council REJECTED this patch. Skipping.[/red]")
+    continue  # Never apply rejected patches
+```
+
+---
+
+## Phase 1: Fix Pipeline Bugs (Day 1-2 — 6 hours)
+
+These are the bugs from `cyphex_bugsplan` that corrupt even perfect patches.
+
+### 1.1 Fix destructive patch application (Bug #1 — CRITICAL)
+
+#### [MODIFY] cli_engine.py (lines ~2073-2078)
+
+**Problem:** Blanks out ALL lines in range, dumps AI output into line 1 — destroys error handlers, closing braces, valid logic.
+
+**Fix:** Precision line replacement that only touches the vulnerable line(s):
+```python
+# NEW: Precision replacement
+vuln_line_idx = p["line_num"] - 1
+fixed_lines = fixed.split("\n")
+
+# Calculate the actual vulnerable range (not the context range)
+vuln_start = p["line_num"] - 1  # The actual vulnerable line
+vuln_end = vuln_start + 1       # Single line by default
+
+# Replace only the vulnerable lines, preserve everything else
+lines[vuln_start:vuln_end] = [fl + "\n" for fl in fixed_lines]
+```
+
+### 1.2 Deduplicate vulns before patching (Bug #3)
+
+Group by `(file_path, line_number)`, keep highest severity. Prevents second patch from overwriting first:
+```python
+seen = {}
+for v in vulns:
+    key = f"{v.file_path}:{v.line_num}"
+    if key not in seen or sev_rank(v.severity) > sev_rank(seen[key].severity):
+        seen[key] = v
+deduped_vulns = list(seen.values())
+```
+
+### 1.3 Fix rule-based fallback emitting comments (Bug R6/UPGRADE_PLAN A5)
+
+**Problem:** `_rule_based_patch` returns `"// Use parameterized queries"` as `fixed_code` — replaces real code with a comment.
+
+**Fix:** If no deterministic transform exists, mark as `unpatched: manual`, never write to file:
+```python
+def _rule_based_patch(self, vuln, code):
+    transform = DETERMINISTIC_TRANSFORMS.get(vuln.cwe)
+    if transform:
+        return transform(code)  # Real code transform
+    return None  # Signal: don't patch, mark for human review
+```
+
+### 1.4 Fix file-level resolution matching (Bug R5)
+
+**Problem:** Marking a file as "patched" treats ALL vulns in that file as fixed.
+
+**Fix:** Track patches by `(file, line, vuln_type)`, not just file:
+```python
+patched_key = f"{filepath}:{line_num}:{vuln_type}"
+```
+
+---
+
+## Phase 2: Verification Gate (Day 2-4 — 10 hours)
+
+This is the highest-ROI upgrade. Once this exists, CYPHEX **never accepts a patch that doesn't actually work**.
+
+### 2.1 Post-patch exploit replay
+
+#### [NEW] backend/patch/verifier.py
+
+After applying a patch to the sandbox, replay the exact exploit that found the vuln:
+```python
+class PatchVerifier:
+    async def verify_patch(self, vuln, sandbox_url):
+        """Replay the exploit. If it still works, the patch failed."""
+        
+        # 1. Replay the exact exploit payload
+        async with httpx.AsyncClient() as client:
+            response = await client.request(
+                method=vuln.method or "GET",
+                url=f"{sandbox_url}{vuln.endpoint}",
+                data=vuln.payload if vuln.method == "POST" else None,
+                params={"q": vuln.payload} if vuln.method == "GET" else None,
+            )
+        
+        still_vulnerable = self._check_exploit_success(vuln, response)
+        
+        # 2. Liveness check — endpoint still works for benign input
+        benign_response = await client.get(f"{sandbox_url}{vuln.endpoint}")
+        endpoint_alive = benign_response.status_code < 500
+        
+        # 3. Anti-suppression check
+        patched_code = open(vuln.file_path).read()
+        has_suppression = any(s in patched_code for s in [
+            "nosemgrep", "eslint-disable", "# noqa", "// @ts-ignore"
+        ])
+        
+        return {
+            "vuln_fixed": not still_vulnerable,
+            "endpoint_alive": endpoint_alive,
+            "no_suppression": not has_suppression,
+            "verdict": "PASS" if (not still_vulnerable and endpoint_alive and not has_suppression) else "FAIL"
+        }
+```
+
+### 2.2 Rollback on verification failure
+
+```python
+async def apply_and_verify(self, patch, vuln, sandbox):
+    # Backup original
+    backup = open(vuln.file_path).read()
+    
+    # Apply patch
+    self._apply_patch(vuln.file_path, patch)
+    
+    # Restart sandbox app
+    await sandbox.restart()
+    
+    # Verify
+    result = await self.verifier.verify_patch(vuln, sandbox.url)
+    
+    if result["verdict"] == "FAIL":
+        # ROLLBACK
+        open(vuln.file_path, "w").write(backup)
+        await sandbox.restart()
+        return {"status": "rolled_back", "reason": result}
+    
+    return {"status": "verified", "evidence": result}
+```
+
+### 2.3 Patch manifest tracking (Bug #5)
+
+#### [NEW] .cyphex_patches.json
+
+Track what's been patched to prevent re-patching and enable durability measurement:
+```python
+manifest[key] = {
+    "vuln_type": vuln.name,
+    "cwe": vuln.cwe,
+    "patched_at": datetime.now().isoformat(),
+    "original_hash": hash(original_code),
+    "patched_hash": hash(patched_code),
+    "verified": result["verdict"] == "PASS",
+    "exploit_payload": vuln.payload,
+}
+```
+
+---
+
+## Phase 3: Vector-less RAG + Code Context (Day 4-6 — 8 hours)
+
+Now the model gets REAL code context. This is where patch quality jumps dramatically.
+
+### 3.1 Sandbox code indexer (vector-less)
+
+#### [NEW] backend/rag/code_indexer.py
+
+Walk the sandbox, build keyword index. No embeddings, no vector DB:
+```python
+class CodeIndexer:
+    """Vector-less code retrieval. Zero dependencies beyond stdlib."""
+    
+    SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__", ".venv"}
+    SKIP_EXTENSIONS = {".map", ".min.js", ".lock", ".png", ".jpg"}
+    MAX_FILE_SIZE = 512 * 1024  # 512KB cap
+    
+    def __init__(self, sandbox_path):
+        self.root = sandbox_path
+        self.files = {}  # path → {content, metadata}
+    
+    def build_index(self):
+        for root, dirs, files in os.walk(self.root):
+            dirs[:] = [d for d in dirs if d not in self.SKIP_DIRS]
+            for fname in files:
+                if Path(fname).suffix in self.SKIP_EXTENSIONS:
+                    continue
+                fpath = os.path.join(root, fname)
+                if os.path.getsize(fpath) > self.MAX_FILE_SIZE:
+                    continue
+                try:
+                    content = open(fpath, encoding="utf-8", errors="ignore").read()
+                except:
+                    continue
+                
+                self.files[fpath] = {
+                    "content": content,
+                    "routes": re.findall(r'["\']/([\w/:]+)["\']', content),
+                    "has_db": bool(re.search(r'db\.|query|SELECT|INSERT|sequelize|mongoose', content, re.I)),
+                    "has_auth": bool(re.search(r'session|login|password|jwt|token|bcrypt', content, re.I)),
+                    "imports": re.findall(r'require\(["\'](.+?)["\']\)|from ["\'](.+?)["\']', content),
+                    "functions": re.findall(r'(?:function|const|let|var)\s+(\w+)\s*[=(]', content),
+                }
+    
+    def find_for_vuln(self, vuln) -> list[dict]:
+        """BM25-style keyword retrieval for a vulnerability."""
+        endpoint = vuln.endpoint.strip("/").split("?")[0]
+        results = []
+        
+        for path, meta in self.files.items():
+            score = 0
+            # Route match (strongest signal)
+            if any(endpoint in r for r in meta["routes"]):
+                score += 10
+            # Vuln-type relevance
+            if "sql" in vuln.name.lower() and meta["has_db"]:
+                score += 5
+            if "auth" in vuln.name.lower() and meta["has_auth"]:
+                score += 5
+            # Payload term match
+            if vuln.payload and any(term in meta["content"] for term in vuln.payload.split()[:3]):
+                score += 3
+            
+            if score > 0:
+                results.append({"path": path, "score": score, **meta})
+        
+        return sorted(results, key=lambda x: -x["score"])[:3]
+```
+
+### 3.2 Function extractor (regex-based, no tree-sitter dep)
+
+#### [NEW] backend/rag/function_extractor.py
+
+Extract the enclosing function + imports for precise context:
+```python
+class FunctionExtractor:
+    """Extract function context without tree-sitter dependency."""
+    
+    def extract_js_function(self, code, line_num):
+        """Find the enclosing function/route handler for a line."""
+        lines = code.split("\n")
+        # Walk backwards to find function/route start
+        start = line_num - 1
+        brace_depth = 0
+        while start > 0:
+            if "{" in lines[start]: brace_depth += 1
+            if "}" in lines[start]: brace_depth -= 1
+            if brace_depth > 0 and re.match(
+                r'\s*(router|app)\.(get|post|put|delete|patch|all)\s*\(|'
+                r'\s*(async\s+)?function\s+\w+|'
+                r'\s*(const|let|var)\s+\w+\s*=\s*(async\s+)?\(',
+                lines[start]
+            ):
+                break
+            start -= 1
+        
+        # Walk forward to find matching closing brace
+        end = line_num
+        brace_depth = 0
+        while end < len(lines):
+            brace_depth += lines[end].count("{") - lines[end].count("}")
+            if brace_depth <= 0 and end > start:
+                break
+            end += 1
+        
+        return "\n".join(lines[start:end+1])
+    
+    def extract_imports(self, code):
+        lines = code.split("\n")
+        return "\n".join(l for l in lines[:50] if re.match(
+            r'\s*(import |from |const \w+ = require|var \w+ = require)', l
+        ))
+```
+
+### 3.3 Security Knowledge Base (ships with CYPHEX)
+
+#### [NEW] backend/rag/security_kb.json
+
+Static KB of CWE → proven fix patterns:
+```json
+{
+    "CWE-89": {
+        "name": "SQL Injection",
+        "fix_strategies": [
+            {
+                "name": "Parameterized Query",
+                "pattern": "db.query(\"SELECT * FROM users WHERE id = ?\", [userId])",
+                "applies_to": ["mysql", "mysql2", "pg", "sqlite3"]
+            },
+            {
+                "name": "ORM Method",
+                "pattern": "User.findOne({ where: { id: userId } })",
+                "applies_to": ["sequelize", "typeorm", "prisma"]
+            }
+        ],
+        "anti_patterns": ["string concatenation", "template literals with user input"]
+    },
+    "CWE-79": { ... },
+    "CWE-78": { ... }
+}
+```
+
+### 3.4 Context-aware patch prompt assembly
+
+#### [MODIFY] patch_council.py
+
+Replace the blind prompt with context-enriched prompt:
+```python
+async def generate_contextual_patch(self, vuln, code_indexer, fn_extractor):
+    # 1. Find relevant files
+    relevant_files = code_indexer.find_for_vuln(vuln)
+    
+    # 2. Extract enclosing function
+    if relevant_files:
+        main_file = relevant_files[0]
+        function_code = fn_extractor.extract_js_function(
+            main_file["content"], vuln.line_num
+        )
+        imports = fn_extractor.extract_imports(main_file["content"])
+    
+    # 3. Get fix recipe from KB
+    kb_recipe = security_kb.get(vuln.cwe, {})
+    
+    # 4. Find repo's own secure examples
+    secure_example = code_indexer.find_secure_pattern(vuln.cwe)
+    
+    # 5. Assemble high-signal prompt
+    prompt = f"""
+CWE: {vuln.cwe} — {vuln.name}
+
+PROVEN FIX PATTERN (from security KB):
+{kb_recipe.get("fix_strategies", [{}])[0].get("pattern", "N/A")}
+
+FILE IMPORTS:
+{imports}
+
+VULNERABLE FUNCTION (full):
+{function_code}
+
+EXPLOIT THAT WORKED:
+Payload: {vuln.payload}
+Endpoint: {vuln.endpoint}
+
+{f"REPO'S OWN SECURE EXAMPLE:" + secure_example if secure_example else ""}
+
+Generate a minimal fix. Change ONLY the vulnerable lines.
+Output as unified diff format.
+"""
+    return prompt
+```
+
+---
+
+## Phase 4: Grounded Reasoning Layer (Day 6-8 — 6 hours)
+
+Build the reasoning patterns directly (~150 LOC each), no Oracle dependency.
+
+### 4.1 Grounded self-reflection (not vibes-based)
+
+#### [NEW] backend/reasoning/reflexion.py
+
+The critique comes from the VERIFIER, not the model's self-opinion:
+```python
+class GroundedReflexion:
+    """Draft → Verify → Feed failure evidence → Improve. Max 3 rounds."""
+    
+    async def patch_with_reflexion(self, vuln, context, verifier, max_rounds=3):
+        history = []
+        
+        for round in range(max_rounds):
+            # Draft (or improve based on prior failure)
+            if not history:
+                patch = await self._generate_patch(vuln, context)
+            else:
+                patch = await self._improve_patch(vuln, context, history)
+            
+            # Verify with OBJECTIVE evidence
+            result = await verifier.verify_patch(vuln, patch)
+            
+            if result["verdict"] == "PASS":
+                return {"patch": patch, "rounds": round + 1, "status": "verified"}
+            
+            # Collect CONCRETE failure evidence (not model opinion)
+            evidence = {
+                "exploit_still_works": not result["vuln_fixed"],
+                "endpoint_broken": not result["endpoint_alive"],
+                "suppression_added": not result["no_suppression"],
+            }
+            history.append({"patch": patch, "failure": evidence})
+        
+        return {"patch": patch, "rounds": max_rounds, "status": "unverified"}
+    
+    async def _improve_patch(self, vuln, context, history):
+        last_failure = history[-1]["failure"]
+        feedback = f"""
+Your previous patch FAILED verification:
+- Exploit still works: {last_failure["exploit_still_works"]}
+- Endpoint broken: {last_failure["endpoint_broken"]}
+- Added suppression comment: {last_failure["suppression_added"]}
+
+Previous attempt:
+{history[-1]["patch"]}
+
+Generate a DIFFERENT fix strategy. Do not repeat the same approach.
+"""
+        return await self._call_model(vuln, context, feedback)
+```
+
+### 4.2 Self-consistency (K candidates, verifier picks winner)
+
+#### [NEW] backend/reasoning/self_consistency.py
+
+```python
+class SelfConsistency:
+    """Generate K patches with different strategies. Keep the one that passes."""
+    
+    async def patch_with_consistency(self, vuln, context, verifier, k=3):
+        strategies = self._get_strategies(vuln.cwe)  # From security KB
+        candidates = []
+        
+        for i, strategy in enumerate(strategies[:k]):
+            prompt = f"{context}\n\nFIX STRATEGY: {strategy['name']}\nPattern: {strategy['pattern']}"
+            patch = await self._call_model(vuln, prompt, temperature=0.3 + (i * 0.1))
+            
+            result = await verifier.verify_patch(vuln, patch)
+            candidates.append({
+                "patch": patch,
+                "strategy": strategy["name"],
+                "verified": result["verdict"] == "PASS",
+                "diff_size": len(patch),
+            })
+        
+        # Pick verified candidate with smallest diff (least blast radius)
+        verified = [c for c in candidates if c["verified"]]
+        if verified:
+            winner = min(verified, key=lambda c: c["diff_size"])
+            return {"patch": winner["patch"], "status": "verified", 
+                    "strategy": winner["strategy"]}
+        
+        # None passed — return best attempt marked unverified
+        return {"patch": candidates[0]["patch"], "status": "unverified"}
+```
+
+---
+
+## Phase 5: Deterministic Template Transforms (Day 8-9 — 4 hours)
+
+100% accurate, zero model dependency. The safety net.
+
+### 5.1 AST-free code transforms
+
+#### [NEW] backend/patch/templates.py
+
+Real code transforms using regex, not comments-as-code:
+```python
+TRANSFORMS = {
+    "CWE-89": {  # SQL Injection
+        "express_mysql": {
+            "detect": r'db\.query\s*\(\s*[`"\'].*?\$\{(\w+)\}',
+            "transform": lambda match, code: re.sub(
+                r'db\.query\s*\(\s*`([^`]*)\$\{(\w+)\}([^`]*)`\s*\)',
+                r'db.query("\1?\3", [\2])',
+                code
+            ),
+        },
+    },
+    "CWE-79": {  # XSS
+        "dangerouslySetInnerHTML": {
+            "detect": r'dangerouslySetInnerHTML',
+            "transform": lambda match, code: re.sub(
+                r'dangerouslySetInnerHTML=\{\{__html:\s*(\w+(?:\.\w+)?)\s*\}\}',
+                r'>{\\1}<',
+                code
+            ),
+        },
+    },
+    # CWE-78, CWE-22, CWE-798, etc.
+}
+```
+
+---
+
+## Phase 6: Patch Memory + Proof-Carrying Tests (Day 9-10 — 4 hours)
+
+### 6.1 Patch memory (reuse verified fixes)
+
+#### [NEW] backend/rag/patch_memory.py
+
+```python
+class PatchMemory:
+    """Cache verified patches. Keyed by (cwe, framework, sink_pattern)."""
+    
+    def __init__(self, path=".cyphex_patch_memory.json"):
+        self.path = path
+        self.memory = self._load()
+    
+    def recall(self, cwe, framework, sink_pattern):
+        key = f"{cwe}:{framework}:{sink_pattern}"
+        return self.memory.get(key)
+    
+    def store(self, cwe, framework, sink_pattern, patch, verified=True):
+        if not verified:
+            return  # Only remember verified patches
+        key = f"{cwe}:{framework}:{sink_pattern}"
+        self.memory[key] = {
+            "patch": patch,
+            "stored_at": datetime.now().isoformat(),
+            "reuse_count": 0,
+        }
+        self._save()
+```
+
+### 6.2 Proof-carrying regression tests
+
+Each verified fix generates a test committed with the PR:
+```python
+def generate_regression_test(vuln, verified_result):
+    return f"""
+// Auto-generated by CYPHEX — Security Regression Test
+// DO NOT DELETE — this test prevents reintroduction of {vuln.name}
+test("{vuln.name} — {vuln.endpoint} is protected", async () => {{
+    const response = await fetch("{vuln.endpoint}", {{
+        method: "{vuln.method or 'GET'}",
+        body: {json.dumps(vuln.payload)},
+    }});
+    // The exploit payload must NOT succeed
+    expect(response.status).not.toBe(200);
+}});
+"""
+```
+
+---
+
+## Execution Timeline
+
+| Day | Phase | Hours | What You Get |
+|:----|:------|:------|:-------------|
+| 1 | Phase 0 + Phase 1 | 8h | Pipeline bugs fixed, context expanded. Existing patches stop getting corrupted |
+| 2-3 | Phase 2 | 10h | Verification gate. "Fixed" now means MEASURED, not assumed |
+| 4-5 | Phase 3 | 8h | Vector-less RAG + real code context. Model sees actual source files |
+| 6-7 | Phase 4 | 6h | Grounded reflexion + self-consistency. Model iterates on failures |
+| 8-9 | Phase 5 + 6 | 8h | Template transforms + patch memory. Safety net + learning |
+| **Total** | | **~40h** | **Complete patching overhaul** |
+
+---
+
+## Success Metrics
+
+- **Patch durability rate** — % of patches where the vuln does NOT reappear on re-scan. Target: >95%
+- **Verified-patch rate** — should be 100% by definition once Phase 2 lands
+- **Mean reflexion rounds** — lower = better context/RAG. Target: <2
+- **Template hit rate** — % of vulns fixed by deterministic transforms. Target: >50%
+- **Zero fake greens** — the degradation ladder (Phase 2) guarantees if you can't verify, you can't claim "fixed"
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Q1**: Do you want tree-sitter added in a later phase for precise AST extraction, or is the regex-based function extractor sufficient for V1?
+
+> [!IMPORTANT]
+> **Q2**: Should the patch memory persist across different target applications (global learning) or stay per-project?
+
+> [!IMPORTANT]  
+> **Q3**: For the CI/CD track (UPGRADE_PLAN Track E) — do you want to tackle that after this patching overhaul, or defer it entirely?

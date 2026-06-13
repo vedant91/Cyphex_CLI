@@ -1,0 +1,6 @@
+Method,Feasibility_Score,Impact_Score,Color
+Manual Code Remediation,20,88,#E74C3C
+Traditional SAST Scanners,75,35,#3498DB
+Traditional DAST Scanners,55,50,#9B59B6
+Raw AI Coding Assistant,80,60,#F1C40F
+CYPHEX Autonomous Pipeline,92,96,#2ECC71

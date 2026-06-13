@@ -1,0 +1,499 @@
+# 🛡️ CYPHEX — System Architecture
+
+> **Autonomous Cyber Defence · v4.3 · Offline-First**
+> Multi-Agent AI Security Pipeline with Self-Healing Capabilities
+
+---
+
+## 🌐 1. High-Level Overview
+
+CYPHEX is a **four-layer security scanning pipeline** powered by local AI models. It takes any application — from a GitHub repo, local folder, or live URL — and runs it through static analysis, dynamic exploitation, adversarial immune training, and AI-driven patch generation, all without sending a single byte to the cloud.
+
+```mermaid
+graph TB
+    subgraph INPUT["🎯 INPUT LAYER"]
+        direction LR
+        GIT["🔗 Git Repo URL"]
+        LOCAL["📁 Local Source Code"]
+        LIVE["🌍 Live URL"]
+    end
+
+    subgraph ENGINE["⚙️ CYPHEX ENGINE"]
+        direction TB
+        S1["📋 Step 1 — Source Acquisition"]
+        S2["🔍 Step 2 — Static Analysis"]
+        S3["📦 Step 3 — Sandbox Deployment"]
+        S4["💥 Step 4 — Dynamic Scanning"]
+        S5["🧬 Step 5 — Immune System"]
+        S6["⚔️ Step 6 — Attack Simulation"]
+        S7["📊 Step 7 — Security Report"]
+        S8["🛠️ Step 8 — Patch & Verify"]
+        
+        S1 --> S2
+        S2 --> S3
+        S3 --> S4
+        S4 --> S5
+        S5 --> S6
+        S6 --> S7
+        S7 --> S8
+    end
+
+    subgraph OUTPUT["📊 OUTPUT LAYER"]
+        direction LR
+        REPORT["📑 Threat Report"]
+        PATCH["💊 Auto-Patches"]
+        GENOME["🧬 WAF Genome"]
+    end
+
+    GIT --> S1
+    LOCAL --> S1
+    LIVE --> S1
+    S8 --> REPORT
+    S8 --> PATCH
+    S5 --> GENOME
+```
+
+---
+
+## 🔒 2. The Four Scanning Layers
+
+CYPHEX uses **four independent scanning engines** that work together to achieve maximum vulnerability coverage. No single tool can catch everything — this layered approach ensures nothing slips through.
+
+```mermaid
+graph LR
+    subgraph STATIC["🔍 STATIC ANALYSIS (Code at Rest)"]
+        direction TB
+        L1["🧩 Layer 1: Cyphex SAST<br/>Custom regex patterns<br/>20+ languages · P0-P3 tiers"]
+        L2["🛡️ Layer 2: Semgrep SAST<br/>5,000+ community rules<br/>via WSL on Windows"]
+    end
+
+    subgraph DYNAMIC["💥 DYNAMIC ANALYSIS (App Running)"]
+        direction TB
+        L3["🤖 Layer 3: Cyphex DAST<br/>14 AI-powered agents<br/>Custom exploit logic"]
+        L4["🎯 Layer 4: Nuclei DAST<br/>8,000+ templates<br/>CVE & misconfiguration"]
+    end
+
+    SRC["📂 Source Code"] --> L1
+    SRC --> L2
+    SANDBOX["📦 Running Sandbox"] --> L3
+    SANDBOX --> L4
+
+    L1 --> MERGE["🔀 Merged Findings"]
+    L2 --> MERGE
+    L3 --> MERGE
+    L4 --> MERGE
+    MERGE --> COUNCIL["🧠 AI Council"]
+```
+
+### Layer Details
+
+| Layer | Tool | Type | Coverage | Speed |
+|:---:|:---:|:---:|:---|:---:|
+| 1️⃣ | **Cyphex SAST** | Static | Custom regex for SQLi, XSS, CMDi, secrets, misconfigs across 20+ languages | ⚡ Fast |
+| 2️⃣ | **Semgrep SAST** | Static | 5,000+ professional rules with semantic analysis (via WSL on Windows) | ⚡ Fast |
+| 3️⃣ | **Cyphex DAST** | Dynamic | 14 autonomous AI agents crawling, fuzzing, exploiting the live sandbox | 🕐 Medium |
+| 4️⃣ | **Nuclei DAST** | Dynamic | 8,000+ templates covering CVEs, exposures, misconfigurations | 🕐 Medium |
+
+---
+
+## 🤖 3. Multi-Agent DAST Pipeline
+
+The dynamic scanner isn't one monolithic tool — it's a **swarm of 14 specialized agents**, each an expert in one attack vector. They operate autonomously inside the sandboxed environment.
+
+```mermaid
+graph TD
+    TARGET["🎯 Sandbox Target<br/>Docker / Native Node.js"]
+
+    subgraph RECON["🕵️ PHASE 1: Reconnaissance"]
+        A01["🕵️ Agent 01<br/>Recon<br/>Fingerprint · Tech Stack"]
+        A02["🕷️ Agent 02<br/>Crawler<br/>Pages · Forms · APIs"]
+        A11["📦 Agent 11<br/>Supply Chain<br/>Dependencies · CVEs"]
+    end
+
+    subgraph EXPLOIT["⚔️ PHASE 2: Exploitation"]
+        A03["💉 Agent 03<br/>SQLi<br/>Tautology · Error · Blind"]
+        A04["📝 Agent 04<br/>XSS<br/>Reflected · DOM · Stored"]
+        A05["🔐 Agent 05<br/>Auth<br/>Brute · JWT · Session"]
+        A06["💻 Agent 06<br/>CMDi<br/>Shell · OS Injection"]
+        A07["📂 Agent 07<br/>LFI<br/>Path Traversal"]
+        A08["🔀 Agent 08<br/>Logic<br/>IDOR · CORS · SSRF"]
+        AFZ["🎲 AI Fuzzer<br/>ML-guided payload<br/>mutation"]
+    end
+
+    subgraph VERIFY["✅ PHASE 3: Verification"]
+        A09["📊 Agent 09<br/>Analysis<br/>Synthesize Findings"]
+        A10["🔧 Agent 10<br/>Patch<br/>Generate Fixes"]
+    end
+
+    TARGET --> A01
+    TARGET --> A02
+    TARGET --> A11
+    A01 --> A03
+    A01 --> A04
+    A01 --> A05
+    A02 --> A03
+    A02 --> A04
+    A02 --> A06
+    A02 --> A07
+    A02 --> A08
+    A02 --> AFZ
+    A03 --> A09
+    A04 --> A09
+    A05 --> A09
+    A06 --> A09
+    A07 --> A09
+    A08 --> A09
+    AFZ --> A09
+    A11 --> A09
+    A09 --> A10
+```
+
+### Agent Capabilities (3-Word Summary)
+
+| Agent | Icon | Role |
+|:---|:---:|:---|
+| **Agent 01 — Recon** | 🕵️ | Gathers surface data |
+| **Agent 02 — Crawler** | 🕷️ | Maps all endpoints |
+| **Agent 03 — SQLi** | 💉 | Database injection attacks |
+| **Agent 04 — XSS** | 📝 | Script injection probes |
+| **Agent 05 — Auth** | 🔐 | Authentication bypass tests |
+| **Agent 06 — CMDi** | 💻 | OS command injection |
+| **Agent 07 — LFI** | 📂 | File traversal attacks |
+| **Agent 08 — Logic** | 🔀 | IDOR, CORS, SSRF |
+| **Agent 09 — Analysis** | 📊 | Synthesizes all findings |
+| **Agent 10 — Patch** | 🔧 | Generates code fixes |
+| **Agent 11 — Supply Chain** | 📦 | Dependency vulnerability scan |
+| **AI Fuzzer** | 🎲 | ML-guided payload mutation |
+
+---
+
+## 🧠 4. The AI Council — Multi-Model Consensus
+
+This is the brain of CYPHEX. Instead of trusting one AI, we use a **council of local LLMs** that debate, validate, and cross-check each other's work. This prevents hallucinations from breaking your code.
+
+```mermaid
+graph TB
+    subgraph SELECTOR["🎛️ Model Selector"]
+        direction LR
+        HW["🖥️ Hardware Detection<br/>GPU VRAM · RAM"]
+        STRAT["📐 Strategy Selection<br/>Solo / Dual / Full Council"]
+        HW --> STRAT
+    end
+
+    subgraph COUNCIL["🧠 AI Council (via Ollama)"]
+        direction TB
+        
+        subgraph DEBATE["⚖️ Vulnerability Debate"]
+            V1["🔎 Validator 1<br/>Confirms or rejects<br/>each finding"]
+            V2["🔎 Validator 2<br/>Independent cross-check"]
+            V3["🔎 Validator 3<br/>Tie-breaker vote"]
+            V1 --> VOTE["🗳️ Majority Vote<br/>Confirmed / False Positive"]
+            V2 --> VOTE
+            V3 --> VOTE
+        end
+
+        subgraph REPORTING["📊 Analysis Council"]
+            NARRATOR["✍️ Narrator Model<br/>Drafts security report<br/>OWASP · CWE · CVSS"]
+            FACTCHECK["🔍 Fact-Checker Model<br/>Cross-validates claims<br/>against raw evidence"]
+            NARRATOR --> FACTCHECK
+        end
+
+        subgraph PATCHING["🛠️ Patch Council"]
+            PATCHER["💊 Patcher Model<br/>Writes the code fix<br/>(Best code specialist)"]
+            REV1["✅ Reviewer 1<br/>Validates safety<br/>(Different model)"]
+            REV2["✅ Reviewer 2<br/>Validates safety<br/>(Different model)"]
+            PATCHER --> REV1
+            PATCHER --> REV2
+            REV1 --> CONSENSUS["🏛️ Consensus<br/>Safe / Review Needed / Rejected"]
+            REV2 --> CONSENSUS
+        end
+    end
+
+    STRAT --> COUNCIL
+```
+
+### Execution Strategies
+
+The Model Selector dynamically adapts to your hardware:
+
+| Strategy | VRAM Needed | Models Loaded | Use Case |
+|:---|:---:|:---:|:---|
+| 🏋️ **Solo Powerhouse** | < 8 GB | 1 large model | Limited hardware — one model does all tasks |
+| ⚡ **Dual Specialist** | 8–12 GB | 2 models | Code specialist + reasoning validator |
+| 🏛️ **Full Council** | 12+ GB | 3+ models | Parallel debate + cross-model consensus |
+
+### The Patching Workflow (Step by Step)
+
+```mermaid
+sequenceDiagram
+    participant E as 🖥️ Engine
+    participant S as 🎛️ Selector
+    participant P as 💊 Patcher
+    participant R1 as ✅ Reviewer 1
+    participant R2 as ✅ Reviewer 2
+    participant V as 🔬 Syntax Validator
+    participant FS as 📂 Filesystem
+    participant GH as 🐙 GitHub
+
+    E->>S: Select best models for patching
+    S-->>E: Patcher + 2 Reviewers
+
+    loop For each vulnerability
+        E->>P: Send vulnerable code + CWE
+        P-->>E: Returns fixed_code JSON
+        E->>R1: Review original vs. patch
+        R1-->>E: Approved ✅ / Rejected ❌
+        E->>R2: Review original vs. patch
+        R2-->>E: Approved ✅ / Rejected ❌
+        
+        alt Majority Approved
+            E->>V: Syntax validation (node -c / python -m py_compile)
+            alt Valid Syntax
+                V-->>E: ✅ Pass
+                E->>FS: Write patched file
+            else Invalid Syntax
+                V-->>E: ❌ Fail — skip patch
+            end
+        else Rejected
+            E-->>E: Skip — log rejection reason
+        end
+    end
+
+    E->>GH: git add → git commit → git push
+```
+
+---
+
+## 🧬 5. Adversarial Immune System
+
+Instead of hardcoded WAF rules, CYPHEX uses a **genetic algorithm** to evolve its own attack detection DNA. A Red Team AI and Blue Team AI battle each other across generations to converge on the mathematical signature of malicious input.
+
+```mermaid
+graph LR
+    subgraph GENOME["🧬 Behavioral Genome Engine"]
+        direction TB
+        BUILD["📊 Build Endpoint Profiles<br/>from scan context"]
+        FV["📐 15-Dimension Feature Vector<br/>Entropy · Special chars · Keywords<br/>URL encoding · Traversal depth<br/>Bracket imbalance · Unicode ratio"]
+        BUILD --> FV
+    end
+
+    subgraph EVOLUTION["🔄 Co-Evolution Loop"]
+        direction TB
+        RED["🔴 Red Team AI<br/>Mutation Engine<br/>Generates obfuscated payloads"]
+        BLUE["🔵 Blue Team AI<br/>Genome Classifier<br/>Evolves detection thresholds"]
+        RED -->|"Attack 🗡️"| BLUE
+        BLUE -->|"Adapt 🛡️"| RED
+    end
+
+    subgraph RESULT["✅ Converged Output"]
+        direction TB
+        WAF["🛡️ Hardened WAF Profile<br/>Mathematical attack signature"]
+        SCORE["📊 Genome Scoring Table<br/>Payload → Score → Verdict"]
+    end
+
+    FV --> RED
+    FV --> BLUE
+    BLUE --> WAF
+    WAF --> SCORE
+```
+
+### Feature Vector (15 Dimensions)
+
+| # | Feature | What It Measures |
+|:---:|:---|:---|
+| 0 | `input_length` | Total input length |
+| 1 | `entropy` | Shannon entropy (randomness) |
+| 2 | `special_char_ratio` | Ratio of `'";-<>` etc. |
+| 3 | `url_encoding_ratio` | `%20`, `%27` density |
+| 4 | `uppercase_ratio` | Unusual casing patterns |
+| 5 | `digit_ratio` | Numeric content density |
+| 6 | `max_token_length` | Longest single token |
+| 7 | `keyword_score` | SQL/JS keyword matches |
+| 8 | `sqli_pattern_score` | SQLi-specific signatures |
+| 9 | `null_byte` | Null byte injection |
+| 10 | `traversal_depth` | `../` depth |
+| 11 | `bracket_imbalance` | Unmatched `()[]{}` |
+| 12 | `unicode_ratio` | Exotic unicode density |
+| 13 | `repetition_ratio` | Repeated char patterns |
+| 14 | `token_count` | Total token count |
+
+---
+
+## 📦 6. Sandbox & Deployment
+
+CYPHEX automatically detects the target framework and spins up an isolated sandbox for dynamic testing:
+
+```mermaid
+graph LR
+    subgraph DETECT["🔍 Framework Detection"]
+        PKG["📦 package.json<br/>requirements.txt<br/>pom.xml"]
+        ENTRY["📄 Entry Point<br/>index.js · app.py<br/>server.js · main.go"]
+    end
+
+    subgraph DEPLOY["📦 Sandbox Deployment"]
+        DOCKER["🐳 Docker Compose<br/>Full-stack isolation<br/>(DB + App + Network)"]
+        NATIVE["⚡ Native Process<br/>npm start / node<br/>(Faster, lighter)"]
+    end
+
+    subgraph PORT["🔌 Port Assignment"]
+        FREE["🎲 Dynamic Port<br/>Auto-find free port<br/>between 3000-65000"]
+    end
+
+    PKG --> DOCKER
+    PKG --> NATIVE
+    ENTRY --> NATIVE
+    DOCKER --> FREE
+    NATIVE --> FREE
+    FREE --> TARGET["🎯 http://localhost:PORT<br/>Ready for DAST agents"]
+```
+
+---
+
+## 🔄 7. Integration Workflows
+
+### A. CLI Workflow (`cyphex scan`)
+
+The primary user-facing workflow. One command triggers the entire 8-step pipeline.
+
+```mermaid
+graph LR
+    CMD["⌨️ cyphex scan ./app"] --> CLONE["📥 Clone / Copy"]
+    CLONE --> SAST["🔍 Static Scan<br/>Cyphex + Semgrep"]
+    SAST --> SANDBOX["📦 Deploy Sandbox"]
+    SANDBOX --> DAST["💥 Dynamic Scan<br/>14 Agents + Nuclei"]
+    DAST --> IMMUNE["🧬 Immune System<br/>Red vs Blue"]
+    IMMUNE --> REPORT["📊 Security Report<br/>AI-generated"]
+    REPORT --> PATCH["🛠️ Auto-Patch<br/>Council consensus"]
+    PATCH --> PUSH["🐙 Git Push<br/>Commit fixes"]
+```
+
+### B. GitHub Webhook (`cyphex webhook`)
+
+Zero-command security — every `git push` triggers a scan automatically.
+
+```mermaid
+sequenceDiagram
+    participant Dev as 👤 Developer
+    participant GH as 🐙 GitHub
+    participant Hook as 🪝 Cyphex Webhook<br/>localhost:3005
+    participant Engine as ⚙️ Scan Engine
+    participant PR as 📝 Pull Request
+
+    Dev->>GH: git push
+    GH->>Hook: POST /api/github/webhook
+    Hook->>Engine: Clone repo → Full scan
+    Engine->>Engine: SAST + DAST + Immune + Patch
+    Engine->>GH: Create branch cyphex/auto-fix-*
+    Engine->>PR: Open Pull Request with fixes
+    PR-->>Dev: Review & merge security patches
+```
+
+### C. Live Auto-Healing (`cyphex watch`)
+
+Real-time protection using the RASP SDK embedded in the running application.
+
+```mermaid
+sequenceDiagram
+    participant Hacker as 🏴‍☠️ Attacker
+    participant App as 🌐 App + RASP SDK
+    participant Daemon as 👁️ Cyphex Daemon<br/>localhost:3004
+    participant Council as 🧠 AI Council
+    participant Code as 📂 Source Code
+
+    Hacker->>App: SQL Injection attempt
+    App->>App: 🛡️ RASP blocks attack (403)
+    App->>App: 📸 Captures exact stack trace<br/>file:line of vulnerable code
+    App->>Daemon: POST /api/telemetry/attack
+    Daemon->>Council: Trigger patch generation
+    Council->>Council: Model 1 drafts fix
+    Council->>Council: Model 2 reviews safety
+    Council->>Code: Write verified patch to disk
+    Note over Code: Auto-healed while app stays online
+```
+
+---
+
+## 🏗️ 8. Complete System Map
+
+Every module and file in the CYPHEX codebase, organized by responsibility:
+
+```mermaid
+graph TB
+    subgraph CLI["⌨️ CLI Layer"]
+        direction LR
+        MAIN["cyphex/cli.py<br/>Entry point · arg parsing"]
+        ENGINE["cli_engine.py<br/>8-step pipeline orchestrator"]
+        DOCTOR["cyphex/doctor.py<br/>System health check"]
+    end
+
+    subgraph SCANNERS["🔍 Scanning Layer"]
+        direction LR
+        SCANNER["cyphex/scanner.py<br/>SAST engine · Semgrep"]
+        DYNSCAN["cyphex/dynamic_scanner.py<br/>Nuclei · ZAP integration"]
+        AGENTS["backend/agents/<br/>14 DAST micro-agents"]
+    end
+
+    subgraph INTEL["🧠 Intelligence Layer"]
+        direction LR
+        ORCH["council/council_orchestrator.py<br/>VRAM manager · Ollama bridge"]
+        SELECTOR["council/model_selector.py<br/>Auto-detect best models"]
+        DEBATE["council/debate_protocol.py<br/>False-positive filtering"]
+        ANALYSIS["council/analysis_council.py<br/>Report generation"]
+        PATCHC["council/patch_council.py<br/>Code fix + multi-review"]
+        TRACER["council/route_tracer.py<br/>DAST → SAST file mapping"]
+    end
+
+    subgraph IMMUNE_SYS["🧬 Immune Layer"]
+        direction LR
+        BG["immune/behavioral_genome.py<br/>15-dim feature extraction"]
+        ME["immune/mutation_engine.py<br/>Red team payload generator"]
+        EC["immune/evolution_controller.py<br/>Co-evolution orchestrator"]
+    end
+
+    subgraph INFRA["📦 Infrastructure Layer"]
+        direction LR
+        SANDBOX["sandbox_manager.py<br/>Docker & native deployment"]
+        HW["cyphex/hardware.py<br/>GPU · VRAM · RAM detection"]
+        HOOK["cyphex/github_hook.py<br/>Webhook → auto-PR"]
+        DAEMON["cyphex/daemon.py<br/>Live RASP telemetry server"]
+        RASP["sdks/node/cyphex-rasp.js<br/>Runtime attack blocker"]
+        ONBOARD["cyphex/onboarder.py<br/>Zero-click RASP injection"]
+    end
+
+    MAIN --> ENGINE
+    ENGINE --> SCANNER
+    ENGINE --> DYNSCAN
+    ENGINE --> AGENTS
+    ENGINE --> ORCH
+    ORCH --> SELECTOR
+    ORCH --> DEBATE
+    ORCH --> ANALYSIS
+    ORCH --> PATCHC
+    PATCHC --> TRACER
+    ENGINE --> BG
+    BG --> ME
+    ME --> EC
+    ENGINE --> SANDBOX
+    SANDBOX --> HW
+    HOOK --> ENGINE
+    DAEMON --> PATCHC
+    ONBOARD --> RASP
+```
+
+---
+
+## 🔐 9. Security Principles
+
+| Principle | Icon | How CYPHEX Implements It |
+|:---|:---:|:---|
+| **Offline-First** | 🔒 | All AI models run locally via Ollama. Zero source code leaves the machine. |
+| **Multi-Model Consensus** | 🏛️ | No single AI can apply a patch. Majority vote required from independent models. |
+| **Syntax Guardrail** | 🚧 | Every AI-generated patch is compiled (`node -c` / `python -m py_compile`) before being written. |
+| **Sandboxed Testing** | 📦 | All dynamic attacks run inside isolated Docker or subprocess sandboxes. |
+| **Genetic WAF** | 🧬 | No hardcoded regex rules. The immune system evolves detection mathematically. |
+| **RASP Stack Traces** | 📍 | Live runtime protection gives EXACT file:line of vulnerable code, not URL guessing. |
+
+---
+
+> [!TIP]
+> **One Command. Full Security.** Point CYPHEX at any application. The agents find the holes. The council writes the patches. The immune system learns the attack patterns. All 100% local, 100% autonomous.

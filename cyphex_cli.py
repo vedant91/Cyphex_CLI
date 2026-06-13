@@ -25,6 +25,23 @@ try:
 except Exception:
     pass
 
+def load_env_file():
+    """Lightweight, standard-library-only .env file loader."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    # Strip quotes if present
+                    val = v.strip().strip("'\"")
+                    os.environ[k.strip()] = val
+
+load_env_file()
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend", "backend"))
 
 class C:
@@ -85,12 +102,48 @@ def main():
     sub.add_parser("doctor", help="Check local runtime/tooling readiness")
     sub.add_parser("council-doctor", help="Check all 4 council models are available in Ollama")
 
+    watch_p = sub.add_parser("watch", help="Start the RASP auto-healing daemon (background server)")
+    watch_p.add_argument("--port", type=int, default=3004, help="Daemon port (default: 3004)")
+    watch_p.add_argument("--host", default="127.0.0.1", help="Bind host")
+
+    gh_p = sub.add_parser("github-hook", help="Start GitHub webhook receiver for repo-connected RASP")
+    gh_p.add_argument("--port", type=int, default=3005, help="Webhook port (default: 3005)")
+    gh_p.add_argument("--secret", default="", help="GitHub webhook secret for signature verification")
+    # === ONBOARD COMMAND (Zero-Click RASP) ===
+    onboard_p = sub.add_parser("onboard", help="Zero-click RASP integration for a new or existing repo")
+    onboard_p.add_argument("--repo", help="GitHub repo URL to clone and onboard")
+    onboard_p.add_argument("--path", help="Local folder path to onboard")
+    onboard_p.add_argument("--scan", action="store_true", help="Also run full Cyphex scan (Semgrep, SAST, DAST, Council, Patcher)")
+
     args = parser.parse_args()
     if not args.command:
         os.system("cls" if os.name == "nt" else "clear")
         print(BANNER)
         parser.print_help()
         return
+
+    if args.command == "onboard":
+        os.system("cls" if os.name == "nt" else "clear")
+        print(BANNER)
+        if not args.repo and not args.path:
+            print(f"{C.R}[ERR]{C.RST} Must provide either --repo or --path")
+            sys.exit(1)
+        import cyphex.onboarder
+        app_dir = cyphex.onboarder.onboard_project(repo_url=args.repo, local_path=args.path)
+        if args.scan and app_dir:
+            print(f"\n  {C.CY}{'=' * 58}")
+            print(f"   PHASE 2: Full Security Scan")
+            print(f"  {'=' * 58}{C.RST}\n")
+            CyphexEngine = _load_engine()
+            engine = CyphexEngine()
+            asyncio.run(engine.run(
+                local_path=app_dir,
+                branch="main",
+                generations=10,
+                auto_patch=True,
+                non_interactive=True,
+            ))
+        sys.exit(0)
 
     if args.command == "doctor":
         os.system("cls" if os.name == "nt" else "clear")
@@ -139,6 +192,25 @@ def main():
         else:
             console.print("[bold yellow]Some models are missing. Pull them with ollama.[/bold yellow]")
         raise SystemExit(0 if all_ok else 1)
+
+    if args.command == "watch":
+        os.system("cls" if os.name == "nt" else "clear")
+        print(BANNER)
+        print(f"  {C.BOLD}Starting CYPHEX Daemon (Auto-Healing Mode){C.RST}")
+        print(f"  {C.DIM}Your app's RASP SDK will send attack telemetry here.{C.RST}")
+        print(f"  {C.DIM}The AI Council will auto-patch vulnerable source code.{C.RST}\n")
+        from cyphex.daemon import run_daemon
+        run_daemon(host=args.host, port=args.port)
+        return
+
+    if args.command == "github-hook":
+        os.system("cls" if os.name == "nt" else "clear")
+        print(BANNER)
+        print(f"  {C.BOLD}Starting GitHub Webhook Receiver{C.RST}")
+        print(f"  {C.DIM}Connect your GitHub repo's webhook to this endpoint.{C.RST}\n")
+        from cyphex.github_hook import run_github_hook
+        run_github_hook(port=args.port, secret=args.secret)
+        return
 
     if args.command == "scan":
         if not args.repo and not args.path:

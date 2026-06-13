@@ -20,11 +20,12 @@ class TestSyntax:
 
     def test_all_files_parse(self):
         errors = []
+        SKIP_DIRS = ["node_modules", ".git", "__pycache__", "venv", "finetune", "sandboxes"]
         for f in glob.glob(os.path.join(ROOT, "**", "*.py"), recursive=True):
-            if any(skip in f for skip in ["node_modules", ".git", "__pycache__", "venv", "finetune"]):
+            if any(skip in f for skip in SKIP_DIRS):
                 continue
             try:
-                ast.parse(open(f).read())
+                ast.parse(open(f, encoding="utf-8", errors="ignore").read())
             except SyntaxError as e:
                 errors.append(f"{f}: {e}")
         assert not errors, f"Syntax errors:\n" + "\n".join(errors)
@@ -168,11 +169,15 @@ class TestHardware:
 
     def test_mode_selection(self):
         from cyphex.hardware import detect_mode
-        assert detect_mode(8.0) == "full"
-        assert detect_mode(5.0) == "standard"
-        assert detect_mode(3.0) == "lite"
-        assert detect_mode(1.0) == "cloud"
-        assert detect_mode(0.0) == "cloud"
+        # Verify current 6-tier system thresholds (from hardware.py):
+        # ultra: >=24, high: >=12, mid: >=6, low: >=4, minimal: >=2, cloud: <2
+        assert detect_mode(25.0) == "ultra"
+        assert detect_mode(12.0) == "high"
+        assert detect_mode(8.0)  == "mid"
+        assert detect_mode(5.0)  == "low"
+        assert detect_mode(3.0)  == "minimal"
+        assert detect_mode(1.0)  == "cloud"
+        assert detect_mode(0.0)  == "cloud"
 
 
 class TestConfig:

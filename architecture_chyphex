@@ -1,0 +1,120 @@
+# CYPHEX: End-to-End System Architecture
+
+This document outlines the complete architecture, workflows, and use cases for the Cyphex Multi-Agent DevSecOps Pipeline.
+
+## 1. High-Level System Architecture
+
+The following diagram illustrates the core components of Cyphex and how they interact to provide an autonomous, self-healing security pipeline.
+
+```mermaid
+graph TD
+    %% Core CLI
+    CLI((Cyphex CLI)):::cli
+    CLI -- "onboard" --> Onboarder
+    CLI -- "scan" --> Pipeline
+    CLI -- "watch" --> Daemon
+    
+    %% Target App
+    subgraph Target Application Environment
+        App[Target Source Code]
+        RASP[Cyphex RASP Middleware]
+        App -. injected with .-> RASP
+    end
+    
+    %% Pipeline Phases
+    subgraph Security Pipeline Engine
+        direction TB
+        SAST[SAST Engine<br/>Semgrep + Regex]
+        Sandbox[Sandbox Manager<br/>Docker / Native]
+        DAST[DAST Engine<br/>14+ AI Agents + Nuclei]
+        Immune[AI Immune System<br/>Behavioral Genome]
+        Council[AI Council<br/>Local LLMs via Ollama]
+        
+        SAST --> Sandbox
+        Sandbox --> DAST
+        DAST --> Immune
+        Immune --> Council
+    end
+    
+    %% Flow
+    Onboarder -->|Clones & Injects| App
+    Onboarder -. triggers .-> Pipeline
+    Pipeline -->|Scans| App
+    
+    %% Live Protection
+    Daemon[Auto-Healing Daemon]:::daemon
+    RASP -- "Blocks Attack & Sends Telemetry" --> Daemon
+    Daemon -- "Triggers Patch Generation" --> Council
+    Council -- "Applies Safe Patch" --> App
+
+    classDef cli fill:#2b2d42,stroke:#edf2f4,stroke-width:2px,color:#fff
+    classDef daemon fill:#d90429,stroke:#fff,stroke-width:2px,color:#fff
+```
+
+## 2. Core Workflows
+
+### A. Zero-Click Onboarding (`cyphex onboard`)
+1. **Clone**: Pulls the target repository (e.g., from GitHub).
+2. **Detect**: Automatically identifies the framework (Node.js/Express, Python, etc.) and entry point.
+3. **Inject**: Drops the `cyphex-rasp` SDK into the repository and auto-wires it into the main app file.
+4. **Handoff**: Triggers the full Security Pipeline to scan the newly protected app.
+
+### B. Full Security Pipeline (`cyphex scan`)
+The pipeline runs through 8 distinct phases:
+```mermaid
+sequenceDiagram
+    participant CLI
+    participant SAST as Static Scanner
+    participant DAST as Dynamic Agents
+    participant Immune as AI Immune System
+    participant Council as AI Patch Council
+    participant App as Target App
+
+    CLI->>SAST: 1. Clone & Static Scan
+    SAST-->>CLI: Regex & Semgrep Findings
+    CLI->>App: 2. Deploy Sandbox (Docker/Local)
+    CLI->>DAST: 3. Dynamic Scan
+    DAST->>App: Crawl & Attack (SQLi, XSS, SSRF, etc.)
+    App-->>DAST: Exploit Results
+    DAST-->>CLI: Confirmed Vulnerabilities
+    CLI->>Immune: 4. Build Behavioral Genome
+    Immune->>Immune: 5. Co-Evolution (Red/Blue Team)
+    Immune-->>CLI: Hardened WAF Profile
+    CLI->>Council: 6. Council Debate & Reporting
+    Council-->>CLI: Security Report
+    CLI->>Council: 7. Auto-Patching Workflow
+    Council->>Council: Model 1 Drafts Patch
+    Council->>Council: Model 2 Reviews Safety
+    Council->>App: 8. Apply Verified Code Patch
+```
+
+### C. Live Auto-Healing (`cyphex watch`)
+1. The **RASP** middleware sits inside the production/staging app.
+2. When a hacker attempts an attack (e.g., `' OR 1=1--`), the RASP blocks it instantly using the converged Genome rules.
+3. RASP sends telemetry over WebSockets/HTTP to the local **Cyphex Daemon** (running via `cyphex watch`).
+4. The Daemon awakens the **AI Council**, which immediately analyzes the attacked route and generates a permanent source-code patch while the app remains online.
+
+## 3. Subsystem Breakdown
+
+### 1. The Multi-Agent DAST
+Instead of a monolithic scanner, Cyphex uses specialized, lightweight agents for dynamic scanning:
+*   **Agent 02 (Crawler)**: Discovers HTML forms and probes for hidden REST APIs.
+*   **Agent 03 (SQLi)**: Injects tautologies and error-inducing payloads.
+*   **Agent 04 (XSS)**: Probes input reflection and DOM execution.
+*   **Agent 14 (JWT)**: Decodes tokens, checks for weak signing algorithms or exposed claims.
+*   *(And 10+ others covering LFI, CMDi, SSRF, IDOR, CORS, Supply Chain leaks, etc.)*
+
+### 2. The AI Council (Ollama-Driven)
+The council uses a **Multi-Model Consensus Architecture** to prevent LLM hallucinations from breaking code:
+*   **Narrator/Drafter (e.g., Qwen 2.5 Coder)**: Writes the initial patch or security report.
+*   **Validators (e.g., Llama 3.1, Deepseek Coder)**: Act as "Solo Powerhouses" to independently verify the patch. They check for syntax errors, logic flaws, and ensure no new vulnerabilities (like CWE-78) are introduced.
+*   **Consensus**: A patch is only applied to the user's filesystem if it passes unanimous or majority review.
+
+### 3. The Behavioral Genome (Immune System)
+A continuous genetic algorithm loop:
+*   **Red Team AI**: Generates increasingly complex obfuscated payloads (e.g., nested URL encoding, bracket imbalances).
+*   **Blue Team AI**: Updates a 15-dimensional feature vector (entropy, special char ratio, keyword scores).
+*   *Result*: The system converges on a mathematical profile of what constitutes an attack vs. benign traffic, completely eliminating the need for hardcoded regex WAF rules.
+
+> [!TIP]
+> **Offline-First**: The entire architecture (Semgrep, Nuclei, Docker sandboxing, and all Ollama AI models) runs 100% locally on the developer's machine, ensuring zero source code is ever sent to the cloud.
