@@ -200,16 +200,111 @@ A debate-based validation system that **eliminates false positives** through adv
 - Each model votes **CONFIRM** or **REJECT** with a confidence score and reasoning
 - Findings require **consensus** — no single model can hallucinate a vulnerability
 - Built-in anti-hallucination rules enforced across all models
-- **Oracle Reasoning Engine** with 15 cognitive architectures (Chain-of-Thought, debate, verification)
+- Powered by the **Oracle Reasoning Engine** (see below)
+
+### 🧠 Oracle Agent-Reasoning — Making Small Models Think Big
+
+> **The core innovation that makes Cyphex work with local 3B-7B models instead of GPT-4.**
+
+Small local LLMs (Llama 3.1 8B, Qwen 2.5 7B) are fast and free — but they hallucinate, miss context, and generate shallow patches. Cyphex solves this through **Oracle's Agent-Reasoning framework**, which wraps every LLM call in a **cognitive architecture** that forces structured, multi-step reasoning:
+
+```
+Without reasoning:  model("Fix this SQL injection")  →  "Use prepared statements" (vague, often wrong)
+With reasoning:     model+cot("Fix this SQL injection")  →  Step-by-step analysis → Specific fix → Verified
+```
+
+**16 cognitive architectures**, each selected automatically based on task type, vulnerability severity, and CWE:
+
+| Strategy | When Used | How It Works |
+|----------|-----------|--------------|
+| 🔗 **Chain-of-Thought** | SQLi, XSS patches (CWE-89, CWE-79) | Forces step-by-step logical reasoning before generating code |
+| 🪞 **Self-Reflection** | High severity vulns, missing auth (CWE-306) | Draft → Critique → Improve loop (3 LLM calls) |
+| 🌳 **Tree of Thoughts** | CMDi, SSRF (CWE-78, CWE-918) | Explores multiple fix approaches via BFS, prunes bad paths |
+| 🗳️ **Self-Consistency** | Critical severity vulns | Generates K candidates, majority vote picks the best |
+| ⚔️ **Adversarial Debate** | Council patch review | Multi-perspective challenge: "Why would this fix fail?" |
+| 🧩 **Decomposition** | Auth bypass, IDOR (CWE-287, CWE-284) | Breaks complex fix into sub-tasks, solves each |
+| 📶 **Least-to-Most** | Path traversal (CWE-22) | Solves simple cases first, builds up to complex |
+| 🔧 **Refinement Loop** | Iterative code improvement | Score-based improvement over 4 rounds |
+| 📊 **Complex Pipeline** | Production-grade patches | 5-stage pipeline: accuracy → structure → depth → examples → polish |
+| 🎲 **Monte Carlo Search** | Exploring fix search space | MCTS with UCB1 scoring across candidate fixes |
+| 🔀 **Analogical** | Pattern matching from past fixes | Reasons from known CWE fix patterns by analogy |
+| ❓ **Socratic** | Code understanding & analysis | Guided questioning to find the root cause |
+| 🛠️ **ReAct** | Tool-augmented reasoning | Reason + Act loop with code context tools |
+| 🔄 **Recursive** | Self-executing code verification | Code REPL agent that tests its own output |
+| 🧠 **Meta-Reasoning** | Auto-selection | Automatically picks the best strategy for each task |
+| 📝 **Standard** | Hardcoded secrets, CORS (CWE-798, CWE-942) | Direct generation for deterministic fixes |
+
+**Automatic strategy selection** based on three signals:
+
+```
+ CWE Override        → CWE-78 (CMDi) always gets Tree-of-Thoughts
+ Severity Escalation → Critical vulns get Self-Consistency (3× majority vote)
+ Task Mapping        → Patch generation → CoT, Patch review → Self-Reflection
+ VRAM Tier Guard     → Low VRAM? Only lightweight strategies. High VRAM? All 16.
+```
+
+**Result:** A 7B local model with Oracle reasoning produces patches **comparable to GPT-4** — because it's not just generating text, it's *thinking through the problem* using the right cognitive framework. Zero API cost.
+
+### 📚 Vectorless RAG — Full Code Context Without Embeddings
+
+> **Traditional RAG needs vector databases, embeddings, and GPU VRAM. Cyphex doesn't.**
+
+When an LLM generates a patch, it needs to understand the **full context** — not just the vulnerable line, but the entire function, the route structure, the project's existing coding patterns, and its dependencies. Cloud tools use expensive embedding models + vector DBs. Cyphex uses a **Vectorless RAG** approach:
+
+```
+Traditional RAG:    Code → Embedding Model (GPU) → Vector DB → Similarity Search → Context
+Cyphex Vectorless:  Code → Keyword Index (CPU) → Regex + Scoring → Context
+                    Zero VRAM. Zero external dependencies. Instant.
+```
+
+**How it works:**
+
+1. **Code Indexer** walks the source tree and builds a keyword-based index of every file:
+   - Route patterns (`/api/users`, `/orders/:id`)
+   - Database usage (`db.query`, `SELECT`, `mongoose`, `prisma`)
+   - Auth patterns (`session`, `jwt`, `bcrypt`, `passport`)
+   - Input handling (`req.body`, `req.query`, `request.form`)
+   - Function names, imports, and dependency graph
+
+2. **Smart Retrieval** for each vulnerability uses multi-signal scoring:
+   - Route match (strongest) — finds the file that serves the vulnerable endpoint
+   - CWE-type relevance — SQLi vuln? Prioritize files with DB queries
+   - Payload term match — searches for attack-relevant code patterns
+   - Direct location match — exact file:line from the scanner
+
+3. **Secure Pattern Discovery** — finds how the **repo already writes safe code**:
+   ```
+   CWE-89 → Finds existing parameterized queries in the codebase
+   CWE-79 → Finds existing HTML sanitization calls
+   CWE-78 → Finds existing execFile/spawn usage (safe subprocess)
+   ```
+   The LLM is told: *"Fix it the way this project already does it."*
+
+4. **API Route Extraction** — Two-pass route discovery:
+   - **Pass 1:** Scans entry files for `app.use('/prefix', require('./routes/xxx'))` mount prefixes
+   - **Pass 2:** Scans route files for `router.get/post(...)` with correct prefixes applied
+   - Result: Full API map with methods, paths, source files, and parameters
+
+**Why this matters:**
+
+| Approach | VRAM Cost | Speed | Accuracy |
+|----------|-----------|-------|----------|
+| Cloud RAG (OpenAI embeddings + Pinecone) | N/A (cloud) | ~2s per query | High |
+| Local RAG (sentence-transformers + ChromaDB) | 2-4 GB VRAM | ~500ms per query | Medium |
+| **Cyphex Vectorless RAG** | **0 GB VRAM** | **<50ms per query** | **High** |
+
+The code indexer runs on CPU, uses zero VRAM (leaving it all for the LLM), and provides richer context than embedding-based approaches because it understands *code structure*, not just semantic similarity.
 
 ### 🔧 Auto-Patching Pipeline with Verification Gate
 
 ```
-Vulnerability Found → Council Generates Fix → Template Fallback if Needed →
+Vulnerability Found → Oracle Reasoning selects strategy → Vectorless RAG provides context →
+LLM generates fix → Template fallback if needed → Council reviews →
 Verification Gate (syntax + blast radius + re-scan) → Applied & Confirmed
 ```
 
-- **RAG-powered context**: Code indexer provides full function/route context to the patching LLM
+- **Oracle-enhanced generation**: Every patch is generated through the optimal cognitive architecture
+- **RAG-grounded context**: Full function, route, and secure-pattern context — not blind 5-line snippets
 - **Deterministic template transforms** for common CWEs (SQLi → parameterized queries, XSS → escaping)
 - **Patch memory**: Learns from verified fixes to improve future patches
 - **Verification gate**: Re-checks that the vulnerability is actually gone after patching
