@@ -14,6 +14,9 @@ dist/
 # Sandboxes (generated at runtime)
 backend/sandboxes/
 
+# Workdir (genomes, reasoning trees — generated at runtime)
+backend/workdir/
+
 # Cloned repos (scanned targets)
 CTMS/
 
@@ -35,3 +38,9 @@ pytest-cache-files-*/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp / generated
+*.zip
+Untitled
+.cyphex/
+backend/.cyphex/

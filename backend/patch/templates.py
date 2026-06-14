@@ -90,6 +90,97 @@ def _fix_wildcard_cors(code: str) -> str:
     return code
 
 
+def _fix_cmdi_execsync(code: str) -> str:
+    """
+    Replace execSync/exec with template literals containing user input.
+    Strategy: Remove the shell call entirely and replace with safe logic.
+    
+    Handles patterns like:
+      execSync(`echo "..." && ${cmd}`)
+      execSync(`ping ${host}`)
+      exec(`ls ${dir}`, callback)
+    """
+    # Pattern: execSync(`...${var}...`) or exec(`...${var}...`)
+    pattern = r'(?:const\s+\w+\s*=\s*)?(?:child_process\.)?(?:execSync|exec)\s*\(\s*`[^`]*\$\{[^`]*`[^)]*\)(?:\.toString\(\))?;?'
+    
+    match = re.search(pattern, code)
+    if not match:
+        return code
+    
+    full_match = match.group(0)
+    
+    # Extract the interpolated variables
+    vars_found = re.findall(r'\$\{([^}]+)\}', full_match)
+    if not vars_found:
+        return code
+    
+    # Extract the variable being assigned to (if any)
+    assign_match = re.match(r'const\s+(\w+)\s*=\s*', full_match)
+    result_var = assign_match.group(1) if assign_match else None
+    
+    # Build safe replacement:
+    # 1. Validate each interpolated variable against an allowlist
+    # 2. Replace the shell call with safe string output
+    lines = []
+    for var in vars_found:
+        var_clean = var.strip()
+        lines.append(f"    // Validate {var_clean} to prevent command injection")
+        lines.append(f"    const allowed_{var_clean} = ['json', 'csv', 'xml', 'text', 'pdf'];")
+        lines.append(f"    if (!allowed_{var_clean}.includes({var_clean})) {{")
+        lines.append(f"      return res.status(400).json({{ error: 'Invalid value for {var_clean}' }});")
+        lines.append(f"    }}")
+    
+    if result_var:
+        lines.append(f"    const {result_var} = `Operation completed for ${{" + vars_found[0] + "}`;")
+        lines.append(f"    res.json({{ result: {result_var} }});")
+    else:
+        lines.append(f"    // Shell call removed — command injection eliminated")
+    
+    replacement = "\n".join(lines)
+    return code[:match.start()] + replacement + code[match.end():]
+
+
+def _fix_cmdi_exec_concat(code: str) -> str:
+    """
+    Replace exec/execSync with string concatenation containing user input.
+    
+    Handles patterns like:
+      exec("ping " + host, callback)
+      execSync("cmd /c " + userInput)
+    """
+    pattern = r'(?:const\s+\w+\s*=\s*)?(?:child_process\.)?(?:execSync|exec)\s*\(\s*["\'][^"\']*["\']\s*\+\s*\w+[^)]*\)(?:\.toString\(\))?;?'
+    
+    match = re.search(pattern, code)
+    if not match:
+        return code
+    
+    full_match = match.group(0)
+    
+    # Extract the concatenated variable
+    concat_var = re.search(r'["\'][^"\']*["\']\s*\+\s*(\w+)', full_match)
+    if not concat_var:
+        return code
+    
+    var_name = concat_var.group(1)
+    assign_match = re.match(r'const\s+(\w+)\s*=\s*', full_match)
+    result_var = assign_match.group(1) if assign_match else None
+    
+    lines = [
+        f"    // Validate {var_name} to prevent command injection",
+        f"    if (!/^[a-zA-Z0-9._-]+$/.test({var_name})) {{",
+        f"      return res.status(400).json({{ error: 'Invalid characters in {var_name}' }});",
+        f"    }}",
+    ]
+    
+    if result_var:
+        lines.append(f"    const {result_var} = `Operation completed for ${{{var_name}}}`;")
+    else:
+        lines.append(f"    // Shell call removed — command injection eliminated")
+    
+    replacement = "\n".join(lines)
+    return code[:match.start()] + replacement + code[match.end():]
+
+
 # ═══════════════════════════════════════════════════════════════
 # Transform Registry
 # ═══════════════════════════════════════════════════════════════
@@ -103,6 +194,16 @@ TRANSFORMS: dict[str, dict[str, dict]] = {
         "mysql": {
             "detect": r'(?:db\.query|connection\.query|pool\.query)\s*\(\s*["\'][^"\']*\+',
             "transform": _fix_sqli_concatenation,
+        },
+    },
+    "CWE-78": {
+        "execsync_tpl": {
+            "detect": r'(?:execSync|exec)\s*\(\s*`[^`]*\$\{',
+            "transform": _fix_cmdi_execsync,
+        },
+        "exec_concat": {
+            "detect": r'(?:execSync|exec)\s*\(\s*["\'][^"\']*["\']\s*\+',
+            "transform": _fix_cmdi_exec_concat,
         },
     },
     "CWE-798": {
@@ -135,10 +236,17 @@ def apply_template(cwe: str, code: str, framework: str = "") -> Optional[str]:
     if not transform:
         return None
 
-    # Try framework-specific first, then generic
-    for key in [framework, "generic"]:
-        if not key:
-            continue
+    # Priority order: framework-specific → generic → all other variants
+    priority_keys = []
+    if framework:
+        priority_keys.append(framework)
+    priority_keys.append("generic")
+    # Add all remaining keys (for CWE-78's "execsync_tpl", "exec_concat", etc.)
+    for key in transform:
+        if key not in priority_keys:
+            priority_keys.append(key)
+
+    for key in priority_keys:
         entry = transform.get(key)
         if entry and re.search(entry["detect"], code, re.I | re.DOTALL):
             try:

@@ -618,6 +618,31 @@ def run_builtin_scan(source_dir: str) -> list[StaticFinding]:
             for line_num, line in enumerate(lines, start=1):
                 for rule in rules:
                     if re.search(rule["pattern"], line, re.IGNORECASE):
+                        # ── False-positive suppression for parameterized queries ──
+                        # If this is a SQLi rule, check whether the call already
+                        # passes a params array (e.g., db.query(sql, [val]) or
+                        # query(sql, params)).  Those are SAFE — skip them.
+                        if rule["cwe"] == "CWE-89":
+                            # Build a multi-line context window (current + next 2 lines)
+                            context_window = line
+                            for offset in range(1, 3):
+                                if line_num - 1 + offset < len(lines):
+                                    context_window += " " + lines[line_num - 1 + offset]
+                            # Patterns that prove parameterised usage:
+                            #   query(sql, [val1, val2])   query(sql, [email])
+                            #   query(sql, params)         query(sql, values)
+                            #   query(`...`, [val])        execute(sql, [val])
+                            param_patterns = [
+                                r'(?:query|execute|raw)\s*\([^,]+,\s*\[',        # second arg is array literal [...]
+                                r'(?:query|execute|raw)\s*\([^,]+,\s*(?:params|values|args|bindings)\b',  # named params
+                            ]
+                            is_parameterised = any(
+                                re.search(pp, context_window, re.IGNORECASE)
+                                for pp in param_patterns
+                            )
+                            if is_parameterised:
+                                continue  # Safe — already parameterised, skip finding
+
                         rel_path = os.path.relpath(fpath, source_dir)
                         findings.append(StaticFinding(
                             rule_id=rule["id"],

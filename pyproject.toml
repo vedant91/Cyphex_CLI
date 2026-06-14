@@ -31,7 +31,9 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = ["openai>=1.0.0"]
+reasoning = ["agent-reasoning>=1.0.8"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
 
 [project.scripts]
 cyphex = "cyphex.cli:main"

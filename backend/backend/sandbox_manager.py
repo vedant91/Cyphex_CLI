@@ -471,13 +471,22 @@ async def _run_cmd(cmd: str, cwd: str, timeout: int = 60) -> dict:
 async def _check_server_up(url: str, retries: int = 5, delay: float = 1.0) -> bool:
     """Check if a server is responding."""
     import httpx
-    for _ in range(retries):
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(url)
-                if resp.status_code < 500:
-                    return True
-        except Exception:
-            pass
-        await asyncio.sleep(delay)
-    return False
+    import logging
+    # Suppress httpx INFO logs during health checks (e.g., "HTTP/1.1 404 Not Found")
+    # These are expected during startup and confuse users into thinking there's an error
+    httpx_logger = logging.getLogger("httpx")
+    prev_level = httpx_logger.level
+    httpx_logger.setLevel(logging.WARNING)
+    try:
+        for _ in range(retries):
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(url)
+                    if resp.status_code < 500:
+                        return True
+            except Exception:
+                pass
+            await asyncio.sleep(delay)
+        return False
+    finally:
+        httpx_logger.setLevel(prev_level)

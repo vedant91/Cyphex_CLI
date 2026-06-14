@@ -16,6 +16,11 @@ import random
 from datetime import datetime, timezone
 from typing import Any, Optional
 import httpx
+import logging
+# Suppress httpx INFO logs (e.g., "HTTP Request: GET ... 200 OK") globally.
+# These flood the CLI output during DAST scans and confuse users.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -24,6 +29,13 @@ from rich.live import Live
 from rich.box import ROUNDED, DOUBLE
 
 console = Console()
+
+# SOC Terminal UI
+try:
+    import terminal_ui as ui
+    SOC_UI = True
+except ImportError:
+    SOC_UI = False
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend", "backend"))
 
 from sandbox_manager import deploy_sandbox, stop_sandbox, _find_free_port, _get_node_env
@@ -43,6 +55,36 @@ try:
     COUNCIL_AVAILABLE = True
 except ImportError:
     COUNCIL_AVAILABLE = False
+
+# ── New Patching Infrastructure (vectorless RAG + grounded reasoning) ──
+try:
+    from backend.patch.resolver import resolve as resolve_location, is_patchable
+    from backend.patch.context import extract_function, extract_imports, detect_language
+    from backend.patch.applier import apply_patch, rollback
+    from backend.patch.verifier import verify_static, VerifyResult
+    from backend.patch.manifest import PatchManifest
+    from backend.patch.templates import apply_template
+    from backend.patch.regression import generate_regression_test
+    from backend.rag.code_indexer import CodeIndexer
+    from backend.rag.security_kb import format_for_prompt, detect_framework, get_fix_strategies
+    from backend.rag.patch_memory import PatchMemory
+    PATCH_V2_AVAILABLE = True
+except ImportError as _e:
+    PATCH_V2_AVAILABLE = False
+
+# ── Oracle Agent-Reasoning + Session Memory ──
+try:
+    from backend.reasoning.oracle_adapter import get_reasoner, get_strategy_info, AGENT_REASONING_AVAILABLE
+    from backend.reasoning.session_memory import (
+        SessionMemory, create_session, save_session, load_session, ReasoningEntry
+    )
+    from backend.reasoning.reasoning_tree import (
+        ReasoningTree, create_tree, save_tree
+    )
+    REASONING_AVAILABLE = True
+except ImportError:
+    AGENT_REASONING_AVAILABLE = False
+    REASONING_AVAILABLE = False
 
 class C:
     """Premium cyber-themed color palette — turquoise/purple/black."""
@@ -321,24 +363,40 @@ class CyphexEngine:
     def _step(self, num, title):
         elapsed = time.time() - self.start_ts if self.start_ts else 0.0
         mode = "JUDGE" if self.judge_mode else "SCAN"
+        step_num, step_total = num.split("/")
+        done = int(step_num)
+        total = int(step_total)
 
-        # Gradient top border
+        if SOC_UI:
+            ui.render_step(done, total, title, elapsed, mode)
+            return
+
+        # Fallback: original ANSI rendering
+        step_icons = {
+            "1": "📥", "2": "🔍", "3": "📦", "4": "⚡",
+            "5": "🧬", "6": "⚔️", "7": "📊", "8": "🔧",
+        }
+        icon = step_icons.get(step_num, "◆")
+        filled = int(done / total * 20)
+        progress = f"{'█' * filled}{'░' * (20 - filled)}"
         border = C.gradient("━" * 72, 0, 255, 255, 138, 43, 226)
         print(f"\n{border}")
-
-        # Step badge with pill style
-        step_num, step_total = num.split("/")
-        pill = f"{C.BG_CYAN}{C.BOLD} ◆ STEP {step_num}/{step_total} {C.RST}"
+        pill = f"{C.BG_CYAN}{C.BOLD} {icon} STEP {step_num}/{step_total} {C.RST}"
         title_text = f"{C.CYAN}{C.BOLD}{title}{C.RST}"
         meta = f"{C.GHOST}[{mode} t={elapsed:.1f}s]{C.RST}"
-
         print(f"  {pill}  {title_text}  {meta}")
-
-        # Gradient bottom border
+        print(f"  {C.GHOST}{progress} {done}/{total}{C.RST}")
         print(f"{border}\n")
 
     def _splash_banner(self):
         """Premium cyber-themed splash screen."""
+        if SOC_UI:
+            target = self.repo_url or getattr(self, 'local_path', '') or ''
+            ui.render_hero(self.scan_id, target=str(target))
+            self._tool_availability_summary()
+            return
+
+        # Fallback: original ANSI rendering
         banner = f"""
 {C.CYAN}  ██████╗██╗   ██╗██████╗ ██╗  ██╗███████╗██╗  ██╗{C.RST}
 {C.CYAN}  ██╔════╝╚██╗ ██╔╝██╔══██╗██║  ██║██╔════╝╚██╗██╔╝{C.RST}
@@ -354,8 +412,6 @@ class CyphexEngine:
         print(f"  {divider}")
         print(f"  {C.GHOST}Scan ID: {C.CYAN2}{self.scan_id}{C.RST}")
         print()
-
-        # Show tool availability summary
         self._tool_availability_summary()
 
     def _tool_availability_summary(self):
@@ -971,6 +1027,9 @@ class CyphexEngine:
         context = ScanContext(target_url=target_url)
 
         def agent_header(agent_id: str, name: str, objective: str):
+            if SOC_UI:
+                ui.render_agent_header(agent_id, name, objective)
+                return
             border = C.gradient("─" * 68, 0, 200, 200, 100, 50, 180)
             print(f"\n  {border}")
             print(f"  {C.CYAN}▸{C.RST} {C.BOLD}{C.CYAN}[{agent_id}]{C.RST} {C.PURP2}{name}{C.RST}")
@@ -1024,29 +1083,79 @@ class CyphexEngine:
 
             # ── API Endpoint Probe (for SPAs with no HTML forms) ──────────
             api_endpoints_found = []
+            source_routes = []
+            _live_get_with_params = []
+            _live_post = []
+            _live_id_routes = []
+            _live_file_routes = []
+            _live_url_routes = []
+            _live_debug_routes = []
             if not forms_found:
                 agent_header("Agent 02b", "API Discovery", "SPA detected (0 HTML forms). Probing REST API surface...")
-                api_probes = [
+
+                # ── Source-Code Route Discovery ──
+                # Use the code indexer to extract REAL routes from source files
+                source_routes = []
+                if hasattr(self, '_dast_indexer') and self._dast_indexer:
+                    source_routes = self._dast_indexer.extract_api_routes()
+                elif self.source_dir:
+                    try:
+                        from backend.rag.code_indexer import CodeIndexer
+                        dast_indexer = CodeIndexer(self.source_dir)
+                        dast_indexer.build_index()
+                        source_routes = dast_indexer.extract_api_routes()
+                        self._dast_indexer = dast_indexer
+                    except Exception:
+                        pass
+
+                if source_routes:
+                    route_lines = []
+                    for r in source_routes[:15]:  # Cap display at 15
+                        params_str = f" params=[{', '.join(r['params'][:3])}]" if r['params'] else ""
+                        route_lines.append(f"  {r['method']:6s} {r['path']:30s} ← {r['source']}{params_str}")
+                    console.print(Panel(
+                        f"[bold]📂 Extracted {len(source_routes)} routes from source code[/bold]\n"
+                        f"[dim]Routes parsed from Express/Flask route definitions in source files[/dim]\n\n"
+                        + "\n".join(route_lines),
+                        title="◈ SOURCE-CODE ROUTE DISCOVERY", border_style="bright_green", padding=(1, 1)
+                    ))
+
+                # Build probe list: source-discovered routes FIRST, then fallback guesses
+                api_probes = []
+                
+                # Add source-discovered routes
+                for r in source_routes:
+                    path = r["path"]
+                    method = r["method"]
+                    body = None
+                    if method == "POST":
+                        # Build body from extracted params
+                        body = {p: "test" for p in r.get("params", []) if p not in ("id",)}
+                        if not body:
+                            body = {"test": "value"}
+                    elif r.get("params"):
+                        # Add query params for GET requests
+                        query = "&".join(f"{p}=test" for p in r["params"] if p not in ("id",))
+                        if query:
+                            path = f"{path}?{query}"
+                    api_probes.append((method, path, body))
+
+                # Add fallback hardcoded probes (deduplicated)
+                seen_probes = {(m, p.split("?")[0]) for m, p, _ in api_probes}
+                fallback_probes = [
                     ("POST", "/api/auth/login",  {"username": "test", "password": "test"}),
                     ("POST", "/api/login",       {"email": "admin@test.com", "password": "admin"}),
                     ("POST", "/login",           {"username": "admin", "password": "admin"}),
-                    ("GET",  "/api/employees",   None),
-                    ("GET",  "/api/employees/1", None),
-                    ("GET",  "/api/employees/2", None),
-                    ("GET",  "/api/payroll/1",   None),
-                    ("GET",  "/api/payroll/2",   None),
-                    ("GET",  "/api/announcements", None),
-                    ("POST", "/api/announcements", {"title": "<b>test</b>", "message": "test"}),
-                    ("POST", "/api/ping",        {"host": "127.0.0.1"}),
-                    ("GET",  "/api/ping?host=127.0.0.1", None),
-                    ("POST", "/api/fetch",       {"url": "http://localhost"}),
-                    ("GET",  "/api/fetch?url=http://localhost", None),
+                    ("GET",  "/api/health",      None),
                     ("GET",  "/api/debug",       None),
                     ("GET",  "/api/env",         None),
-                    ("GET",  "/api/health",      None),
                     ("GET",  "/api/config",      None),
                     ("GET",  "/api/users",       None),
                 ]
+                for method, path, body in fallback_probes:
+                    if (method, path.split("?")[0]) not in seen_probes:
+                        api_probes.append((method, path, body))
+                        seen_probes.add((method, path.split("?")[0]))
                 for method, path, body in api_probes:
                     full_url = f"{target_url}{path}"
                     try:
@@ -1058,10 +1167,11 @@ class CyphexEngine:
                             resp = await client.post(full_url, json=body)
                     except Exception:
                         continue
-                    if resp.status_code < 404:
+                    if resp.status_code != 404:
                         api_endpoints_found.append((method, path, resp.status_code, resp.text[:500], body))
                         context.all_endpoints.append(full_url)
-                        print(f"  {C.G}[API]{C.RST} {method} {path} => HTTP {resp.status_code} ({len(resp.text)} bytes)")
+                        status_tag = C.G if resp.status_code < 400 else C.Y if resp.status_code < 500 else C.R
+                        print(f"  {status_tag}[API]{C.RST} {method} {path} => HTTP {resp.status_code} ({len(resp.text)} bytes)")
                         # Auto-create synthetic forms for login endpoints
                         if body and any(k in path.lower() for k in ("login", "auth")):
                             forms_found.append(FormData(action=full_url, method=method, inputs=list(body.keys()), page=path))
@@ -1069,6 +1179,60 @@ class CyphexEngine:
                         print(f"  {C.DIM}[API] {method} {path} => {resp.status_code}{C.RST}")
                 context.all_forms = forms_found
                 print(f"\n  {C.G}[API Discovery][OK]{C.RST} live_apis={len(api_endpoints_found)} synthetic_forms={len(forms_found)}")
+
+                # ══════════════════════════════════════════════════════════
+                # Build smart probe lists from discovered routes for agents
+                # ══════════════════════════════════════════════════════════
+                _live_get_with_params = []   # GET endpoints with query params
+                _live_post = []              # POST endpoints with bodies
+                _live_id_routes = []         # Routes with :id params
+                _live_file_routes = []       # Routes with file/path params
+                _live_url_routes = []        # Routes with url/callback params
+                _live_debug_routes = []      # Debug/admin/info routes
+
+                for r in source_routes:
+                    path = r["path"]
+                    params = [p.lower() for p in r.get("params", [])]
+                    method = r["method"]
+
+                    # Categorize by param type
+                    if any(p in params for p in ("file", "path", "filename", "name", "doc", "filepath")):
+                        _live_file_routes.append(r)
+                    if any(p in params for p in ("url", "callback", "callbackurl", "webhook", "target", "redirect")):
+                        _live_url_routes.append(r)
+                    if ":id" in path or "/:" in path:
+                        _live_id_routes.append(r)
+                    if any(k in path.lower() for k in ("debug", "admin", "info", "env", "config", "status")):
+                        _live_debug_routes.append(r)
+
+                # Build from BOTH source routes AND live API discovery
+                # Source routes give us params even for endpoints that returned 500
+                for r in source_routes:
+                    if r["method"] == "GET" and r.get("params"):
+                        # Build URL with params from source code
+                        param_str = "&".join(f"{p}=test" for p in r["params"])
+                        _live_get_with_params.append((f"{r['path']}?{param_str}", ""))
+                    elif r["method"] == "POST":
+                        body = {p: "test" for p in r.get("params", [])}
+                        if not body:
+                            body = {"test": "value"}
+                        _live_post.append((r["path"], body))
+
+                # Also add from live API discovery results (may have extra context)
+                for m, path, code, text, body in api_endpoints_found:
+                    if m == "GET" and "?" in path:
+                        _live_get_with_params.append((path, text))
+                    elif m == "POST" and body:
+                        _live_post.append((path, body))
+                # Deduplicate by base path
+                seen_bases = set()
+                deduped_get = []
+                for item in _live_get_with_params:
+                    base = item[0].split("?")[0]
+                    if base not in seen_bases:
+                        seen_bases.add(base)
+                        deduped_get.append(item)
+                _live_get_with_params = deduped_get
 
             # Agent 04 - XSS
             agent_header("Agent 04", "XSS", "Probe reflected XSS payload execution paths")
@@ -1173,6 +1337,12 @@ class CyphexEngine:
             # Agent 07 - LFI
             agent_header("Agent 07", "LFI", "Try file traversal payloads")
             lfi_targets = ["/download?file=../../../etc/passwd", "/api/file?path=../../../etc/passwd"]
+            # Inject source-discovered routes with file/path params
+            for r in _live_file_routes:
+                for p in r.get("params", []):
+                    if p.lower() in ("file", "path", "filename", "name", "doc", "filepath"):
+                        lfi_targets.append(f"{r['path']}?{p}=../../../etc/passwd")
+                        lfi_targets.append(f"{r['path']}?{p}=....//....//....//etc/passwd")
             for suffix in lfi_targets:
                 full = f"{target_url}{suffix}"
                 show_cmd("LFI", f'curl -s "{full}"')
@@ -1198,6 +1368,16 @@ class CyphexEngine:
             # Agent 06 - CMDi
             agent_header("Agent 06", "CMDi", "Probe command execution sinks")
             cmdi_targets = ["/api/ping?host=127.0.0.1;id", "/ping?host=127.0.0.1|whoami"]
+            # Inject discovered GET endpoints — try CMDi payloads in each param
+            cmdi_inject_payloads = [";id", "|whoami", "$(id)", "`id`"]
+            for path, _text in _live_get_with_params:
+                base = path.split("?")[0]
+                qs = path.split("?", 1)[1] if "?" in path else ""
+                for param_pair in qs.split("&"):
+                    key = param_pair.split("=")[0]
+                    if key:
+                        for payload in cmdi_inject_payloads[:2]:  # Limit to 2 payloads per param
+                            cmdi_targets.append(f"{base}?{key}={payload}")
             for suffix in cmdi_targets:
                 full = f"{target_url}{suffix}"
                 show_cmd("CMDi", f'curl -s "{full}"')
@@ -1265,6 +1445,14 @@ class CyphexEngine:
             # ── Agent 09 — IDOR Prober ─────────────────────────────────
             agent_header("Agent 09", "IDOR", "Probe insecure direct object references by enumerating sequential IDs")
             idor_paths = ["/api/employees/", "/api/payroll/", "/api/users/", "/api/payslips/", "/api/orders/"]
+            # Inject source-discovered routes with :id params
+            idor_seen = set(idor_paths)
+            for r in _live_id_routes:
+                # Convert /users/:id → /users/
+                base = r["path"].split(":")[0]
+                if base and base not in idor_seen:
+                    idor_paths.append(base)
+                    idor_seen.add(base)
             for base_path in idor_paths:
                 responses = []
                 for test_id in [1, 2, 3]:
@@ -1301,6 +1489,16 @@ class CyphexEngine:
                 "/api/fetch?url=http://127.0.0.1",
                 "/api/fetch?url=http://169.254.169.254/latest/meta-data/",
             ]
+            # Inject source-discovered routes with url/callback params
+            for r in _live_url_routes:
+                for p in r.get("params", []):
+                    if p.lower() in ("url", "callback", "callbackurl", "webhook", "target", "redirect"):
+                        if r["method"] == "POST":
+                            ssrf_endpoints.append((r["path"], {p: "http://169.254.169.254/latest/meta-data/"}))
+                            ssrf_endpoints.append((r["path"], {p: "http://127.0.0.1"}))
+                        else:
+                            ssrf_get_endpoints.append(f"{r['path']}?{p}=http://169.254.169.254/latest/meta-data/")
+                            ssrf_get_endpoints.append(f"{r['path']}?{p}=http://127.0.0.1")
             for path, body in ssrf_endpoints:
                 full = f"{target_url}{path}"
                 show_cmd("SSRF", f'curl -s -X POST "{full}" -d \'url={body["url"]}\'')
@@ -1343,6 +1541,12 @@ class CyphexEngine:
             # ── Agent 12 — Sensitive Data Exposure ─────────────────────
             agent_header("Agent 12", "Data Exposure", "Probe debug and config endpoints for sensitive data leaks")
             sde_paths = ["/api/debug", "/api/env", "/api/config", "/debug", "/env", "/api/health"]
+            # Inject source-discovered debug/admin/info routes
+            sde_seen = set(sde_paths)
+            for r in _live_debug_routes:
+                if r["method"] == "GET" and r["path"] not in sde_seen:
+                    sde_paths.append(r["path"])
+                    sde_seen.add(r["path"])
             sde_indicators = ["DB_", "SECRET", "KEY", "PASSWORD", "TOKEN", "process.env", "DATABASE_URL", "MONGO", "REDIS"]
             for path in sde_paths:
                 full = f"{target_url}{path}"
@@ -1377,6 +1581,12 @@ class CyphexEngine:
                 ("POST", "/api/ping", {"host": "127.0.0.1 | cat /etc/passwd"}),
                 ("POST", "/api/exec", {"cmd": "id"}),
             ]
+            # Inject discovered POST endpoints with CMDi payloads
+            for path, body in _live_post:
+                if body and isinstance(body, dict):
+                    for key in list(body.keys())[:3]:  # Test first 3 params
+                        cmdi_api_tests.append(("POST", path, {**body, key: "127.0.0.1; id"}))
+                        cmdi_api_tests.append(("POST", path, {**body, key: "test && whoami"}))
             cmdi_indicators = ["uid=", "gid=", "root:", "www-data", "nt authority", "groups="]
             for method, path, body in cmdi_api_tests:
                 full = f"{target_url}{path}"
@@ -1611,15 +1821,8 @@ class CyphexEngine:
             ("Normal Number", "42", "benign"),
         ]
 
-        table = Table(title="Before / After Simulation", box=ROUNDED)
-        table.add_column("Attack", style="white")
-        table.add_column("Payload", max_width=26)
-        table.add_column("Type", justify="center")
-        table.add_column("Before", justify="center")
-        table.add_column("After", justify="center")
-        table.add_column("Score", justify="right")
-
         blocked = fp = mal = 0
+        attacks_data = []
         for name, payload, ptype in attacks:
             score = self.genome._heuristic_score(self.genome.extract_features(payload))
             is_blocked = score >= 0.5
@@ -1634,11 +1837,24 @@ class CyphexEngine:
                 fp += 1
                 after = "[bold red]FALSE POS[/bold red]"
                 
-            table.add_row(name, payload[:24], ptype, before, after, f"{score:.3f}")
+            attacks_data.append((name, payload[:24], ptype, before, after, score))
 
-        console.print(table)
-        rate = (blocked / mal * 100) if mal else 0
-        console.print(f"\n  Blocked: {blocked}/{mal} ({rate:.0f}%)  |  False positives: {fp}")
+        if SOC_UI:
+            ui.render_attacks(attacks_data, blocked, mal, fp)
+        else:
+            table = Table(title="Before / After Simulation", box=ROUNDED)
+            table.add_column("Attack", style="white")
+            table.add_column("Payload", max_width=26)
+            table.add_column("Type", justify="center")
+            table.add_column("Before", justify="center")
+            table.add_column("After", justify="center")
+            table.add_column("Score", justify="right")
+            for row in attacks_data:
+                n, p, t, b, a, s = row
+                table.add_row(n, p, t, b, a, f"{s:.3f}")
+            console.print(table)
+            rate = (blocked / mal * 100) if mal else 0
+            console.print(f"\n  Blocked: {blocked}/{mal} ({rate:.0f}%)  |  False positives: {fp}")
 
     async def _print_report(self, duration):
         vulns = self.context.confirmed_vulns
@@ -1839,7 +2055,7 @@ class CyphexEngine:
         if not vulns:
             print(f"  {C.G}No vulnerabilities to patch.{C.RST}")
             return
-            
+
         if COUNCIL_AVAILABLE:
             try:
                 tracer = RouteTracer(self.source_dir)
@@ -1860,19 +2076,180 @@ class CyphexEngine:
         if low_b:  penalty_b += 1 + 2 * math.log2(1 + low_b)
         score_before = max(0, min(100, round(100 - penalty_b)))
 
+        # ═══════════════════════════════════════════════════════════════
+        # V2 PIPELINE: Vectorless RAG + Grounded Reasoning
+        # ═══════════════════════════════════════════════════════════════
+        use_v2 = PATCH_V2_AVAILABLE
+        indexer = None
+        manifest = None
+        patch_memory = None
+        framework = ""
+
+        if use_v2:
+            # ── Build Code Index (Vectorless RAG) ──
+            console.print(Panel(
+                "[bold cyan]Building Vectorless Code Index...[/bold cyan]\n"
+                "[dim]Walking source tree → keyword index (no embeddings, no vector DB)[/dim]",
+                title="◈ VECTORLESS RAG ENGINE", border_style="bright_cyan"
+            ))
+            indexer = CodeIndexer(self.source_dir)
+            file_count = indexer.build_index()
+
+            # Show the code tree
+            tree_lines = []
+            for rel_path, meta in list(indexer.files.items())[:15]:
+                flags = []
+                if meta["has_db"]: flags.append("[red]DB[/red]")
+                if meta["has_auth"]: flags.append("[yellow]AUTH[/yellow]")
+                if meta["has_input"]: flags.append("[magenta]INPUT[/magenta]")
+                flag_str = " ".join(flags) if flags else "[dim]—[/dim]"
+                funcs = meta["functions"][:3]
+                func_str = ", ".join(funcs) if funcs else "—"
+                tree_lines.append(f"  [cyan]📄[/cyan] {rel_path:40s} {flag_str:30s} [dim]fn: {func_str}[/dim]")
+            if len(indexer.files) > 15:
+                tree_lines.append(f"  [dim]... and {len(indexer.files) - 15} more files[/dim]")
+
+            console.print(Panel(
+                "\n".join(tree_lines),
+                title=f"[bold]Code Tree Index — {file_count} files indexed[/bold]",
+                border_style="bright_cyan", padding=(1, 1)
+            ))
+
+            # Detect framework
+            deps = indexer.get_dependency_info()
+            framework = detect_framework(deps)
+            if framework:
+                console.print(f"  [green]✓[/green] Detected framework: [bold]{framework}[/bold]")
+
+            # Init manifest + patch memory
+            manifest = PatchManifest(self.source_dir)
+            patch_memory = PatchMemory(self.source_dir)
+            console.print(f"  [green]✓[/green] Patch manifest: .cyphex/patches.json")
+            console.print(f"  [green]✓[/green] Patch memory: .cyphex/patch_memory.json")
+
+        # ── Session Memory + Agent Reasoning ──
+        session = None
+        reasoner = None
+        thread_id = ""
+
+        if REASONING_AVAILABLE:
+            session = create_session(
+                repo_url=getattr(self, "repo_url", "") or "",
+                source_dir=self.source_dir,
+                framework=framework if use_v2 else "",
+                file_count=indexer.build_index() if use_v2 and indexer else 0,
+            )
+            thread_id = session.thread_id
+            prior_context = session.get_prior_context()
+            prior_lessons = len(session.model_context.get("lessons", []))
+            prior_scans = len(session.reasoning_history)
+
+            reasoner = get_reasoner()
+            is_enhanced = reasoner and reasoner.is_enhanced
+
+            # ── Agent Reasoning Engine Panel (show ALL 16 strategies) ──
+            strategy_display = reasoner.get_strategy_display() if is_enhanced else "  [dim]Install agent-reasoning for 16 cognitive architectures[/dim]"
+            console.print(Panel(
+                f"[bold bright_magenta]Oracle Agent-Reasoning Engine[/bold bright_magenta]\n"
+                f"[dim]github.com/jasperan/agent-reasoning — 16 cognitive architectures[/dim]\n\n"
+                f"[bold]Available Strategies ({len(reasoner.available_strategies) if is_enhanced else 0}/16):[/bold]\n"
+                f"{strategy_display}\n\n"
+                f"[bold]Strategy Selection:[/bold]\n"
+                f"  • CWE-78 (CMDi) → [cyan]🌳 Tree of Thoughts[/cyan] (multi-path search)\n"
+                f"  • Critical vulns → [yellow]🗳️ Self-Consistency[/yellow] (majority vote)\n"
+                f"  • High vulns → [green]🪞 Self-Reflection[/green] (draft→critique→improve)\n"
+                f"  • Standard vulns → [blue]🔗 Chain-of-Thought[/blue] (step-by-step)\n"
+                f"  • Patch review → [red]⚔️ Adversarial Debate[/red] (multi-perspective)\n\n"
+                f"[bold]Status:[/bold] {'[bold green]ENHANCED[/bold green] — All strategies active' if is_enhanced else '[yellow]BASIC[/yellow] — pip install agent-reasoning'}",
+                title="◈ AGENT REASONING ENGINE", border_style="bright_magenta", padding=(1, 2)
+            ))
+
+            # ── Session Memory Panel ──
+            is_returning = prior_scans > 0 or prior_lessons > 0
+            repo_name = (getattr(self, "repo_url", "") or self.source_dir or "unknown").split("/")[-1].replace(".git", "")
+            session_status = "[bold green]🔄 RETURNING SESSION[/bold green] — prior context loaded" if is_returning else "[yellow]🆕 NEW SESSION[/yellow] — building context from scratch"
+            
+            session_info = (
+                f"{session_status}\n\n"
+                f"[bold]Thread ID:[/bold]     [cyan]{thread_id}[/cyan]\n"
+                f"[bold]Repository:[/bold]    {repo_name}\n"
+                f"[bold]Session File:[/bold]  .cyphex/sessions/{thread_id[:8]}...json\n\n"
+            )
+            
+            if is_returning:
+                session_info += (
+                    f"[bold green]📚 Prior Knowledge:[/bold green]\n"
+                    f"  • {prior_scans} patch{'es' if prior_scans != 1 else ''} from previous sessions\n"
+                    f"  • {prior_lessons} learned pattern{'s' if prior_lessons != 1 else ''}\n"
+                    f"  • Verified fixes: {session.model_context.get('patches_verified', 0)}\n"
+                    f"  • Failed fixes:   {session.model_context.get('patches_failed', 0)}\n\n"
+                    f"[dim]💡 These lessons are injected into every model prompt to improve fix quality.[/dim]"
+                )
+            else:
+                session_info += (
+                    f"[dim]📝 How Session Memory works:[/dim]\n"
+                    f"[dim]  1. Each scan creates a persistent thread tied to this repo[/dim]\n"
+                    f"[dim]  2. Successful & failed patches are recorded as 'lessons'[/dim]\n"
+                    f"[dim]  3. On re-scan, lessons are injected into model prompts[/dim]\n"
+                    f"[dim]  4. The LLM learns from past mistakes → better patches over time[/dim]"
+                )
+            
+            console.print(Panel(
+                session_info,
+                title="◈ SESSION MEMORY (Persistent Cross-Scan Context)", border_style="bright_cyan", padding=(1, 2)
+            ))
+
+        # ── RAG Pipeline Status Panel ──
+        if use_v2 and indexer:
+            rag_tree = indexer.files if hasattr(indexer, 'files') else {}
+            db_files = sum(1 for m in rag_tree.values() if m.get("has_db"))
+            auth_files = sum(1 for m in rag_tree.values() if m.get("has_auth"))
+            input_files = sum(1 for m in rag_tree.values() if m.get("has_input"))
+            total_funcs = sum(len(m.get("functions", [])) for m in rag_tree.values())
+            console.print(Panel(
+                f"[bold bright_green]Vectorless RAG[/bold bright_green] — No embeddings, no vector DB, no external API\n"
+                f"[dim]Extracts code structure into a JSON tree for precise context injection[/dim]\n\n"
+                f"[bold]📂 Code Tree Index:[/bold] {len(rag_tree)} files indexed\n"
+                f"[bold]⚙️  Functions:[/bold]       {total_funcs} extracted for context enrichment\n"
+                f"[bold]🔍 Security Flags:[/bold]\n"
+                f"  [red]DB[/red]:     {db_files} file{'s' if db_files != 1 else ''} with database operations\n"
+                f"  [yellow]AUTH[/yellow]:   {auth_files} file{'s' if auth_files != 1 else ''} with authentication logic\n"
+                f"  [magenta]INPUT[/magenta]:  {input_files} file{'s' if input_files != 1 else ''} with user input handling\n"
+                f"[bold]📖 KB Recipes:[/bold]    CWE-89, CWE-79, CWE-78, CWE-798, CWE-942 + framework-specific\n"
+                f"[bold]🏗️  Framework:[/bold]     {framework or 'auto-detected'}\n\n"
+                f"[dim]Context flow: 📂 Code Tree → ⚙️ Functions → 📖 KB Recipe → 📥 Imports → 🤖 Model Prompt[/dim]\n"
+                f"[dim]Each vulnerability gets: function body + file imports + CWE recipe + repo patterns[/dim]",
+                title="◈ VECTORLESS RAG PIPELINE (Context Enrichment Engine)", border_style="bright_green", padding=(1, 2)
+            ))
+
+        # Build status indicators
+        council_status = "[green]✓ ON[/green]" if COUNCIL_AVAILABLE else "[red]✗ OFF[/red]"
+        reasoning_status = f"[green]✓ ON ({len(reasoner.available_strategies)} strategies)[/green]" if REASONING_AVAILABLE and reasoner and reasoner.is_enhanced else "[yellow]⚡ BASIC[/yellow]"
+        rag_status = "[green]✓ ON[/green]" if use_v2 else "[red]✗ OFF[/red]"
+        session_status_short = f"[green]✓ {thread_id[:8]}[/green]" if thread_id else "[red]✗ NONE[/red]"
+        
         console.print(Panel(
-            f"[bold]Found {len(vulns)} vulnerabilities to review.[/bold]\n"
-            f"[dim]Council Mode: {'ENABLED (Batch)' if COUNCIL_AVAILABLE else 'DISABLED (fallback)'}[/dim]",
-            title="PATCH WORKFLOW", border_style="magenta"
+            f"[bold]🎯 {len(vulns)} vulnerabilities to patch[/bold]\n\n"
+            f"[bold]Pipeline Steps[/bold] (each vulnerability goes through):\n"
+            f"  [cyan]①[/cyan] [bold]Template Match[/bold]  → Try known deterministic fix (fastest, no LLM)\n"
+            f"  [cyan]②[/cyan] [bold]RAG Context[/bold]     → Extract function + imports + KB recipe\n"
+            f"  [cyan]③[/cyan] [bold]LLM Generation[/bold]  → Model generates fix with reasoning strategy\n"
+            f"  [cyan]④[/cyan] [bold]Council Review[/bold]  → 2 reviewer LLMs validate the patch\n"
+            f"  [cyan]⑤[/cyan] [bold]Verify Gate[/bold]     → Re-scan + syntax check + blast radius\n\n"
+            f"[bold]Component Status:[/bold]\n"
+            f"  Council:     {council_status}    Agent Reasoning: {reasoning_status}\n"
+            f"  RAG:         {rag_status}    Session Memory:  {session_status_short}",
+            title="◈ PATCH WORKFLOW", border_style="magenta", padding=(1, 2)
         ))
 
-        # Initialize the council if available
-        patch_council = PatchCouncil() if COUNCIL_AVAILABLE else None
-
+        patch_council = PatchCouncil(thread_id=thread_id) if COUNCIL_AVAILABLE else None
         patched_files = []
+        verified_count = 0
+        template_count = 0
         skipped = 0
 
-        # CWE lookup helper
+
+
         cwe_map = {
             "sql injection": "CWE-89", "xss": "CWE-79",
             "command injection": "CWE-78", "cmdi": "CWE-78",
@@ -1882,59 +2259,80 @@ class CyphexEngine:
             "lfi": "CWE-22", "path traversal": "CWE-22",
         }
 
-        # ── Phase 1: Collect all patchable vulns ──
-        patchable = []  # list of (vuln, rel_path, line_num, lines, snippet, vuln_type)
-        dynamic_only = []  # vulns with no source file to patch (runtime/DAST findings)
+        # ── Phase 1: Resolve locations using V2 resolver ──
+        patchable = []
+        dynamic_only = []
         for v in vulns:
-            endpoint = v.endpoint or ""
-            # Dynamic vulns have HTTP URLs, not file:line references
-            if endpoint.startswith("http://") or endpoint.startswith("https://"):
-                dynamic_only.append(v)
-                continue
-            if ":" not in endpoint:
-                dynamic_only.append(v)
-                continue
-            parts = endpoint.split(":")
-            rel_path = parts[0].strip()
-            try:
-                line_num = int(parts[1].split()[0])
-            except Exception:
-                dynamic_only.append(v)
-                continue
-            filepath = os.path.join(self.source_dir, rel_path)
-            if not os.path.exists(filepath):
-                # Try absolute path (semgrep findings have full paths)
-                if os.path.exists(rel_path):
-                    filepath = rel_path
-                    # Convert to relative for display
-                    if self.source_dir and rel_path.startswith(self.source_dir):
-                        rel_path = os.path.relpath(rel_path, self.source_dir)
+            if use_v2:
+                loc = resolve_location(v, self.source_dir)
+                if loc and is_patchable(loc):
+                    content = open(loc.file, "r", encoding="utf-8", errors="ignore").read()
+                    lines = content.split("\n")
+                    lang = detect_language(loc.file)
+                    snippet_fn, ctx_quality = extract_function(content, loc.line, lang)
+                    imports_str = extract_imports(content, lang)
+                    vuln_type = v.name.replace("[STATIC] ", "").replace("[DYNAMIC] ", "")
+                    cwe = getattr(v, "cwe", "") or ""
+                    if not cwe or cwe == "CWE-???":
+                        for key, val in cwe_map.items():
+                            if key in vuln_type.lower():
+                                cwe = val
+                                break
+                    start_l = max(0, loc.line - 3)
+                    end_l = min(len(lines), loc.line + 2)
+                    raw_snippet = "\n".join(lines[start_l:end_l])
+                    patchable.append({
+                        "vuln": v, "rel_path": loc.rel, "line_num": loc.line,
+                        "lines": [l + "\n" for l in lines], "snippet": raw_snippet,
+                        "snippet_fn": snippet_fn, "ctx_quality": ctx_quality,
+                        "imports": imports_str, "vuln_type": vuln_type,
+                        "cwe": cwe, "start_l": start_l, "end_l": end_l,
+                        "filepath": loc.file, "location": loc, "lang": lang,
+                    })
+                elif loc and loc.kind == "url":
+                    dynamic_only.append(v)
                 else:
                     dynamic_only.append(v)
-                    continue
-            try:
-                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = f.readlines()
-            except Exception:
-                dynamic_only.append(v)
-                continue
-            start_l = max(0, line_num - 3)
-            end_l = min(len(lines), line_num + 2)
-            snippet = "".join(lines[start_l:end_l])
-            vuln_type = v.name.replace("[STATIC] ", "").replace("[DYNAMIC] ", "")
-
-            cwe = "CWE-unknown"
-            for key, val in cwe_map.items():
-                if key in vuln_type.lower():
-                    cwe = val
-                    break
-
-            patchable.append({
-                "vuln": v, "rel_path": rel_path, "line_num": line_num,
-                "lines": lines, "snippet": snippet, "vuln_type": vuln_type,
-                "cwe": cwe, "start_l": start_l, "end_l": end_l,
-                "filepath": filepath,
-            })
+            else:
+                # Legacy resolver fallback
+                endpoint = v.endpoint or ""
+                if endpoint.startswith("http://") or endpoint.startswith("https://"):
+                    dynamic_only.append(v); continue
+                if ":" not in endpoint:
+                    dynamic_only.append(v); continue
+                parts = endpoint.split(":")
+                rel_path = parts[0].strip()
+                try:
+                    line_num = int(parts[1].split()[0])
+                except Exception:
+                    dynamic_only.append(v); continue
+                filepath = os.path.join(self.source_dir, rel_path)
+                if not os.path.exists(filepath):
+                    if os.path.exists(rel_path):
+                        filepath = rel_path
+                        if self.source_dir and rel_path.startswith(self.source_dir):
+                            rel_path = os.path.relpath(rel_path, self.source_dir)
+                    else:
+                        dynamic_only.append(v); continue
+                try:
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        file_lines = f.readlines()
+                except Exception:
+                    dynamic_only.append(v); continue
+                start_l = max(0, line_num - 3)
+                end_l = min(len(file_lines), line_num + 2)
+                snippet = "".join(file_lines[start_l:end_l])
+                vuln_type = v.name.replace("[STATIC] ", "").replace("[DYNAMIC] ", "")
+                cwe = "CWE-unknown"
+                for key, val in cwe_map.items():
+                    if key in vuln_type.lower(): cwe = val; break
+                patchable.append({
+                    "vuln": v, "rel_path": rel_path, "line_num": line_num,
+                    "lines": file_lines, "snippet": snippet, "vuln_type": vuln_type,
+                    "cwe": cwe, "start_l": start_l, "end_l": end_l,
+                    "filepath": filepath, "snippet_fn": snippet, "ctx_quality": "window",
+                    "imports": "", "location": None, "lang": "js",
+                })
 
         if dynamic_only:
             console.print(f"[dim]  {len(dynamic_only)} dynamic/runtime findings (no source file to auto-patch)[/dim]")
@@ -1943,125 +2341,180 @@ class CyphexEngine:
             console.print(f"[dim]No vulns with file locations to patch.[/dim]")
             return
 
-        # ── Phase 2: Batch generate + validate (agent-centric batching) ──
-        # The batch council now caches Stage 1 patches internally.
-        # Even if the review stage crashes, we get patches with "review_needed" status
-        # instead of losing everything and regenerating from scratch.
+
+
+        # ── Phase 2: Batch generate with ENRICHED context ──
         batch_results = None
         if patch_council and len(patchable) > 0:
             try:
-                vuln_inputs = [
-                    {"vuln_name": p["vuln_type"], "cwe": p["cwe"],
-                     "vulnerable_code": p["snippet"], "file_path": p["rel_path"]}
-                    for p in patchable
-                ]
+                vuln_inputs = []
+                for p in patchable:
+                    # V2: Use full function context + KB recipe instead of blind window
+                    enriched_code = p.get("snippet_fn", p["snippet"])
+                    kb_recipe = ""
+                    if use_v2:
+                        kb_recipe = format_for_prompt(p["cwe"], framework)
+                        if p.get("imports"):
+                            enriched_code = f"// FILE IMPORTS:\n{p['imports']}\n\n// VULNERABLE CODE ({p.get('ctx_quality','window')} extraction):\n{enriched_code}"
+                        if kb_recipe:
+                            enriched_code = f"{kb_recipe}\n\n{enriched_code}"
+                        # Add repo's own secure pattern if available
+                        if indexer:
+                            repo_pattern = indexer.find_secure_pattern(p["cwe"])
+                            if repo_pattern:
+                                enriched_code += f"\n\n// REPO'S OWN SECURE PATTERN (use this style):\n{repo_pattern[:300]}"
+
+                    vuln_inputs.append({
+                        "vuln_name": p["vuln_type"], "cwe": p["cwe"],
+                        "vulnerable_code": enriched_code, "file_path": p["rel_path"],
+                        "severity": p["vuln"].severity,
+                    })
+
+                # Show context enrichment panel
+                if use_v2:
+                    enrich_lines = []
+                    for p in patchable:
+                        q = p.get("ctx_quality", "window")
+                        has_kb = "[green]✓[/green]" if format_for_prompt(p["cwe"], framework) else "[red]✗[/red]"
+                        has_imp = "[green]✓[/green]" if p.get("imports") else "[red]✗[/red]"
+                        # Show which reasoning strategy will be used
+                        strat = ""
+                        if reasoner and reasoner.is_enhanced:
+                            from backend.reasoning.oracle_adapter import ALL_STRATEGIES
+                            s = reasoner.select_strategy("patch_generate", p["vuln"].severity, p["cwe"])
+                            s_info = ALL_STRATEGIES.get(s, {"icon": "⚡", "name": s})
+                            strat = f" → {s_info['icon']} {s_info['name']}"
+                        enrich_lines.append(
+                            f"  [{p['cwe']:10s}] {p['rel_path']:30s} "
+                            f"ctx=[bold]{q:8s}[/bold] KB={has_kb} imp={has_imp}{strat}"
+                        )
+                    console.print(Panel(
+                        "[bold]RAG Context → Model Prompt Assembly:[/bold]\n"
+                        "[dim]Each vuln gets: function body + file imports + KB recipe + repo secure pattern[/dim]\n\n"
+                        + "\n".join(enrich_lines),
+                        title="[bold]◈ Context Enrichment — RAG Pipeline + Strategy Selection[/bold]",
+                        border_style="bright_magenta", padding=(1, 1)
+                    ))
+
+
                 batch_results = await patch_council.generate_and_validate_batch(vuln_inputs)
             except Exception as e:
                 console.print(f"[yellow]⚠ Batch council error: {str(e)[:80]}.[/yellow]")
                 console.print(f"[cyan]  → Per-vuln fallback will only generate patches that weren't cached.[/cyan]")
                 batch_results = None
 
-        # ── Phase 3: Present each patch for user approval ──
+
+        # ── Phase 3: Present each patch — template → council → verify → apply ──
         for i, p in enumerate(patchable):
             v = p["vuln"]
-            console.print(f"\n[bold]{'-' * 70}[/bold]")
-            console.print(f"[bold][{i+1}/{len(patchable)}] {p['vuln_type']} ({v.severity})[/bold]")
-            console.print(f"File: [cyan]{p['rel_path']}:{p['line_num']}[/cyan]")
+            sev_colors = {"Critical": "red", "High": "bright_red", "Medium": "yellow", "Low": "green"}
+            sev_icons  = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}
+            sev_color = sev_colors.get(v.severity, "white")
+            sev_icon = sev_icons.get(v.severity, "●")
+            
+            console.print(f"\n[bold bright_cyan]{'━' * 70}[/bold bright_cyan]")
+            console.print(
+                f"[bold][{i+1}/{len(patchable)}] {sev_icon} {p['vuln_type']}[/bold] "
+                f"[{sev_color}]({v.severity})[/{sev_color}]"
+            )
+            console.print(f"[bold]File:[/bold] [cyan]{p['rel_path']}:{p['line_num']}[/cyan]")
+            if use_v2:
+                console.print(f"[dim]Context: {p.get('ctx_quality','window')} extraction | CWE: {p['cwe']} | Lang: {p.get('lang','?')}[/dim]")
 
             console.print(f"\n[bold]Vulnerable Code:[/bold]")
-            for j in range(p["start_l"], p["end_l"]):
+            for j in range(p["start_l"], min(p["end_l"], len(p["lines"]))):
                 ln = j + 1
                 marker = "->" if ln == p["line_num"] else "  "
-                console.print(f"  {marker} {ln:4} | {p['lines'][j].rstrip()[:120]}")
+                line_content = p["lines"][j].rstrip() if j < len(p["lines"]) else ""
+                console.print(f"  {marker} {ln:4} | {line_content[:120]}")
 
-            # Get patch from batch results or fallback
+            # ── Step A: Try deterministic template fix first (no model needed) ──
+            fixed = None
+            fix_source = "council"
+            if use_v2:
+                vuln_line = p["lines"][p["line_num"] - 1].rstrip() if p["line_num"] - 1 < len(p["lines"]) else ""
+                template_result = apply_template(p["cwe"], vuln_line, framework)
+                if template_result:
+                    fixed = template_result
+                    fix_source = "template"
+                    template_count += 1
+                    console.print(Panel(
+                        f"[bold green]✓ Deterministic template fix applied (no AI needed)[/bold green]\n"
+                        f"[dim]CWE: {p['cwe']} | Transform: regex-based[/dim]",
+                        title="◈ TEMPLATE ENGINE", border_style="green"
+                    ))
+
+            # ── Step B: Try council/model-based patch ──
             patch_pkg = None
-            if batch_results and i < len(batch_results):
-                council_result = batch_results[i]
-                if council_result and council_result.get("fixed_code"):
-                    patch_pkg = {
-                        "unsafe_reason": council_result.get("unsafe_reason", ""),
-                        "fixed_code": council_result.get("fixed_code", ""),
-                        "justifications": council_result.get("vote_summary", ""),
-                        "patch_safety": council_result.get("patch_safety", ""),
-                    }
-                    # Show council approval details
-                    approvals = council_result.get("approvals", [])
-                    dissent = council_result.get("dissent_reasons", [])
-                    vote_table = Table(title="Council Patch Validation", box=ROUNDED)
-                    vote_table.add_column("Model", width=22)
-                    vote_table.add_column("Verdict", justify="center", width=10)
-                    vote_table.add_column("Reason", max_width=45)
-                    for a in approvals:
-                        verdict_color = "green" if a.get("approved") else "red"
-                        verdict_text = "APPROVED" if a.get("approved") else "REJECTED"
-                        vote_table.add_row(
-                            a.get("model", "unknown"),
-                            f"[{verdict_color}]{verdict_text}[/{verdict_color}]",
-                            a.get("reason", "")
-                        )
-                    console.print(vote_table)
-
-                    if dissent:
-                        console.print(Panel(
-                            "\n".join(f"[red]•[/red] {r}" for r in dissent),
-                            title="Dissenting Reasons", border_style="red"
-                        ))
-
-            # If batch council didn't produce a patch, skip it entirely
-            # (No re-generation fallback — saves significant scan time)
-            if not patch_pkg:
-                console.print(f"[yellow][SKIP][/yellow] Could not generate patch\n")
-                skipped += 1
-                continue
-
-            analysis = patch_pkg.get('unsafe_reason', 'No rationale provided.')
-            if isinstance(analysis, list): analysis = " ".join(str(x) for x in analysis)
-            
-            justifications = patch_pkg.get('justifications', 'N/A')
-            if isinstance(justifications, list): justifications = " ".join(str(x) for x in justifications)
-            
-            raw_safety = patch_pkg.get("patch_safety", "")
-            if isinstance(raw_safety, list): raw_safety = " ".join(str(x) for x in raw_safety)
-            llm_patch_safety = str(raw_safety).strip()
-
-            console.print(Panel(
-                f"[bold red]Root Cause:[/bold red] {analysis}\n\n"
-                f"[bold green]Justifications:[/bold green] {justifications}",
-                title="Vulnerability Analysis", border_style="cyan", padding=(1, 2)
-            ))
-
-            fixed_raw = patch_pkg.get("fixed_code", "")
-            if isinstance(fixed_raw, list):
-                fixed_raw = "\n".join(str(x) for x in fixed_raw)
-            fixed = str(fixed_raw).strip()
             if not fixed:
-                console.print(f"[yellow][SKIP][/yellow] Model did not return fixed code\n")
-                skipped += 1
-                continue
+                if batch_results and i < len(batch_results):
+                    council_result = batch_results[i]
+                    if council_result and council_result.get("fixed_code"):
+                        patch_pkg = {
+                            "unsafe_reason": council_result.get("unsafe_reason", ""),
+                            "fixed_code": council_result.get("fixed_code", ""),
+                            "justifications": council_result.get("vote_summary", ""),
+                            "patch_safety": council_result.get("patch_safety", ""),
+                        }
+                        approvals = council_result.get("approvals", [])
+                        dissent = council_result.get("dissent_reasons", [])
+                        vote_table = Table(title="Council Patch Validation", box=ROUNDED)
+                        vote_table.add_column("Model", width=22)
+                        vote_table.add_column("Verdict", justify="center", width=10)
+                        vote_table.add_column("Reason", max_width=45)
+                        for a in approvals:
+                            verdict_color = "green" if a.get("approved") else "red"
+                            verdict_text = "APPROVED" if a.get("approved") else "REJECTED"
+                            vote_table.add_row(
+                                a.get("model", "unknown"),
+                                f"[{verdict_color}]{verdict_text}[/{verdict_color}]",
+                                a.get("reason", "")
+                            )
+                        console.print(vote_table)
+                        if dissent:
+                            console.print(Panel(
+                                "\n".join(f"[red]•[/red] {r}" for r in dissent),
+                                title="Dissenting Reasons", border_style="red"
+                            ))
 
+                if not patch_pkg:
+                    console.print(f"[yellow][SKIP][/yellow] Could not generate patch\n")
+                    skipped += 1
+                    continue
+
+                # Extract fixed code from council result
+                analysis = patch_pkg.get('unsafe_reason', 'No rationale provided.')
+                if isinstance(analysis, list): analysis = " ".join(str(x) for x in analysis)
+                justifications = patch_pkg.get('justifications', 'N/A')
+                if isinstance(justifications, list): justifications = " ".join(str(x) for x in justifications)
+                raw_safety = patch_pkg.get("patch_safety", "")
+                if isinstance(raw_safety, list): raw_safety = " ".join(str(x) for x in raw_safety)
+                llm_patch_safety = str(raw_safety).strip()
+
+                console.print(Panel(
+                    f"[bold red]Root Cause:[/bold red] {analysis}\n\n"
+                    f"[bold green]Justifications:[/bold green] {justifications}",
+                    title="Vulnerability Analysis", border_style="cyan", padding=(1, 2)
+                ))
+
+                fixed_raw = patch_pkg.get("fixed_code", "")
+                if isinstance(fixed_raw, list): fixed_raw = "\n".join(str(x) for x in fixed_raw)
+                fixed = str(fixed_raw).strip()
+                if not fixed:
+                    console.print(f"[yellow][SKIP][/yellow] Model did not return fixed code\n")
+                    skipped += 1
+                    continue
+
+            # ── Show diff ──
             safety_notes = self._assess_patch_safety(v, p["snippet"], fixed)
-
             diff_text = Text()
             for ol in p["snippet"].split("\n"):
-                if ol.strip():
-                    diff_text.append(f"- {ol[:120]}\n", style="red")
+                if ol.strip(): diff_text.append(f"- {ol[:120]}\n", style="red")
             for nl in fixed.split("\n"):
-                if nl.strip():
-                    diff_text.append(f"+ {nl[:120]}\n", style="green")
+                if nl.strip(): diff_text.append(f"+ {nl[:120]}\n", style="green")
+            console.print(Panel(diff_text, title=f"Proposed Changes ({fix_source.upper()})", border_style="yellow"))
 
-            console.print(Panel(diff_text, title="Proposed Code Changes (Diff)", border_style="yellow"))
-
-            safety_text = ""
-            if llm_patch_safety:
-                sc = "green" if llm_patch_safety == "safe" else "yellow" if llm_patch_safety == "review_needed" else "red"
-                safety_text += f"[bold]Council Verdict:[/bold] [{sc}]{llm_patch_safety.upper()}[/{sc}]\n"
-            for note in safety_notes:
-                safety_text += f"- {note}\n"
-            
-            if safety_text:
-                console.print(Panel(safety_text.strip(), title="Patch Safety Notes", border_style="red"))
-
+            # ── User approval ──
             if self.non_interactive:
                 choice = "y"
                 console.print(f"[dim]non-interactive mode: auto applying patch[/dim]")
@@ -2071,76 +2524,208 @@ class CyphexEngine:
                     choice = input().strip().lower()
                 except EOFError:
                     choice = "n"
-
-            if choice == "q":
-                break
+            if choice == "q": break
             if choice != "y":
                 skipped += 1
                 console.print(f"[dim][SKIPPED][/dim]\n")
                 continue
 
-            # --- SYNTAX VALIDATION ---
-            import tempfile
-            import subprocess
-            
-            ext = os.path.splitext(p["filepath"])[1].lower()
-            syntax_passed = True
-            syntax_err = ""
-            
-            # Create a temporary copy of the lines to check
-            test_lines = p["lines"].copy()
-            for j in range(p["start_l"], p["end_l"]):
-                test_lines[j] = ""
-            test_lines[p["start_l"]] = fixed + "\n"
-            test_content = "".join(test_lines)
+            # ── Step C: Apply using V2 applier (with backup + syntax check) ──
+            original_content = open(p["filepath"], "r", encoding="utf-8", errors="ignore").read()
 
-            if ext in ['.js', '.ts', '.py']:
-                with tempfile.NamedTemporaryFile(suffix=ext, mode='w', delete=False, encoding='utf-8') as tf:
-                    tf.write(test_content)
-                    tf_name = tf.name
+            if use_v2:
+                apply_result = apply_patch(p["filepath"], p["line_num"], p["line_num"], fixed)
+                if not apply_result.success:
+                    console.print(f"[bold red][REJECTED][/bold red] Apply failed: {apply_result.error}")
+                    skipped += 1
+                    continue
+                if not apply_result.parse_valid:
+                    console.print(f"[bold red][REJECTED][/bold red] Syntax error in patched file — rolling back")
+                    rollback(p["filepath"], original_content)
+                    skipped += 1
+                    continue
+            else:
+                # Legacy apply
+                import tempfile
+                ext = os.path.splitext(p["filepath"])[1].lower()
+                test_lines = p["lines"].copy()
+                for j in range(p["start_l"], p["end_l"]):
+                    test_lines[j] = ""
+                test_lines[p["start_l"]] = fixed + "\n"
+                test_content = "".join(test_lines)
+                syntax_passed = True
+                if ext in ['.js', '.ts', '.py']:
+                    with tempfile.NamedTemporaryFile(suffix=ext, mode='w', delete=False, encoding='utf-8') as tf:
+                        tf.write(test_content); tf_name = tf.name
+                    try:
+                        cmd = ["node", "-c", tf_name] if ext in ['.js', '.ts'] else ["python", "-m", "py_compile", tf_name]
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                        if result.returncode != 0: syntax_passed = False
+                    except Exception: pass
+                    finally:
+                        if os.path.exists(tf_name): os.unlink(tf_name)
+                if not syntax_passed:
+                    console.print(f"[bold red][REJECTED][/bold red] Syntax error in proposed patch")
+                    skipped += 1; continue
+                lines = p["lines"]
+                for j in range(p["start_l"], p["end_l"]): lines[j] = ""
+                lines[p["start_l"]] = fixed + "\n"
+                with open(p["filepath"], "w", encoding="utf-8") as f: f.writelines(lines)
+
+            # ── Step D: Verification Gate (V2 only) ──
+            patched_content = open(p["filepath"], "r", encoding="utf-8", errors="ignore").read()
+            verify_verdict = "UNVERIFIED"
+
+            if use_v2:
+                loc = p.get("location")
+                # Severity-scaled blast radius: Critical vulns need more room for proper fixes
+                sev_blast_cap = {"Critical": 80, "High": 60, "Medium": 40, "Low": 30}.get(
+                    v.severity, 40
+                )
+                vr = verify_static(
+                    loc, v, self.source_dir,
+                    parse_valid=True,
+                    original_content=original_content,
+                    patched_content=patched_content,
+                    blast_radius_cap=sev_blast_cap,
+                )
+                verify_verdict = vr.verdict
+
+                verdict_color = "green" if vr.verdict == "PASS" else "yellow" if vr.verdict == "UNVERIFIABLE" else "red"
+                verdict_icon = "✅" if vr.verdict == "PASS" else "⚠️" if vr.verdict == "UNVERIFIABLE" else "❌"
                 
-                try:
-                    if ext in ['.js', '.ts']:
-                        cmd = ["node", "-c", tf_name]
-                    elif ext == '.py':
-                        cmd = ["python", "-m", "py_compile", tf_name]
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                    if result.returncode != 0:
-                        syntax_passed = False
-                        syntax_err = result.stderr.strip()
-                except Exception as e:
-                    pass # Ignore if node/python isn't installed
-                finally:
-                    if os.path.exists(tf_name):
-                        os.unlink(tf_name)
-            
-            if not syntax_passed:
-                console.print(f"\n[bold red][REJECTED][/bold red] AI Hallucination detected: Syntax Error in proposed patch!")
-                console.print(f"[dim]{syntax_err[:500]}[/dim]\n")
-                skipped += 1
-                continue
-            # --------------------------
+                # Build human-readable check results
+                check = lambda ok: "[green]✓ PASS[/green]" if ok else "[red]✗ FAIL[/red]"
+                console.print(Panel(
+                    f"[bold]{verdict_icon} Verdict: [{verdict_color}]{vr.verdict}[/{verdict_color}][/bold]\n\n"
+                    f"[bold]Sub-checks:[/bold]\n"
+                    f"  {check(vr.finding_gone)}  Finding Gone    — Re-scanned: vulnerability {'eliminated' if vr.finding_gone else 'STILL PRESENT'}\n"
+                    f"  {check(vr.builds)}  Syntax Valid    — Patched code {'compiles' if vr.builds else 'has SYNTAX ERRORS'}\n"
+                    f"  {check(vr.no_suppression)}  No Suppression  — {'Clean fix (no noqa/eslint-disable)' if vr.no_suppression else 'Patch ADDED suppression comments'}\n"
+                    f"  {check(vr.blast_ok)}  Blast Radius    — Diff {'within' if vr.blast_ok else 'EXCEEDS'} {sev_blast_cap}-line cap ({v.severity})\n"
+                    + (f"\n[dim]Evidence: {vr.evidence}[/dim]" if vr.evidence else ""),
+                    title="◈ VERIFICATION GATE", border_style=verdict_color
+                ))
 
-            lines = p["lines"]
-            for j in range(p["start_l"], p["end_l"]):
-                lines[j] = ""
-            lines[p["start_l"]] = fixed + "\n"
-            with open(p["filepath"], "w", encoding="utf-8") as f:
-                f.writelines(lines)
+                if vr.verdict == "FAIL":
+                    rollback(p["filepath"], original_content)
+                    console.print(f"[bold red][ROLLED BACK][/bold red] Verification failed — patch reverted")
+                    skipped += 1
+                    continue
+
+                verified_count += 1 if vr.verdict == "PASS" else 0
+
+                # Record in manifest
+                if manifest:
+                    manifest.record(
+                        rel_path=p["rel_path"], line=p["line_num"], cwe=p["cwe"],
+                        vuln_type=p["vuln_type"], verdict=vr.verdict,
+                        original_hash=hashlib.sha256(original_content.encode()).hexdigest()[:16],
+                        patched_hash=hashlib.sha256(patched_content.encode()).hexdigest()[:16],
+                        exploit_payload=getattr(v, "payload", ""),
+                    )
+
+                # Store in patch memory for future reuse
+                if patch_memory and vr.verdict == "PASS":
+                    patch_memory.store(p["cwe"], p.get("snippet_fn", p["snippet"]), fixed, fix_source, verified=True)
+
+                # ── Record in session memory ──
+                if session and REASONING_AVAILABLE:
+                    entry = ReasoningEntry(
+                        vuln_id=f"vuln_{i:03d}",
+                        cwe=p["cwe"],
+                        file=p["rel_path"],
+                        line=p["line_num"],
+                        strategy_used=fix_source,
+                        verdict=vr.verdict,
+                        patch_hash=hashlib.sha256(fixed.encode()).hexdigest()[:12],
+                        fix_source=fix_source,
+                    )
+                    session.add_entry(entry)
+
+                    # Auto-learn lessons from verified patches
+                    if vr.verdict == "PASS":
+                        lesson = f"{p['cwe']} in {os.path.basename(p['rel_path'])} fixed via {fix_source}"
+                        session.add_lesson(lesson)
+
+                    # Build reasoning tree for this patch
+                    tree = create_tree(
+                        thread_id=thread_id, vuln_cwe=p["cwe"],
+                        vuln_type=p["vuln_type"], file_path=p["rel_path"],
+                        line=p["line_num"], strategy=fix_source,
+                        model="council" if fix_source == "council" else "template",
+                    )
+                    tree.build_cot_tree(
+                        vuln_description=f"{p['vuln_type']} at {p['rel_path']}:{p['line_num']}",
+                        thinking_steps=[f"Identified {p['cwe']} vulnerability", f"Applied {fix_source} fix"],
+                        final_action=fixed[:500],
+                        verify_result={"verdict": vr.verdict, "finding_gone": vr.finding_gone,
+                                       "builds": vr.builds, "blast_ok": vr.blast_ok},
+                    )
+                    tree.final_patch = fixed[:1000]
+                    tree.verdict = vr.verdict
+                    save_tree(tree, self.source_dir)
+
             patched_files.append(p["rel_path"])
-            console.print(f"[green][APPLIED][/green] Patch applied to {p['rel_path']}\n")
+            console.print(f"[green][APPLIED][/green] Patch applied to {p['rel_path']} [dim]({fix_source})[/dim]\n")
 
-            # Overwrite the original file in the workspace so the git commit includes the patch
-            if hasattr(self, "local_path") and self.local_path:
-                dst_orig = os.path.join(os.path.abspath(self.local_path), p["rel_path"])
-                if os.path.exists(dst_orig):
-                    import shutil
-                    shutil.copy2(p["filepath"], dst_orig)
+            # NOTE: Disabled write-back to original source directory.
+            # Patches are applied in the sandbox copy (self.source_dir).
+            # Copying back was causing corruption of demo source files
+            # because badly-applied patches would overwrite the originals,
+            # breaking subsequent scans.
+            # if hasattr(self, "local_path") and self.local_path:
+            #     dst_orig = os.path.join(os.path.abspath(self.local_path), p["rel_path"])
+            #     if os.path.exists(dst_orig):
+            #         import shutil
+            #         shutil.copy2(p["filepath"], dst_orig)
 
+        # ── Summary Panel ──
+        console.print(Panel(
+            f"[bold]Patch Results:[/bold]\n"
+            f"  ✅ Applied:    [green]{len(patched_files)}[/green]\n"
+            f"  ⏭️  Skipped:    [yellow]{skipped}[/yellow]\n"
+            + (f"  ✓  Verified:   [cyan]{verified_count}[/cyan]\n"
+               f"  🔧 Templates:  [magenta]{template_count}[/magenta]" if use_v2 else ""),
+            title="◈ PATCH SUMMARY", border_style="bright_cyan", padding=(1, 2)
+        ))
 
-        console.print(f"\n[bold]{'-' * 50}[/bold]")
-        console.print(f"[green]Applied:[/green] {len(patched_files)}  [yellow]Skipped:[/yellow] {skipped}")
+        if use_v2 and manifest:
+            stats = manifest.get_durability_stats()
+            if stats.get("total", 0) > 0:
+                console.print(Panel(
+                    f"[bold]Total patches:[/bold] {stats['total']}  "
+                    f"[green]Verified:[/green] {stats.get('verified', 0)}  "
+                    f"[yellow]Unverified:[/yellow] {stats.get('unverified', 0)}  "
+                    f"[bold]Durability:[/bold] {stats.get('durability_pct', 0):.0f}%",
+                    title="◈ PATCH MANIFEST", border_style="bright_cyan"
+                ))
+
+        # ── Save Session Memory ──
+        if session and REASONING_AVAILABLE:
+            saved_path = save_session(session, self.source_dir)
+            reasoning_stats = ""
+            if reasoner:
+                stats = reasoner.get_stats()
+                usage = stats.get("strategy_usage", {})
+                if usage:
+                    strat_lines = ", ".join(f"{k}×{v}" for k, v in usage.items())
+                    reasoning_stats = (
+                        f"\n[bold]Reasoning Stats:[/bold]\n"
+                        f"  Calls: {stats['calls']}  |  Avg: {stats['avg_time_ms']:.0f}ms  |  Total: {stats['total_time_ms']:.0f}ms\n"
+                        f"  Strategies used: {strat_lines}"
+                    )
+            console.print(Panel(
+                f"[bold]Thread ID:[/bold]        [cyan]{thread_id}[/cyan]\n"
+                f"[bold]Session:[/bold]          {saved_path}\n"
+                f"[bold]Patches recorded:[/bold] {session.model_context.get('patches_applied', 0)}\n"
+                f"[bold]Verified:[/bold]         {session.model_context.get('patches_verified', 0)}\n"
+                f"[bold]Lessons learned:[/bold]  {len(session.model_context.get('lessons', []))}"
+                + reasoning_stats +
+                f"\n\n[dim]Session persisted — will be loaded on next scan for continuity[/dim]",
+                title="◈ SESSION MEMORY SAVED", border_style="bright_green", padding=(1, 2)
+            ))
+
 
         # ── After-Patching Score ──
         remaining_vulns = len(vulns) - len(patched_files)
@@ -2148,16 +2733,23 @@ class CyphexEngine:
         patched_set = set(patched_files)
         remaining = [v for v in vulns
                      if not any(v.endpoint and p_entry in v.endpoint for p_entry in patched_set)]
+        # Guard: if nothing was patched, remaining IS the full vuln list
+        if not patched_files:
+            remaining = list(vulns)
         crit_a = sum(1 for v in remaining if v.severity == "Critical")
         high_a = sum(1 for v in remaining if v.severity == "High")
         med_a  = sum(1 for v in remaining if v.severity == "Medium")
         low_a  = sum(1 for v in remaining if v.severity in ("Low", "Info"))
         penalty_a = 0
-        if crit_a: penalty_a += 15 + 8 * math.log2(1 + crit_a)
-        if high_a: penalty_a += 8 + 5 * math.log2(1 + high_a)
-        if med_a:  penalty_a += 3 + 3 * math.log2(1 + med_a)
-        if low_a:  penalty_a += 1 + 1 * math.log2(1 + low_a)
+        # MUST use the SAME coefficients as score_before (20/10, 10/8, 3/4, 1/2)
+        if crit_a: penalty_a += 20 + 10 * math.log2(1 + crit_a)
+        if high_a: penalty_a += 10 + 8 * math.log2(1 + high_a)
+        if med_a:  penalty_a += 3 + 4 * math.log2(1 + med_a)
+        if low_a:  penalty_a += 1 + 2 * math.log2(1 + low_a)
         score_after = max(0, min(100, round(100 - penalty_a)))
+        # Final guard: 0 patches ⇒ 0 improvement
+        if not patched_files:
+            score_after = score_before
 
         delta = score_after - score_before
         delta_color = "green" if delta > 0 else "yellow" if delta == 0 else "red"
@@ -2172,12 +2764,18 @@ class CyphexEngine:
             f"  [bold]Before Patching:[/bold]  [{sc_b_color}]{'█' * bar_b}{'░' * (25 - bar_b)}  {score_before}/100[/{sc_b_color}]\n"
             f"  [bold]After Patching:[/bold]   [{sc_a_color}]{'█' * bar_a}{'░' * (25 - bar_a)}  {score_after}/100[/{sc_a_color}]\n\n"
             f"  [bold]Improvement:[/bold]  [{delta_color}]{delta_str} points[/{delta_color}]  │  "
-            f"Patched: [green]{len(patched_files)}[/green]  Remaining: [yellow]{len(remaining)}[/yellow]  │  "
-            f"Crit: {crit_a}  High: {high_a}  Med: {med_a}  Low: {low_a}\n\n"
-            f"  [dim italic]* Note: Dynamic runtime findings cannot be auto-marked as patched. Run a re-scan to clear them![/dim italic]",
+            f"Patched: [green]{len(patched_files)}[/green]  Remaining: [yellow]{len(remaining)}[/yellow]\n\n"
+            f"  [bold]Remaining Vulnerabilities:[/bold]\n"
+            f"    🔴 Critical: {crit_a}    🟠 High: {high_a}    🟡 Medium: {med_a}    🟢 Low: {low_a}\n\n"
+            f"  [dim]Score = 100 − severity-weighted penalties (higher = safer)[/dim]\n"
+            f"  [dim]Only VERIFIED patches (re-scanned + syntax-checked) affect the score[/dim]",
             title="[bold cyan]◈ SECURITY SCORE: BEFORE vs AFTER ◈[/bold cyan]",
             border_style="cyan", padding=(1, 2)
         ))
+
+        # Save post-patch score for final banner
+        self._post_patch_score = score_after
+        self._post_patch_remaining = remaining
 
         if patched_files and self.repo_url and not self.non_interactive:
             print(f"\n  {C.Y}Push patches to GitHub? (y/n):{C.RST} ", end="")
@@ -2436,61 +3034,60 @@ class CyphexEngine:
                 pass
 
         elapsed = time.time() - self.start_ts
-        vulns = self.context.confirmed_vulns if self.context else []
-        crit = sum(1 for v in vulns if v.severity == "Critical")
-        high = sum(1 for v in vulns if v.severity == "High")
-        med = sum(1 for v in vulns if v.severity == "Medium")
-        low = sum(1 for v in vulns if v.severity in ("Low", "Info"))
-        total = len(vulns)
-        score = max(0, 100 - crit * 25 - high * 10 - med * 5 - low)
-        # Diminishing returns: duplicate findings of same severity don't stack fully
-        import math
-        penalty = 0
-        if crit: penalty += 20 + 10 * math.log2(1 + crit)  # ~20 first, +10 per doubling
-        if high: penalty += 10 + 8 * math.log2(1 + high)   # ~10 first, +8 per doubling
-        if med:  penalty += 3 + 4 * math.log2(1 + med)
-        if low:  penalty += 1 + 2 * math.log2(1 + low)
-        score = max(0, min(100, round(100 - penalty)))
 
-        # Score color
-        if score >= 80:
-            sc, sc_label = C.NEON, "SECURE"
-        elif score >= 60:
-            sc, sc_label = C.CYAN, "FAIR"
-        elif score >= 40:
-            sc, sc_label = C.Y, "AT RISK"
-        elif score >= 20:
-            sc, sc_label = C.R, "POOR"
+        # Use post-patch score if available, otherwise calculate from raw vulns
+        if hasattr(self, '_post_patch_score') and self._post_patch_score is not None:
+            score = self._post_patch_score
+            remaining = getattr(self, '_post_patch_remaining', [])
+            crit = sum(1 for v in remaining if v.severity == "Critical")
+            high = sum(1 for v in remaining if v.severity == "High")
+            med = sum(1 for v in remaining if v.severity == "Medium")
+            low = sum(1 for v in remaining if v.severity in ("Low", "Info"))
         else:
-            sc, sc_label = C.FLAME, "CRITICAL"
+            vulns = self.context.confirmed_vulns if self.context else []
+            crit = sum(1 for v in vulns if v.severity == "Critical")
+            high = sum(1 for v in vulns if v.severity == "High")
+            med = sum(1 for v in vulns if v.severity == "Medium")
+            low = sum(1 for v in vulns if v.severity in ("Low", "Info"))
+            import math
+            penalty = 0
+            if crit: penalty += 20 + 10 * math.log2(1 + crit)
+            if high: penalty += 10 + 8 * math.log2(1 + high)
+            if med:  penalty += 3 + 4 * math.log2(1 + med)
+            if low:  penalty += 1 + 2 * math.log2(1 + low)
+            score = max(0, min(100, round(100 - penalty)))
 
+        endpoints = len(self.context.all_endpoints) if self.context else 0
+        pa = getattr(self, '_patches_applied', 0)
+        pt = getattr(self, '_patches_total', 0)
+
+        if SOC_UI:
+            ui.render_final_banner(score, crit, high, med, low, elapsed,
+                                   self.scan_id, pa, pt, endpoints)
+            return
+
+        # Fallback: original ANSI rendering
+        if score >= 80:   sc, sc_label = C.NEON, "SECURE"
+        elif score >= 60: sc, sc_label = C.CYAN, "FAIR"
+        elif score >= 40: sc, sc_label = C.Y, "AT RISK"
+        elif score >= 20: sc, sc_label = C.R, "POOR"
+        else:             sc, sc_label = C.FLAME, "CRITICAL"
+        total = crit + high + med + low
         border = C.gradient("━" * 72, 138, 43, 226, 0, 255, 255)
         border2 = C.gradient("━" * 72, 0, 255, 255, 138, 43, 226)
-
         print(f"\n{border}")
         print(f"  {C.NEON}✓{C.RST} {C.BOLD}{C.CYAN}CYPHEX SCAN COMPLETE{C.RST}")
         print(f"{border2}\n")
-
-        # Score display
-        bar_filled = int(score / 100 * 20)
-        bar_empty = 20 - bar_filled
+        bar_filled = int(score / 100 * 30)
+        bar_empty = 30 - bar_filled
         score_bar = f"{sc}{'█' * bar_filled}{C.GHOST}{'░' * bar_empty}{C.RST}"
-        print(f"  {C.SLATE}Security Score{C.RST}   {score_bar}  {sc}{C.BOLD}{score}/100{C.RST}  {sc}{sc_label}{C.RST}")
-        print()
-
-        # Severity breakdown
+        print(f"{sc}{C.BOLD}  ╔═══════════╗  {C.RST}")
+        print(f"{sc}{C.BOLD}  ║  {score:3d}/100   ║  {sc_label}{C.RST}")
+        print(f"{sc}{C.BOLD}  ╚═══════════╝  {C.RST}")
+        print(f"\n  {score_bar}\n")
         if total > 0:
-            print(f"  {C.FLAME}● Critical: {crit}{C.RST}  {C.R}● High: {high}{C.RST}  {C.Y}● Medium: {med}{C.RST}  {C.SLATE}● Low: {low}{C.RST}  {C.GHOST}│{C.RST}  {C.CYAN}Total: {total}{C.RST}")
-        else:
-            print(f"  {C.NEON}● No vulnerabilities found{C.RST}")
-        print()
-
-        # Metadata
-        print(f"  {C.GHOST}Duration    {C.SLATE}{elapsed:.1f}s{C.RST}")
-        print(f"  {C.GHOST}Scan ID     {C.CYAN2}{self.scan_id}{C.RST}")
-        print(f"  {C.GHOST}Agents      {C.SLATE}13 deployed (Crawler, XSS, SQLi, Auth, LFI, CMDi, CORS, IDOR, SSRF, SDE, JWT, SupplyChain, API){C.RST}")
-        print(f"  {C.GHOST}Tools       {C.SLATE}Semgrep + Nuclei + Built-in Scanner + Immune System{C.RST}")
-
+            print(f"  {C.BOLD}Vulnerabilities Found:{C.RST}")
+            print(f"    {C.FLAME}🔴 Critical: {crit}{C.RST}    {C.R}🟠 High: {high}{C.RST}    {C.Y}🟡 Medium: {med}{C.RST}    {C.SLATE}🟢 Low: {low}{C.RST}")
         print(f"\n{border}")
-        print(f"  {C.PURP2}cyphex{C.RST} {C.GHOST}— Multi-Agent Security Pipeline v2.0{C.RST}")
+        print(f"  {C.PURP2}cyphex{C.RST} {C.GHOST}— Multi-Agent Security Pipeline v4.3{C.RST}")
         print(f"{border2}\n")

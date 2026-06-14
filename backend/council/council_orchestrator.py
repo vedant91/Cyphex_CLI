@@ -8,6 +8,13 @@ from rich.panel import Panel
 from rich.live import Live
 from backend.council.council_errors import CouncilCallError, ModelNotFoundError
 
+# Oracle agent-reasoning integration
+try:
+    from backend.reasoning.oracle_adapter import get_reasoner, AGENT_REASONING_AVAILABLE
+except ImportError:
+    AGENT_REASONING_AVAILABLE = False
+    def get_reasoner(**kwargs): return None
+
 OLLAMA_BASE = "http://localhost:11434"
 console = Console()
 
@@ -213,22 +220,64 @@ ANTI-HALLUCINATION RULES — apply on every response:
 6. Return ONLY valid JSON. No preamble, no markdown, no extra text.
 """
 
-    def __init__(self):
+    def __init__(self, thread_id: str = ""):
         self.vram = VRAMManager()
+        self.thread_id = thread_id
+        self.reasoner = get_reasoner() if AGENT_REASONING_AVAILABLE else None
+        self._reasoning_calls = 0
 
-    async def _call(self, model: str, system: str, prompt: str, task_name: str = "Reasoning") -> dict:
+    async def _call(self, model: str, system: str, prompt: str, task_name: str = "Reasoning",
+                    severity: str = "", cwe: str = "") -> dict:
         """
         Call a model and return parsed JSON.
+        Routes through Oracle agent-reasoning when available (adds CoT/reflection).
         Handles: model loading, JSON extraction from markdown fences, retries.
         Raises CouncilCallError if model returns non-JSON after 2 retries.
         """
         console.print(f"[dim]VRAM Manager: Loading {model}...[/dim]")
         await self.vram.ensure_loaded(model)
 
+        # Determine reasoning task type from task_name
+        task_type_map = {
+            "Reasoning": "vuln_analysis",
+            "Generating": "patch_generate",
+            "Reviewing": "patch_review",
+        }
+        task_type = task_type_map.get(task_name, "default")
+
         full_system = f"{system}\n\n{self.UNIVERSAL_ANTI_HALLUCINATION_RULES}"
 
+        # ── Try Oracle agent-reasoning first (adds CoT/reflection layer) ──
+        if self.reasoner and self.reasoner.is_enhanced:
+            try:
+                strategy = self.reasoner.select_strategy(task_type, severity, cwe)
+                console.print(f"[dim]  ◈ Agent-Reasoning: {strategy} strategy[/dim]")
+                result = self.reasoner.generate(
+                    model=model,
+                    prompt=prompt,
+                    task_type=task_type,
+                    severity=severity,
+                    cwe=cwe,
+                    system=full_system,
+                )
+                if result.response:
+                    self._reasoning_calls += 1
+                    # Parse JSON from reasoning output
+                    clean = re.sub(r"```(?:json)?|```", "", result.response).strip()
+                    try:
+                        parsed = json.loads(clean)
+                    except json.JSONDecodeError:
+                        parsed = self._extract_json_robust(clean)
+                    if parsed and isinstance(parsed, dict):
+                        console.print(f"[dim]  ◈ Reasoning complete ({result.strategy}, {result.duration_ms:.0f}ms)[/dim]")
+                        return parsed
+            except Exception as e:
+                console.print(f"[dim]  ◈ Agent-reasoning fallback: {str(e)[:60]}[/dim]")
+
+        # ── Fallback: direct Ollama httpx call ──
         for attempt in range(2):
             try:
+
                 # Use Live to show thinking process — 90s timeout prevents infinite hangs
                 with Live(Panel(f"[cyan bold]Evaluating[/cyan bold]\n[dim]Model: {model}[/dim]\n[yellow]Status: Thinking...[/yellow]", border_style="cyan"), refresh_per_second=2, console=console, transient=True) as live:
                     async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:

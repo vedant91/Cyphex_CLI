@@ -16,6 +16,10 @@ import uuid
 import json
 import glob
 import re
+import logging
+# Silence httpx INFO logs globally (they flood DAST output)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 os.environ["PYTHONUTF8"] = "1"
 os.environ["PYTHONIOENCODING"] = "utf-8"

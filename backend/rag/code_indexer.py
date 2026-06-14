@@ -109,6 +109,106 @@ class CodeIndexer:
 
         return len(self.files)
 
+    def extract_api_routes(self) -> list:
+        """
+        Extract API routes from source code by parsing framework-specific patterns.
+        
+        Two-pass approach:
+          Pass 1: Scan main entry file for app.use('/prefix', require('./routes/xxx'))
+          Pass 2: Scan route files for router.get/post/etc, using real mount prefixes
+        
+        Returns list of {method, path, source, params} dicts.
+        """
+        routes = []
+        seen = set()
+
+        # ══════════════════════════════════════════════════════════════
+        # PASS 1: Discover mount prefixes from app.use() in entry files
+        # ══════════════════════════════════════════════════════════════
+        # Maps: route module basename → mount prefix
+        # e.g. "orders" → "/api/orders" from app.use('/api/orders', require('./routes/orders'))
+        mount_map = {}
+        
+        entry_files = [
+            rel for rel in self.files
+            if os.path.basename(rel).replace(".js", "").replace(".ts", "")
+            in ("index", "app", "server", "main")
+        ]
+        
+        for entry_rel in entry_files:
+            content = self.files[entry_rel]["content"]
+            # Pattern: app.use('/prefix', require('./routes/xxx'))
+            # Also handles: app.use('/prefix', xxxRoutes) where xxxRoutes = require(...)
+            mount_pattern = r"app\.use\s*\(\s*['\"](/[^'\"]*)['\"].*?(?:require\s*\(\s*['\"]\.?/(?:routes?/)?(\w+)['\"]|(\w+)Routes)"
+            for m in re.finditer(mount_pattern, content):
+                prefix = m.group(1)
+                module_name = m.group(2) or m.group(3)
+                if module_name:
+                    mount_map[module_name.lower()] = prefix
+
+        # ══════════════════════════════════════════════════════════════
+        # PASS 2: Extract routes from all files using discovered mounts
+        # ══════════════════════════════════════════════════════════════
+        for rel_path, meta in self.files.items():
+            content = meta["content"]
+
+            # Determine the mount prefix for this file
+            basename = os.path.basename(rel_path).replace(".js", "").replace(".ts", "")
+            
+            # Priority: use mount_map from Pass 1, fallback to filename
+            if basename.lower() in mount_map:
+                mount_prefix = mount_map[basename.lower()]
+            elif basename in ("index", "app", "server", "main"):
+                mount_prefix = ""  # Entry files have no prefix
+            else:
+                mount_prefix = f"/{basename}"  # Fallback: use filename
+
+            # ── Express patterns ──
+            # router.get('/path', handler) or app.post('/path', handler)
+            express_pattern = r'(?:router|app)\.(get|post|put|delete|patch)\s*\(\s*[\'"](/[^\'"]*)[\'"]'
+            for match in re.finditer(express_pattern, content, re.I):
+                method = match.group(1).upper()
+                path = match.group(2)
+                full_path = f"{mount_prefix}{path}" if path != "/" else mount_prefix or "/"
+                # Normalize: /api/orders/ → /api/orders, but keep / as /
+                full_path = full_path.rstrip("/") or "/"
+
+                # Extract potential query/body params from nearby code
+                params = []
+                nearby = content[max(0, match.start()-50):match.end()+300]
+                params.extend(re.findall(r'req\.query\.(\w+)', nearby))
+                params.extend(re.findall(r'req\.body\.(\w+)', nearby))
+                params.extend(re.findall(r'req\.params\.(\w+)', nearby))
+
+                key = (method, full_path)
+                if key not in seen:
+                    seen.add(key)
+                    routes.append({
+                        "method": method,
+                        "path": full_path,
+                        "source": rel_path,
+                        "params": list(set(params)),
+                    })
+
+            # ── Flask patterns ──
+            flask_pattern = r'@\w+\.route\s*\(\s*[\'"](/[^\'"]*)[\'"](?:.*?methods\s*=\s*\[([^\]]*)\])?'
+            for match in re.finditer(flask_pattern, content, re.I):
+                path = match.group(1)
+                methods_str = match.group(2) or "'GET'"
+                methods = re.findall(r"'(\w+)'", methods_str)
+                for method in methods:
+                    key = (method.upper(), path)
+                    if key not in seen:
+                        seen.add(key)
+                        routes.append({
+                            "method": method.upper(),
+                            "path": path,
+                            "source": rel_path,
+                            "params": [],
+                        })
+
+        return routes
+
     def find_for_vuln(self, vuln, location=None) -> list:
         """
         Find files most relevant to a vulnerability.

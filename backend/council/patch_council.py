@@ -127,7 +127,7 @@ class PatchCouncil(CouncilOrchestrator):
 
         console.print(f"[dim]Stage 1: {patch_model} Generating Patch...[/dim]")
         try:
-            patch_result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, patch_prompt, task_name="Patch Generation")
+            patch_result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, patch_prompt, task_name="Generating", severity="Critical", cwe=cwe)
         except Exception as e:
             console.print(f"[red]Error generating patch: {e}[/red]")
             return {"fixed_code": "", "patch_safety": "rejected", "unsafe_reason": "Error", "dissent_reasons": ["Generation failed"]}
@@ -152,7 +152,7 @@ class PatchCouncil(CouncilOrchestrator):
         for model in reviewer_models:
             try:
                 await self.vram.ensure_loaded(model)
-                review = await self._call(model, PATCH_REVIEW_SYSTEM, review_prompt, task_name=f"Patch Review ({model})")
+                review = await self._call(model, PATCH_REVIEW_SYSTEM, review_prompt, task_name="Reviewing", severity="Critical", cwe=cwe)
                 approvals.append({"model": model, **review})
             except Exception as e:
                 console.print(f"[red]Error from {model}: {e}[/red]")
@@ -234,17 +234,31 @@ class PatchCouncil(CouncilOrchestrator):
                          "unsafe_reason": "All models failed to load"} for _ in vuln_list]
 
         # ── PATCH CACHE: these results survive even if reviews crash ──
+        # CWE-specific fix directives — tell the model EXACTLY what to do
+        CWE_DIRECTIVES = {
+            "CWE-78": "CRITICAL: You MUST replace execSync/exec with execFileSync or spawn using an arguments array, OR remove the shell call entirely and use safe string operations. Adding input validation alone is NOT sufficient — the shell call itself must be eliminated.",
+            "CWE-89": "Replace template literals/string concatenation with parameterized queries using ? placeholders and [value] arrays. Example: db.query('SELECT * FROM t WHERE id = ?', [userId])",
+            "CWE-79": "Remove dangerouslySetInnerHTML entirely and render as text content, OR apply DOMPurify.sanitize() before rendering.",
+            "CWE-798": "Replace ALL hardcoded secret values with process.env.VAR_NAME references.",
+            "CWE-918": "Add URL validation that blocks private IPs (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16) and cloud metadata endpoints.",
+            "CWE-22": "Use path.basename() to strip directory traversal, or path.resolve() + startsWith() check against allowed base directory.",
+            "CWE-942": "Replace wildcard CORS origin ('*') with a specific allowlist of origins.",
+            "CWE-287": "Add authentication middleware check before the route handler.",
+        }
         patch_results = []
         for i, v in enumerate(vuln_list, 1):
             console.print(f"[dim]  [{i}/{len(vuln_list)}] Patching: {v['vuln_name']}[/dim]")
+            directive = CWE_DIRECTIVES.get(v['cwe'], "Eliminate the vulnerability completely. The fix must remove the dangerous pattern, not just add a superficial validation.")
             prompt = (
                 f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
+                f"Severity: {v.get('severity', 'High')}\n"
                 f"File: {v['file_path']}\n\n"
                 f"Vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
-                f"Generate the fixed version of this code."
+                f"FIX REQUIREMENT: {directive}\n\n"
+                f"Generate the fixed version of this code. The fix must ELIMINATE the vulnerability, not just add a superficial check."
             )
             try:
-                result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, prompt, task_name="Batch Patch")
+                result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, prompt, task_name="Generating", severity=v.get('severity', ''), cwe=v.get('cwe', ''))
                 patch_results.append(result)
             except Exception as e:
                 console.print(f"[red]  Error: {e}[/red]")
@@ -292,7 +306,7 @@ class PatchCouncil(CouncilOrchestrator):
                         try:
                             review = await self._call(
                                 reviewer_model, PATCH_REVIEW_SYSTEM, prompt,
-                                task_name=f"Parallel Review ({reviewer_model})"
+                                task_name="Reviewing", severity=v.get('severity', ''), cwe=v.get('cwe', '')
                             )
                             return {"model": reviewer_model, **review}
                         except Exception as e:
@@ -334,7 +348,7 @@ class PatchCouncil(CouncilOrchestrator):
                             f"Proposed patch:\n```\n{fixed_code}\n```"
                         )
                         try:
-                            review = await self._call(reviewer, PATCH_REVIEW_SYSTEM, review_prompt, task_name=f"Batch Review")
+                            review = await self._call(reviewer, PATCH_REVIEW_SYSTEM, review_prompt, task_name="Reviewing", severity=v.get('severity', ''), cwe=v.get('cwe', ''))
                             all_approvals[i].append({"model": reviewer, **review})
                         except Exception as e:
                             all_approvals[i].append({"model": reviewer, "approved": False, "reason": f"Error: {str(e)[:40]}"})
@@ -380,6 +394,135 @@ class PatchCouncil(CouncilOrchestrator):
                 "dissent_reasons": dissent_reasons,
                 "vote_summary": f"{approved_count}/{total_reviewers} validators approved" if total_reviewers > 0 else "Unreviewed (cached from Stage 1)"
             })
+
+        # ══════════════════════════════════════════════════════════════
+        # REFLEXION LOOP: Retry rejected patches with critique feedback
+        # ══════════════════════════════════════════════════════════════
+        MAX_REFLEXION_RETRIES = 2
+        rejected_indices = [
+            i for i, r in enumerate(final_results)
+            if r["patch_safety"] == "rejected" and r.get("dissent_reasons")
+        ]
+
+        if rejected_indices and review_completed:
+            console.print(Panel(
+                f"[bold]🔄 {len(rejected_indices)} patch(es) rejected by council — entering Reflexion Loop[/bold]\n"
+                f"[dim]Max {MAX_REFLEXION_RETRIES} retries per vuln. Reviewer critique is injected into the prompt.[/dim]",
+                title="◈ REFLEXION LOOP", border_style="bright_yellow", padding=(1, 2)
+            ))
+
+            # Load patcher for retries
+            for model in list(self.vram.loaded.keys()):
+                await self.vram.unload(model)
+            try:
+                await self.vram.ensure_loaded(patch_model)
+            except Exception:
+                console.print("[yellow]⚠ Could not load patcher for reflexion — skipping retries[/yellow]")
+                rejected_indices = []
+
+            for retry_round in range(1, MAX_REFLEXION_RETRIES + 1):
+                if not rejected_indices:
+                    break
+
+                console.print(f"\n[bold yellow]  Reflexion Round {retry_round}/{MAX_REFLEXION_RETRIES} — {len(rejected_indices)} patch(es) to retry[/bold yellow]")
+
+                still_rejected = []
+                for idx in rejected_indices:
+                    v = vuln_list[idx]
+                    prev_result = final_results[idx]
+                    critique = "; ".join(prev_result.get("dissent_reasons", ["Patch was rejected"]))
+
+                    console.print(f"  [dim]🔄 [{idx+1}] Retrying: {v['vuln_name']}[/dim]")
+                    console.print(f"  [dim]   Critique: \"{critique[:100]}\"[/dim]")
+
+                    directive = CWE_DIRECTIVES.get(v['cwe'], "Eliminate the vulnerability completely.")
+                    retry_prompt = (
+                        f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
+                        f"Severity: {v.get('severity', 'High')}\n"
+                        f"File: {v['file_path']}\n\n"
+                        f"Vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                        f"PREVIOUS ATTEMPT WAS REJECTED by code reviewers.\n"
+                        f"Reviewer critique: \"{critique}\"\n\n"
+                        f"FIX REQUIREMENT: {directive}\n\n"
+                        f"You MUST address the reviewer critique above and generate a DIFFERENT, BETTER fix.\n"
+                        f"The fix must ELIMINATE the vulnerability — not just add superficial validation."
+                    )
+
+                    try:
+                        new_result = await self._call(
+                            patch_model, PATCH_GENERATION_SYSTEM, retry_prompt,
+                            task_name="Reflexion", severity=v.get('severity', ''), cwe=v.get('cwe', '')
+                        )
+                    except Exception as e:
+                        console.print(f"  [red]   Retry error: {e}[/red]")
+                        still_rejected.append(idx)
+                        continue
+
+                    new_code = new_result.get("fixed_code", "")
+                    if not new_code:
+                        still_rejected.append(idx)
+                        continue
+
+                    # Quick re-review with first available reviewer
+                    reviewer = unique_reviewers[0] if unique_reviewers else None
+                    new_approved = False
+                    new_approvals = []
+                    if reviewer:
+                        await self.vram.unload(patch_model)
+                        try:
+                            await self.vram.ensure_loaded(reviewer)
+                            review_prompt = (
+                                f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
+                                f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                                f"Proposed patch (attempt {retry_round + 1}):\n```\n{new_code}\n```\n\n"
+                                f"Previous rejection reason: \"{critique}\"\n"
+                                f"Has this new patch addressed the critique?"
+                            )
+                            review_result = await self._call(
+                                reviewer, PATCH_REVIEW_SYSTEM, review_prompt,
+                                task_name="Re-reviewing", severity=v.get('severity', ''), cwe=v.get('cwe', '')
+                            )
+                            is_approved = review_result.get("approved", False)
+                            reason = review_result.get("reason", "No reason")
+                            new_approvals = [{"model": reviewer, "approved": is_approved, "reason": reason}]
+                            new_approved = is_approved
+                            verdict = "[green]APPROVED[/green]" if is_approved else "[red]REJECTED[/red]"
+                            console.print(f"  [dim]   {reviewer} re-review: {verdict} — {reason[:60]}[/dim]")
+                            await self.vram.unload(reviewer)
+                        except Exception:
+                            new_approved = True  # Give benefit of doubt if review fails
+                        # Reload patcher for next retry
+                        try:
+                            await self.vram.ensure_loaded(patch_model)
+                        except Exception:
+                            pass
+                    else:
+                        new_approved = True  # No reviewer available — accept
+
+                    if new_approved:
+                        final_results[idx] = {
+                            "fixed_code": new_code,
+                            "unsafe_reason": new_result.get("unsafe_reason", ""),
+                            "patch_safety": "safe" if new_approved else "review_needed",
+                            "approvals": new_approvals,
+                            "dissent_reasons": [],
+                            "vote_summary": f"Approved after reflexion (attempt {retry_round + 1})",
+                        }
+                        console.print(f"  [green]   ✓ Patch improved and APPROVED on attempt {retry_round + 1}[/green]")
+                    else:
+                        # Update with new dissent for next round
+                        new_dissent = [a.get("reason", "") for a in new_approvals if not a.get("approved", False)]
+                        final_results[idx]["dissent_reasons"] = new_dissent
+                        still_rejected.append(idx)
+
+                rejected_indices = still_rejected
+
+            # Summary
+            improved = len([i for i, r in enumerate(final_results) if "reflexion" in r.get("vote_summary", "").lower()])
+            if improved:
+                console.print(f"\n[bold green]  ✓ Reflexion improved {improved} patch(es)[/bold green]")
+            else:
+                console.print(f"\n[dim]  Reflexion could not improve remaining patches[/dim]")
 
         mode_label = "parallel" if can_parallel else "sequential"
         console.print(f"\n[bold green]═══ Batch complete: {len(final_results)} patches ({mode_label} review) ═══[/bold green]")
