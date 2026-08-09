@@ -37,9 +37,9 @@ class AuthAgent(BaseAgent):
     ]
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ AUTHENTICATION TESTING ═══", "info")
+        await self.log("=== AUTHENTICATION TESTING ===", "info")
 
-        # ─── 1. Find login endpoints ───
+        # --- 1. Find login endpoints ---
         login_forms = self._find_login_forms(context)
 
         if not login_forms:
@@ -60,27 +60,27 @@ class AuthAgent(BaseAgent):
                     ))
                     break
 
-        # ─── 2. Default credential testing ───
+        # --- 2. Default credential testing ---
         for form in login_forms:
             await self._test_default_creds(form, context)
 
-        # ─── 3. Hydra brute force (if available) ───
+        # --- 3. Hydra brute force (if available) ---
         has_hydra = await self.terminal.check_tool("hydra")
         if has_hydra and login_forms:
             await self._run_hydra(login_forms[0], context)
 
-        # ─── 4. JWT analysis ───
+        # --- 4. JWT analysis ---
         await self._analyze_jwt(context)
 
-        # ─── 5. Username enumeration timing ───
+        # --- 5. Username enumeration timing ---
         if login_forms:
             await self._test_username_enumeration(login_forms[0], context)
 
-        # ─── 6. Missing rate limiting ───
+        # --- 6. Missing rate limiting ---
         if login_forms:
             await self._test_rate_limiting(login_forms[0], context)
 
-        # ─── 7. IDOR on user endpoints ───
+        # --- 7. IDOR on user endpoints ---
         await self._test_user_idor(context)
 
         await self.log(

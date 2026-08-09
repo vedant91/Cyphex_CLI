@@ -22,7 +22,10 @@ from typing import Optional
 from dataclasses import dataclass, field, asdict
 
 
-TREE_DIR = os.path.join(".cyphex", "reasoning_trees")
+# Save reasoning trees to a STABLE global directory — NOT inside temporary sandboxes.
+# This ensures reasoning trees persist across scans for auditability.
+_CYPHEX_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TREE_DIR = os.path.join(_CYPHEX_ROOT, ".cyphex", "reasoning_trees")
 
 
 @dataclass
@@ -243,18 +246,18 @@ def create_tree(
 
 
 def save_tree(tree: ReasoningTree, base_dir: str = "."):
-    """Save reasoning tree to .cyphex/reasoning_trees/{tree_id}.json"""
-    trees_dir = os.path.join(base_dir, TREE_DIR)
-    os.makedirs(trees_dir, exist_ok=True)
-    filepath = os.path.join(trees_dir, f"{tree.tree_id}.json")
+    """Save reasoning tree to the stable global .cyphex/reasoning_trees/ dir."""
+    # Always save to global stable dir, ignoring base_dir for storage
+    os.makedirs(TREE_DIR, exist_ok=True)
+    filepath = os.path.join(TREE_DIR, f"{tree.tree_id}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(tree.to_dict(), f, indent=2, ensure_ascii=False)
     return filepath
 
 
 def load_tree(tree_id: str, base_dir: str = ".") -> Optional[ReasoningTree]:
-    """Load a reasoning tree by ID."""
-    filepath = os.path.join(base_dir, TREE_DIR, f"{tree_id}.json")
+    """Load a reasoning tree by ID from the stable global dir."""
+    filepath = os.path.join(TREE_DIR, f"{tree_id}.json")
     if not os.path.exists(filepath):
         return None
     try:
@@ -271,15 +274,14 @@ def load_tree(tree_id: str, base_dir: str = ".") -> Optional[ReasoningTree]:
 
 def list_trees(thread_id: str = "", base_dir: str = ".") -> list:
     """List all reasoning trees, optionally filtered by thread_id."""
-    trees_dir = os.path.join(base_dir, TREE_DIR)
-    if not os.path.isdir(trees_dir):
+    if not os.path.isdir(TREE_DIR):
         return []
     trees = []
-    for fname in os.listdir(trees_dir):
+    for fname in os.listdir(TREE_DIR):
         if not fname.endswith(".json"):
             continue
         try:
-            with open(os.path.join(trees_dir, fname), "r") as f:
+            with open(os.path.join(TREE_DIR, fname), "r") as f:
                 data = json.load(f)
             if thread_id and data.get("thread_id") != thread_id:
                 continue

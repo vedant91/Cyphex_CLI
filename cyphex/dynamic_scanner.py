@@ -15,8 +15,10 @@ Usage:
 import asyncio
 import json
 import os
+import platform
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -55,21 +57,21 @@ async def run_nuclei(
 ) -> list[DynamicFinding]:
     """
     Run Nuclei scan against a target URL.
-
-    Args:
-        target_url: The target to scan (e.g., http://localhost:3000)
-        severity: Comma-separated severity filter
-        templates: Specific template paths/tags (None = auto with web tags)
-        rate_limit: Max requests per second
-        timeout: Scan timeout in seconds
+    Handles Windows by writing to a temp file instead of /dev/stdout.
     """
+    is_windows = platform.system() == "Windows"
+    out_path = None
+
+    print(f"  → [DAST] Nuclei scanning {target_url}")
+    print(f"  → [DAST] Severity: {severity} | Rate: {rate_limit} req/s")
+    print(f"  → [DAST] Templates: cve,sqli,xss,rce,lfi,ssrf,redirect,exposure")
+
     cmd = [
         "nuclei",
         "-u", target_url,
         "-severity", severity,
-        "-json-export", "/dev/stdout",  # JSON to stdout
-        "-silent",                       # No banner
-        "-duc",                          # Disable update check (prevents hanging prompt)
+        "-silent",
+        "-duc",                          # Disable update check
         "-rate-limit", str(rate_limit),
         "-timeout", "10",               # Per-request timeout
         "-retries", "1",
@@ -81,48 +83,72 @@ async def run_nuclei(
         for t in templates:
             cmd.extend(["-t", t])
     else:
-        # Default: use built-in web vulnerability templates
         cmd.extend(["-tags", "cve,sqli,xss,rce,lfi,ssrf,redirect,exposure"])
+
+    # Windows: /dev/stdout doesn't exist — write to temp file
+    if is_windows:
+        out_path = tempfile.mktemp(suffix=".jsonl")
+        cmd.extend(["-o", out_path, "-json"])
+    else:
+        cmd.extend(["-json-export", "/dev/stdout"])
 
     try:
         proc = await asyncio.to_thread(
             subprocess.run, cmd,
             capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL  # Prevent interactive prompts
+            stdin=subprocess.DEVNULL
         )
 
+        # Read output from temp file (Windows) or stdout (Linux/Mac)
+        raw = ""
+        if is_windows and out_path and os.path.exists(out_path):
+            try:
+                with open(out_path, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read().strip()
+            finally:
+                os.remove(out_path)
+        else:
+            raw = proc.stdout.strip()
+
+        if not raw:
+            print(f"  → [DAST] Nuclei: No findings (target may be missing templates)")
+            return []
+
         findings = []
-        stdout = proc.stdout.strip()
-        if not stdout:
-            return findings
+        # Parse JSONL (one JSON object per line)
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+                if isinstance(r, dict):
+                    findings.append(_nuclei_to_finding(r))
+            except json.JSONDecodeError:
+                continue
 
-        # Nuclei can output either a JSON array or JSONL (one object per line)
-        try:
-            data = json.loads(stdout)
-            if isinstance(data, list):
-                # JSON array format (from -json-export)
-                for r in data:
-                    if isinstance(r, dict):
-                        findings.append(_nuclei_to_finding(r))
-            elif isinstance(data, dict):
-                findings.append(_nuclei_to_finding(data))
-        except json.JSONDecodeError:
-            # JSONL format: one JSON object per line
-            for line in stdout.split("\n"):
-                if not line.strip():
-                    continue
-                try:
-                    r = json.loads(line)
-                    if isinstance(r, dict):
-                        findings.append(_nuclei_to_finding(r))
-                except json.JSONDecodeError:
-                    continue
+        # Also try to parse as a single JSON array (fallback)
+        if not findings:
+            try:
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    for r in data:
+                        if isinstance(r, dict):
+                            findings.append(_nuclei_to_finding(r))
+                elif isinstance(data, dict):
+                    findings.append(_nuclei_to_finding(data))
+            except json.JSONDecodeError:
+                pass
 
+        print(f"  → [DAST] Nuclei: {len(findings)} finding(s) confirmed")
         return findings
 
     except subprocess.TimeoutExpired:
+        print(f"  → [DAST] Nuclei: Timed out after {timeout}s")
+        if out_path and os.path.exists(out_path):
+            os.remove(out_path)
         return []
     except FileNotFoundError:
+        print(f"  → [DAST] Nuclei: Binary not found (run: cyphex setup)")
         return []
 
 

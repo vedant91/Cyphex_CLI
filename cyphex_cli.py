@@ -88,6 +88,7 @@ def main():
     scan_p = sub.add_parser("scan", help="Scan a codebase")
     scan_p.add_argument("--repo", help="GitHub repo URL to clone and scan")
     scan_p.add_argument("--path", help="Local folder path to scan")
+    scan_p.add_argument("--url", help="Live URL target to scan dynamically (DAST only)")
     scan_p.add_argument("--branch", default="main", help="Git branch")
     scan_p.add_argument("--generations", type=int, default=10)
     scan_p.add_argument("--output", help="Save report to file")
@@ -182,12 +183,12 @@ def main():
                 )
                 response = r.json().get("response", "")
                 if "ready" in response.lower():
-                    console.print(f"  [green]✓[/green] {role:12} {tag:30} {vram} GB  ({schedule})")
+                    console.print(f"  [green][OK][/green] {role:12} {tag:30} {vram} GB  ({schedule})")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {role:12} {tag:30} {vram} GB  ({schedule}) — unexpected response")
             except Exception:
-                console.print(f"  [red]✗[/red] {role:12} {tag:30} NOT FOUND")
-                console.print(f"       → Run: [bold]ollama pull {tag}[/bold]")
+                console.print(f"  [red][ERR][/red] {role:12} {tag:30} NOT FOUND")
+                console.print(f"       -> Run: [bold]ollama pull {tag}[/bold]")
                 all_ok = False
 
         print()
@@ -217,8 +218,8 @@ def main():
         return
 
     if args.command == "scan":
-        if not args.repo and not args.path:
-            print(f"{C.R}Error: Provide --repo or --path{C.RST}")
+        if not args.repo and not args.path and not args.url:
+            print(f"{C.R}Error: Provide --repo, --path, or --url{C.RST}")
             return
         os.system("cls" if os.name == "nt" else "clear")
         print(BANNER)
@@ -227,6 +228,7 @@ def main():
         asyncio.run(engine.run(
             repo_url=args.repo,
             local_path=args.path,
+            target_url=args.url,
             branch=args.branch,
             generations=args.generations,
             output_file=args.output,

@@ -20,6 +20,8 @@ SKIP_DIRS = {
     "node_modules", ".git", "dist", "build", "__pycache__",
     ".venv", "venv", ".next", ".nuxt", "coverage", ".cache",
     "vendor", "bower_components", ".svn",
+    # Cyphex internal directories — NEVER parse these as source code
+    ".cyphex", "sandboxes", "workdir", "sessions",
 }
 
 SKIP_EXTENSIONS = {

@@ -29,9 +29,9 @@ from immune.behavioral_genome import BehavioralGenome
 from immune.mutation_engine import MutationEngine
 from immune.evolution_controller import EvolutionController
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # COLORS FOR TERMINAL OUTPUT
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 class C:
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -53,7 +53,7 @@ def header(title: str, emoji: str = ""):
 
 def section(title: str, emoji: str = ""):
     print(f"\n  {emoji}  {C.BOLD}{C.YELLOW}{title}{C.RESET}")
-    print(f"  {C.DIM}{'─'*50}{C.RESET}")
+    print(f"  {C.DIM}{'-'*50}{C.RESET}")
 
 
 def info(msg: str):
@@ -77,13 +77,13 @@ def bypassed(msg: str):
 
 
 def pause(msg: str = ""):
-    print(f"\n  {C.DIM}───────────────────────────────────────{C.RESET}")
+    print(f"\n  {C.DIM}---------------------------------------{C.RESET}")
     time.sleep(0.3)
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # PHASE 1: SIMULATED SCAN (What agents would discover)
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 def create_scan_context() -> ScanContext:
     """Simulate what Agent 01 (Recon) and Agent 02 (Crawler) would discover."""
 
@@ -165,9 +165,9 @@ def create_scan_context() -> ScanContext:
     return context
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # PHASE 2: BUILD THE BEHAVIORAL GENOME
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 def build_genome(context: ScanContext) -> BehavioralGenome:
     """Build the behavioral genome from scan results."""
 
@@ -231,16 +231,16 @@ def build_genome(context: ScanContext) -> BehavioralGenome:
         bar = f"{C.RED}{'█' * bar_len}{C.DIM}{'░' * (20 - bar_len)}{C.RESET}"
 
         correct = (score >= 0.7 and is_attack) or (score < 0.7 and not is_attack)
-        check = f"{C.GREEN}✓{C.RESET}" if correct else f"{C.RED}✗{C.RESET}"
+        check = f"{C.GREEN}[OK]{C.RESET}" if correct else f"{C.RED}[ERR]{C.RESET}"
 
         print(f"    {check} [{bar}] {score:.2f}  {status}  {C.DIM}{label}:{C.RESET} {payload[:40]}")
 
     return genome
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # PHASE 3: RED TEAM PAYLOAD GENERATION
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 def demo_red_team(genome: BehavioralGenome) -> MutationEngine:
     """Show how the red team generates and mutates payloads."""
 
@@ -283,9 +283,9 @@ def demo_red_team(genome: BehavioralGenome) -> MutationEngine:
     return mutation
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # PHASE 4: FULL EVOLUTION LOOP
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 async def run_evolution(context: ScanContext):
     """Run the full adversarial co-evolution and show every generation."""
 
@@ -346,9 +346,9 @@ async def run_evolution(context: ScanContext):
     return controller
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # PHASE 5: FINAL GENOME STATUS
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 def show_final_genome(controller: EvolutionController):
     """Show the final hardened genome state."""
 
@@ -409,20 +409,20 @@ def show_final_genome(controller: EvolutionController):
     print(f"    Attacks blocked: {blocked_count}/{len(attacks) - 2}")
 
 
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 # MAIN
-# ═══════════════════════════════════════════════════════════════
+# ===============================================================
 async def main():
     os.system("cls" if os.name == "nt" else "clear")
 
     print(f"""
 {C.CYAN}
     ██████╗██╗   ██╗██████╗ ██╗  ██╗███████╗██╗  ██╗
-   ██╔════╝╚██╗ ██╔╝██╔══██╗██║  ██║██╔════╝╚██╗██╔╝
+   ██╔====╝╚██╗ ██╔╝██╔==██╗██║  ██║██╔====╝╚██╗██╔╝
    ██║      ╚████╔╝ ██████╔╝███████║█████╗   ╚███╔╝
-   ██║       ╚██╔╝  ██╔═══╝ ██╔══██║██╔══╝   ██╔██╗
+   ██║       ╚██╔╝  ██╔===╝ ██╔==██║██╔==╝   ██╔██╗
    ╚██████╗   ██║   ██║     ██║  ██║███████╗██╔╝ ██╗
-    ╚═════╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+    ╚=====╝   ╚=╝   ╚=╝     ╚=╝  ╚=╝╚======╝╚=╝  ╚=╝
 {C.RESET}
    {C.BOLD}{C.WHITE}ADVERSARIAL CO-EVOLUTION ENGINE{C.RESET}
    {C.DIM}Self-Evolving Cyber Immune System{C.RESET}

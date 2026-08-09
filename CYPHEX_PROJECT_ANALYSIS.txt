@@ -1,0 +1,484 @@
+
+================================================================================
+                    CYPHEX — PROJECT ANALYSIS & DOCUMENTATION
+                    Autonomous AI Cyber Defence Engine | v4.3
+================================================================================
+
+Written: 2026-07-18
+Project Root: d:\cyphex_v3
+GitHub: https://github.com/vedant91/Cyphex_CLI
+
+
+================================================================================
+1. WHAT IS CYPHEX?
+================================================================================
+
+Cyphex is an offline-first, autonomous AI-powered cybersecurity platform that
+operates entirely from the command line. Given a GitHub repo URL or a local
+folder path, Cyphex autonomously:
+
+  1. Scans the source code for vulnerabilities (SAST)
+  2. Deploys the app inside a Docker sandbox
+  3. Launches 14+ specialized AI attack agents against the live app (DAST)
+  4. Has multiple LLM models debate each finding to eliminate false positives
+  5. Trains a self-evolving behavioral immune system (Isolation Forest ML)
+  6. Auto-generates, reviews, and applies verified code patches
+
+The core design principle: 100% offline. No API keys. No cloud. Your source
+code never leaves your machine. Everything runs via local Ollama models.
+
+Target audience: Developers and security engineers who want autonomous security
+testing without depending on cloud tools like Snyk, SonarCloud, or Burp Suite.
+
+
+================================================================================
+2. THE PROBLEM IT SOLVES
+================================================================================
+
+Modern developers ship fast with AI assistance ("vibe coding") but security
+is an afterthought. Existing tools have critical gaps:
+
+  - SAST tools find code patterns but miss runtime vulnerabilities
+  - DAST tools test running apps but don't understand source code
+  - Neither tool can FIX what they find — only produce noisy reports
+  - Cloud-based tools upload your code to third-party servers (a security risk)
+  - No existing tool adapts or learns — same rules every run
+
+Cyphex addresses all five gaps in a single CLI command.
+
+
+================================================================================
+3. HOW IT WORKS — THE 8-STEP SCAN PIPELINE
+================================================================================
+
+Every `cyphex scan` command executes this fully autonomous pipeline:
+
+  STEP 1 — SOURCE ACQUISITION
+    Clone a GitHub repo OR copy a local directory into a working sandbox.
+
+  STEP 2 — STATIC ANALYSIS (SAST)
+    Two-layer scan:
+    a) Semgrep with 5,000+ community rules (run via WSL on Windows)
+    b) Built-in custom regex scanner covering 20+ languages
+    Detects: SQLi, XSS, hardcoded secrets, insecure configs, path traversal,
+    command injection, SSRF, IDOR, JWT issues, and more.
+
+  STEP 3 — SANDBOX DEPLOYMENT
+    Auto-detects the app framework (Express.js, Flask, Django, Docker Compose,
+    static HTML) and deploys it in an isolated Docker container or native
+    Node.js process. The app runs live so DAST agents can attack it safely.
+
+  STEP 4 — DYNAMIC VULNERABILITY SCAN (DAST)
+    14 specialized AI attack agents hit the running application:
+      Agent 01 — Recon (fingerprint headers, tech stack)
+      Agent 02 — Crawler (discover pages, forms, API routes)
+      Agent 02b — API Discovery (SPA route enumeration)
+      Agent 03 — SQLi (Union, Boolean, Time-based, Error-based, Stacked)
+      Agent 04 — XSS (Reflected, DOM, Event handlers, WAF bypass)
+      Agent 05 — Auth (weak credentials, session fixation, token analysis)
+      Agent 06 — CMDi (OS command injection, encoding bypass)
+      Agent 07 — LFI (path traversal, null byte, directory traversal)
+      Agent 08 — Logic (insecure CORS, parameter tampering, authz gaps)
+      Agent 09 — IDOR (sequential ID enumeration, UUID prediction)
+      Agent 10 — SSRF (internal service probing, cloud metadata access)
+      Agent 11 — Supply Chain (NPM/Pip CVE audit, manifest analysis)
+      Agent 12 — Prompt Injection (AI endpoint testing)
+      Agent 15 — Network (port scanning, service fingerprinting)
+    + AI Fuzzer agent for adaptive payload generation
+    + Nuclei scanner (8,000+ templates) for template-based DAST
+
+  STEP 5 — AI VERDICT COUNCIL (False Positive Elimination)
+    Multiple local LLMs (Qwen, Llama, DeepSeek, Phi) independently review
+    each finding. Each model votes CONFIRM or REJECT with a confidence score
+    and reasoning chain. Consensus is required — no single model hallucination
+    can pass a vulnerability. Built-in anti-hallucination rules enforced.
+
+  STEP 6 — BEHAVIORAL GENOME EVOLUTION (Immune System)
+    Red Team vs Blue Team adversarial co-evolution runs over N generations:
+      Red Team  → generates & mutates attack payloads
+      Blue Team → trains Isolation Forest ML on request feature vectors
+      Each generation: blocked payloads trigger mutation; bypassed payloads
+      trigger retraining. Block rate climbs from ~60% → 95%+ → 99%+.
+    The genome uses a 15-dimensional feature vector per HTTP request:
+      [input_length, entropy, special_char_ratio, url_encoding_ratio,
+       uppercase_ratio, digit_ratio, max_token_length, keyword_score,
+       sqli_pattern_score, null_byte, traversal_depth, bracket_imbalance,
+       unicode_ratio, repetition_ratio, token_count]
+
+  STEP 7 — SECURITY REPORT
+    Generates a score (0–100), confirmed vulnerability list with CWE mapping,
+    severity levels (Critical/High/Medium/Low), and remediation guidance.
+
+  STEP 8 — AUTO-PATCHING + VERIFICATION
+    Oracle Reasoning selects the right cognitive strategy → Vectorless RAG
+    provides full code context → LLM generates a fix → Council reviews the
+    patch → Verification gate checks syntax + blast radius + re-scans the
+    vuln → Patch is applied and confirmed. Anti-suppression rules reject
+    patches that just add `nosemgrep`, `# noqa`, or `eslint-disable`.
+
+
+================================================================================
+4. KEY INNOVATIONS
+================================================================================
+
+4a. ORACLE REASONING ENGINE — Making Small Models Think Like GPT-4
+--------------------------------------------------------------------
+Small local LLMs (3B–8B params) hallucinate and produce vague patches.
+Oracle wraps every LLM call in a cognitive architecture that forces structured,
+multi-step reasoning. 16 cognitive strategies, auto-selected by task type:
+
+  Strategy              | When Used
+  ----------------------|------------------------------------------
+  Chain-of-Thought      | SQLi, XSS patches (CWE-89, CWE-79)
+  Self-Reflection       | High severity vulns (draft→critique→improve)
+  Tree of Thoughts      | CMDi, SSRF (explores multiple fix branches)
+  Self-Consistency      | Critical severity (majority vote from K runs)
+  Adversarial Debate    | Council patch review ("why would this fail?")
+  Decomposition         | Auth bypass, IDOR (breaks fix into sub-tasks)
+  Least-to-Most         | Path traversal (simple cases first, then complex)
+  Refinement Loop       | Iterative code improvement (4 rounds)
+  Complex Pipeline      | 5-stage: accuracy→structure→depth→examples→polish
+  Monte Carlo Search    | MCTS with UCB1 scoring across candidate fixes
+  Analogical            | Reasons from known CWE fix patterns by analogy
+  Socratic              | Guided questioning to find the root cause
+  ReAct                 | Reason + Act loop with code context tools
+  Recursive             | Self-executing code verification (REPL agent)
+  Meta-Reasoning        | Auto-picks the best strategy for each task
+  Standard              | Hardcoded secrets, CORS (direct generation)
+
+Auto-selection logic:
+  CWE Override     → CWE-78 (CMDi) always gets Tree-of-Thoughts
+  Severity Trigger → Critical vulns get Self-Consistency (3× majority vote)
+  Task Mapping     → Patch generation → CoT; Patch review → Self-Reflection
+  VRAM Guard       → Low VRAM? Only lightweight strategies used
+
+4b. VECTORLESS RAG — Full Code Context Without a GPU or Vector DB
+-----------------------------------------------------------------
+Traditional RAG needs an embedding model (2–4 GB VRAM) + a vector database.
+Cyphex's Vectorless RAG uses CPU-only keyword indexing and regex scoring:
+
+  Traditional RAG:  Code → GPU Embedding → Vector DB → Similarity Search → Context
+  Cyphex:           Code → Keyword Index (CPU) → Regex + Scoring → Context
+                    Zero VRAM. Zero external DB. < 50ms per query.
+
+How it works:
+  1. Code Indexer walks the source tree, building a keyword index of every file:
+     - Route patterns (/api/users, /orders/:id)
+     - DB usage (db.query, SELECT, mongoose, prisma)
+     - Auth patterns (session, jwt, bcrypt, passport)
+     - Input handling (req.body, req.query, request.form)
+  2. Smart Retrieval uses multi-signal scoring:
+     - Route match (strongest) → finds the file serving the vulnerable endpoint
+     - CWE-type relevance → SQLi vuln? Prioritize files with DB queries
+     - Payload term match → searches for attack-relevant code patterns
+     - Direct location match → exact file:line from the scanner
+  3. Secure Pattern Discovery finds how the repo already writes safe code:
+     CWE-89 → finds existing parameterized queries in the codebase
+     CWE-79 → finds existing HTML sanitization calls
+     The LLM is told: "Fix it the way this project already does it."
+  4. Two-pass API Route Extraction:
+     Pass 1: entry files → finds `app.use('/prefix', require('./routes/x'))`
+     Pass 2: route files → finds `router.get/post(...)` with correct prefixes
+
+4c. BEHAVIORAL GENOME — The Cyber Immune System
+------------------------------------------------
+Flagship innovation. Inspired by biological immune systems. Uses adversarial
+co-evolution (Red vs Blue) to build a defense model tuned specifically to your
+application. Unlike static WAF rules, the genome evolves and adapts.
+Based on scikit-learn's Isolation Forest anomaly detection algorithm.
+
+4d. MULTI-MODEL AI VERDICT COUNCIL
+------------------------------------
+Multiple independent LLMs debate each finding. No single model can confirm a
+vulnerability — consensus is required. Models used:
+  - deepseek-coder:1.3b (Detector, always-on, ~1.0 GB VRAM)
+  - phi3:mini           (Validator, always-on, ~2.2 GB VRAM)
+  - llama3.2:1b         (Narrator, phase-swap, ~1.0 GB VRAM)
+  - cyphex-patch        (Patch Agent, patch-only, ~4.5 GB VRAM)
+
+
+================================================================================
+5. TECH STACK
+================================================================================
+
+Layer                | Technology               | Purpose
+---------------------|--------------------------|------------------------------
+Language             | Python 3.11+             | Core language
+CLI Framework        | argparse + Rich          | Argument parsing, terminal UI
+AI Inference         | Ollama (100% local)      | LLM serving (no API key)
+LLM Models           | Qwen 2.5 Coder, Llama   | Multi-model council + patches
+                     | 3.1, DeepSeek Coder,    |
+                     | Phi-3 Mini              |
+Reasoning Engine     | agent-reasoning lib      | 16 cognitive architectures
+Static Analysis      | Semgrep + Custom Regex   | 5,000+ rules, 20+ languages
+Dynamic Analysis     | 14 Custom Agents         | Specialized attack agents
+Template DAST        | Nuclei                   | 8,000+ vulnerability templates
+Machine Learning     | scikit-learn, NumPy      | Isolation Forest (Immune System)
+HTTP Client          | httpx (async)            | Agent HTTP requests
+Sandboxing           | Docker / Docker Compose  | Isolated app deployment
+Async Runtime        | asyncio                  | Concurrent agent execution
+Terminal UI          | Rich (panels, tables)    | SOC-style terminal output
+Package Manager      | pip / pyproject.toml     | Dependency management
+Test Framework       | pytest + pytest-asyncio  | Test suite
+Build System         | setuptools + wheel       | Package build
+Patch Memory         | JSON-based flat store    | Learns from past verified fixes
+Code Intelligence    | Vectorless RAG (custom)  | Code context for LLM patching
+Memory (optional)    | cognee                   | Cross-scan learning (opt-in)
+
+External Tools (optional, auto-detected):
+  - Semgrep      — SAST rules engine (or via WSL on Windows)
+  - Nuclei       — Template-based DAST
+  - Docker       — App sandboxing
+  - Node.js 18+  — For JS/TS app deployment
+  - Git          — For cloning GitHub repos
+
+
+================================================================================
+6. SUPPORTED LANGUAGES (SAST)
+================================================================================
+
+JavaScript, TypeScript, Python, Java, Go, PHP, Ruby, C, C++, Rust, C#,
+Swift, Kotlin, Scala, SQL, HTML, CSS, YAML, Dockerfile, Shell/Bash
+
+(20+ languages via Semgrep + 20-language custom regex engine)
+
+
+================================================================================
+7. CLI COMMANDS
+================================================================================
+
+  cyphex scan --path ./my-project           # Scan a local project
+  cyphex scan --repo <github-url>           # Clone and scan a GitHub repo
+  cyphex scan --path ./app --patch          # Scan + auto-patch
+  cyphex scan --path ./app --judge          # Deterministic judge mode (CI/CD)
+  cyphex scan --path ./app --non-interactive  # No prompts (CI/CD pipelines)
+  cyphex scan --path ./app --generations 15  # Control immune system generations
+  cyphex scan --path ./app --output report.json  # Save JSON report
+
+  cyphex doctor          # Check all tools: Git, Docker, Ollama, Semgrep, Nuclei
+  cyphex council-doctor  # Verify all 4 council LLMs are loaded and responding
+
+  cyphex watch --port 3004          # Start RASP auto-healing daemon
+  cyphex github-hook --port 3005    # Start GitHub webhook receiver
+
+  cyphex onboard --repo <url> --scan  # Zero-click RASP integration + scan
+
+
+================================================================================
+8. PROJECT FILE STRUCTURE
+================================================================================
+
+cyphex_v3/
+├── cyphex_cli.py              — CLI entry point (all commands, argparse, banner)
+├── cli_engine.py              — Core scan engine (3,000+ lines, main pipeline)
+├── terminal_ui.py             — SOC-style Rich terminal panels
+├── pyproject.toml             — Package config & dependencies
+│
+├── cyphex/                    — Core CLI modules (installed as package)
+│   ├── cli.py                 — CLI argument parser
+│   ├── scanner.py             — SAST (Semgrep + 20-language regex engine)
+│   ├── dynamic_scanner.py     — DAST coordination (Nuclei integration)
+│   ├── daemon.py              — RASP auto-healing daemon
+│   ├── github_hook.py         — GitHub webhook receiver
+│   ├── onboarder.py           — Zero-click RASP integration
+│   ├── hardware.py            — VRAM/GPU detection & model assignment
+│   ├── doctor.py              — System readiness checker
+│   ├── docker_sandbox.py      — Docker sandbox lifecycle management
+│   └── formatters.py          — Output formatting utilities
+│
+├── backend/
+│   ├── council/               — AI Verdict Council
+│   │   ├── council_orchestrator.py  — Multi-model debate orchestration
+│   │   ├── patch_council.py         — Patch generation + peer review
+│   │   ├── debate_protocol.py       — False-positive filtering logic
+│   │   ├── model_selector.py        — Hardware-aware model assignment
+│   │   ├── analysis_council.py      — Analysis-phase council
+│   │   └── route_tracer.py          — Route → handler mapping
+│   │
+│   └── backend/
+│       ├── agents/            — 14 DAST Attack Agents
+│       │   ├── base_agent.py              — Shared agent base class
+│       │   ├── agent_01_recon.py          — Recon & fingerprinting
+│       │   ├── agent_02_crawler.py        — Crawler & route discovery
+│       │   ├── agent_03_sqli.py           — SQL Injection
+│       │   ├── agent_04_xss.py            — Cross-Site Scripting
+│       │   ├── agent_05_auth.py           — Authentication testing
+│       │   ├── agent_06_cmdi.py           — Command Injection
+│       │   ├── agent_07_lfi.py            — Local File Inclusion
+│       │   ├── agent_08_logic.py          — Business Logic / CORS
+│       │   ├── agent_09_analysis.py       — IDOR analysis
+│       │   ├── agent_10_patch.py          — Patch agent
+│       │   ├── agent_11_supply_chain.py   — Dependency CVE audit
+│       │   ├── agent_12_prompt_injection.py — AI prompt injection
+│       │   ├── agent_15_network.py        — Network scanning
+│       │   └── agent_ai_fuzzer.py         — Adaptive AI fuzzer
+│       │
+│       ├── immune/            — Behavioral Genome (Immune System)
+│       │   ├── behavioral_genome.py     — Isolation Forest detector
+│       │   ├── evolution_controller.py  — Red/Blue co-evolution loop
+│       │   └── mutation_engine.py       — Payload mutation strategies
+│       │
+│       ├── models/            — Data models (Vulnerability, ScanContext)
+│       ├── orchestrator.py    — Agent orchestration
+│       ├── scan_orchestrator.py — Full scan pipeline orchestration
+│       ├── sandbox_manager.py — Docker sandbox lifecycle
+│       ├── deep_agent.py      — DeepAgent integration
+│       └── security_posture_score.py — Score calculation
+│
+│   ├── patch/                 — Patch pipeline
+│   │   ├── templates.py       — Deterministic CWE fix templates
+│   │   └── verifier.py        — Verification gate (syntax, blast radius)
+│   │
+│   ├── rag/                   — Code Intelligence (Vectorless RAG)
+│   │   ├── code_indexer.py    — Keyword-based code indexer
+│   │   ├── knowledge_tree.py  — JSON-tree document structure
+│   │   ├── tree_navigator.py  — Agentic tree traversal
+│   │   ├── patch_memory.py    — Stores & recalls past verified fixes
+│   │   └── security_kb.py/json — Security knowledge base
+│   │
+│   └── reasoning/             — Oracle Reasoning Engine
+│       ├── oracle_adapter.py  — 16 cognitive architecture implementations
+│       ├── reasoning_tree.py  — Chain-of-Thought trace trees
+│       ├── session_memory.py  — Cross-scan learning & memory
+│       ├── reflexion.py       — Self-reflection reasoning loop
+│       ├── self_consistency.py — Self-consistency voting
+│       └── cognee_memory.py   — Cognee-based long-term memory (optional)
+│
+├── demo/
+│   ├── vuln-webapp/           — Bundled vulnerable Express.js app (14 vulns)
+│   └── vibemart/              — Secondary demo target app
+│
+├── finetune/
+│   └── Modelfile              — Ollama Modelfile for cyphex-patch fine-tuned model
+│
+├── docs/                      — Documentation
+├── tests/                     — Test suite (pytest)
+├── sdks/                      — RASP SDK for client app integration
+├── iot/                       — IoT device scanning roadmap (Raspberry Pi, ESP32)
+├── frontend/                  — Frontend UI (in development)
+└── CTMS/                      — Cyphex Threat Modelling System
+
+
+================================================================================
+9. RUNTIME PROTECTION — RASP DAEMON
+================================================================================
+
+Beyond one-shot scanning, Cyphex includes a persistent runtime daemon:
+
+  cyphex watch --port 3004
+
+The RASP (Runtime Application Self-Protection) daemon:
+  - Receives real-time attack telemetry from the app's embedded RASP SDK
+  - Scores each incoming request against the trained behavioral genome
+  - Flags anomalous requests as potential attacks
+  - Auto-patches vulnerable source code when attacks are detected in production
+  - Integrates with GitHub webhooks for continuous protection on every push
+
+
+================================================================================
+10. GITHUB WEBHOOK INTEGRATION
+================================================================================
+
+  cyphex github-hook --port 3005 --secret <webhook_secret>
+
+  - Connect your GitHub repo's webhook to the Cyphex endpoint
+  - On every push/PR, Cyphex auto-clones and scans the new code
+  - Patches and reports are generated automatically
+  - Enables CI/CD-style continuous security testing
+
+
+================================================================================
+11. HARDWARE AWARENESS
+================================================================================
+
+Cyphex's hardware.py module detects available GPU VRAM and assigns models
+accordingly:
+
+  Low VRAM  (<4 GB)  → lightweight strategies only, smaller models
+  Mid VRAM  (4-8 GB) → standard council models
+  High VRAM (8+ GB)  → all 16 reasoning strategies, larger models
+
+This ensures Cyphex works on everything from a laptop to a workstation.
+
+
+================================================================================
+12. SECURITY PHILOSOPHY
+================================================================================
+
+  - No cloud APIs     — source code, reports, and patches never leave the machine
+  - No API keys       — runs entirely on local Ollama models
+  - No telemetry      — zero analytics, zero phone-home behavior
+  - Offline-first     — works in air-gapped environments and offline labs
+  - Open source       — fully auditable; every line that scans your code is readable
+  - Anti-suppression  — rejects patches that add nosemgrep / eslint-disable / noqa
+
+
+================================================================================
+13. DEPENDENCIES (pyproject.toml)
+================================================================================
+
+Core (always installed):
+  httpx >= 0.27.0       — Async HTTP client for agent requests
+  numpy >= 1.26.0       — Numerical computing (feature vectors)
+  scikit-learn >= 1.4.0 — Isolation Forest ML (Behavioral Genome)
+  joblib >= 1.3.0       — Model serialization and parallel computing
+  rich >= 13.0.0        — Terminal UI (panels, tables, progress bars)
+
+Optional extras:
+  [cloud]     openai >= 1.0.0          — Cloud LLM fallback (not needed normally)
+  [reasoning] agent-reasoning >= 1.0.8 — Oracle cognitive architecture lib
+  [memory]    cognee >= 0.1.0          — Long-term memory across scans
+  [dev]       pytest, pytest-asyncio   — Test suite
+
+
+================================================================================
+14. CURRENT STATUS & ROADMAP
+================================================================================
+
+Completed:
+  [x] 14 specialized DAST attack agents
+  [x] AI Verdict Council with multi-model consensus
+  [x] Behavioral Genome with adversarial co-evolution (Red vs Blue)
+  [x] Auto-patching with verification gate
+  [x] Oracle Reasoning Engine (16 cognitive architectures)
+  [x] Vectorless RAG-powered code indexing for grounded patches
+  [x] RASP daemon with GitHub webhook integration
+  [x] 20+ language SAST support (Semgrep + built-in)
+  [x] Patch memory — learns from verified fixes
+  [x] Deterministic template transforms for common CWEs
+  [x] DeepAgent integration (LangChain-based deep research agents)
+
+In Progress:
+  [ ] CI/CD GitHub Action for automated PR scanning
+  [ ] SOC-style terminal dashboard (Rich panels — terminal_ui.py)
+  [ ] Frontend UI (React/Next.js dashboard)
+
+Planned:
+  [ ] Proof-carrying regression tests generated per fix
+  [ ] IoT device security scanning (Raspberry Pi, ESP32) — iot/ directory exists
+  [ ] Fine-tuned cyphex-patch model (finetune/Modelfile exists)
+
+
+================================================================================
+15. QUICK START SUMMARY
+================================================================================
+
+  # Install
+  pip install -e .
+
+  # Pull at least one Ollama model
+  ollama pull llama3.1:8b
+
+  # Check your setup
+  cyphex doctor
+
+  # Scan the bundled demo vulnerable app
+  cyphex scan --path ./demo/vuln-webapp --patch
+
+  # Scan your own project with auto-patching
+  cyphex scan --path ./my-project --patch
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

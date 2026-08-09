@@ -19,7 +19,7 @@ from models.agent_result import AgentResult
 class CerebrasAnalysisAgent(BaseAgent):
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ AI ANALYSIS PHASE ═══", "info")
+        await self.log("=== AI ANALYSIS PHASE ===", "info")
         await self.log(
             f"Analyzing {len(context.confirmed_vulns)} confirmed vulnerabilities...",
             "info",
@@ -95,6 +95,8 @@ Generate the full pentest report as JSON.
         if isinstance(report, dict):
             risk = report.get("total_risk_score", "?")
             summary = report.get("executive_summary", "N/A")
+            if not isinstance(summary, str):
+                summary = str(summary)
             chains = report.get("attack_chains", [])
 
             await self.log(f"Total Risk Score: {risk}/100", "danger" if int(str(risk).replace("?","0")) > 70 else "warning")
@@ -104,9 +106,12 @@ Generate the full pentest report as JSON.
                 await self.log(f"Attack Chains Identified: {len(chains)}", "danger")
                 for chain in chains:
                     if isinstance(chain, dict):
+                        impact = chain.get("impact", "")
+                        if not isinstance(impact, str):
+                            impact = str(impact)
                         await self.log(
                             f"  ⛓ {chain.get('name', 'Unknown')}: "
-                            f"{chain.get('impact', '')[:100]}",
+                            f"{impact[:100]}",
                             "warning",
                         )
 
@@ -182,7 +187,7 @@ Generate the full pentest report as JSON.
         chains = []
         vuln_names_lower = [v.name.lower() for v in vulns]
 
-        # Chain: SQLi + Credential Exposure → Full Compromise
+        # Chain: SQLi + Credential Exposure -> Full Compromise
         has_sqli = any("sql" in n for n in vuln_names_lower)
         has_creds = any("credential" in n or "default" in n or "password" in n
                         for n in vuln_names_lower)
@@ -199,7 +204,7 @@ Generate the full pentest report as JSON.
                 "impact": "Complete data breach — all user data compromised",
             })
 
-        # Chain: XSS + CSRF → Account Takeover
+        # Chain: XSS + CSRF -> Account Takeover
         has_xss = any("xss" in n for n in vuln_names_lower)
         has_csrf = any("csrf" in n for n in vuln_names_lower)
 
@@ -215,7 +220,7 @@ Generate the full pentest report as JSON.
                 "impact": "Any user account can be silently compromised",
             })
 
-        # Chain: LFI + Exposed Credentials → RCE
+        # Chain: LFI + Exposed Credentials -> RCE
         has_lfi = any("lfi" in n or "file inclusion" in n or "traversal" in n
                       for n in vuln_names_lower)
         has_exposed = any("sensitive file" in n or "exposed" in n or ".env" in n

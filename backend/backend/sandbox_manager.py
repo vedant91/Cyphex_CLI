@@ -207,6 +207,7 @@ async def deploy_sandbox(zip_path: str, sandbox_id: Optional[str] = None) -> dic
     # ── Start the sandbox server ─────────────────────────────
     env = _NODE_ENV.copy()
     env["PORT"] = str(port)
+    env["CYPHEX_SCAN_MODE"] = "1"  # Disable RASP blocking during scan
 
     npm_cmd = shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
     npm_cmd_clean = npm_cmd.strip('"')
@@ -490,3 +491,137 @@ async def _check_server_up(url: str, retries: int = 5, delay: float = 1.0) -> bo
         return False
     finally:
         httpx_logger.setLevel(prev_level)
+
+
+async def health_check_sandbox(sandbox_id: str) -> bool:
+    """
+    Check if a sandbox is still alive and responding.
+    Returns True if healthy, False if dead/unresponsive.
+    """
+    if sandbox_id not in active_sandboxes:
+        return False
+
+    info = active_sandboxes[sandbox_id]
+    proc = info.get("process")
+
+    # Check if process is still running
+    if proc and proc.poll() is not None:
+        info["status"] = "crashed"
+        return False
+
+    # Check if HTTP server responds
+    url = info.get("url", "")
+    if url:
+        return await _check_server_up(url, retries=2, delay=0.5)
+
+    return False
+
+
+async def restart_sandbox(sandbox_id: str) -> dict:
+    """
+    Restart a crashed sandbox. Re-launches the Node/Python process
+    on the same port using the original sandbox directory.
+    Returns updated sandbox metadata.
+    """
+    if sandbox_id not in active_sandboxes:
+        return {"error": "Sandbox not found"}
+
+    info = active_sandboxes[sandbox_id]
+    proc = info.get("process")
+
+    # Kill the old process if it's still hanging
+    if proc and proc.poll() is None:
+        try:
+            if os.name != 'nt':
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            else:
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                               capture_output=True, timeout=5)
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    # Re-launch on the same port
+    sandbox_dir = info.get("path", "")
+    port = info.get("port")
+    app_file = info.get("app_file", "")
+
+    if not sandbox_dir or not os.path.isdir(sandbox_dir):
+        return {"error": "Sandbox directory not found"}
+
+    env = _NODE_ENV.copy()
+    env["PORT"] = str(port)
+    env["CYPHEX_SCAN_MODE"] = "1"  # Keep RASP disabled on restart
+
+    npm_cmd = shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
+    npm_cmd_clean = npm_cmd.strip('"')
+
+    if app_file == "__NPM_RUN_START_DEV__":
+        cmd = [npm_cmd_clean, "run", "start:dev"]
+    elif app_file == "__NPM_RUN_DEV__":
+        cmd = [npm_cmd_clean, "run", "dev"]
+    elif app_file == "__NPM_RUN_START__":
+        cmd = [npm_cmd_clean, "run", "start"]
+    elif app_file.endswith(".js"):
+        cmd = ["node", app_file]
+    elif app_file.endswith(".py"):
+        cmd = [sys.executable, app_file]
+    else:
+        cmd = ["node", app_file]
+
+    new_proc = subprocess.Popen(
+        cmd, shell=False,
+        cwd=sandbox_dir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        preexec_fn=os.setsid if os.name != 'nt' else None,
+    )
+
+    await asyncio.sleep(3)
+
+    if new_proc.poll() is not None:
+        return {"error": "Sandbox failed to restart"}
+
+    url = f"http://localhost:{port}"
+    is_up = await _check_server_up(url, retries=5, delay=1.0)
+
+    # Update the active sandbox entry
+    active_sandboxes[sandbox_id]["process"] = new_proc
+    active_sandboxes[sandbox_id]["pid"] = new_proc.pid
+    active_sandboxes[sandbox_id]["status"] = "running" if is_up else "starting"
+    active_sandboxes[sandbox_id]["restarted_at"] = datetime.now().isoformat()
+
+    return {
+        "sandbox_id": sandbox_id,
+        "port": port,
+        "url": url,
+        "status": "running" if is_up else "starting",
+        "pid": new_proc.pid,
+        "restarted": True,
+    }
+
+
+async def ensure_sandbox_alive(sandbox_id: str) -> bool:
+    """
+    High-level helper: check if sandbox is alive, restart if dead.
+    Returns True if sandbox is now responsive.
+    Used by DeepAgent orchestrator before each agent group.
+    """
+    is_healthy = await health_check_sandbox(sandbox_id)
+    if is_healthy:
+        return True
+
+    # Try to restart
+    print(f"  ⚠ Sandbox {sandbox_id} is unresponsive — restarting...")
+    result = await restart_sandbox(sandbox_id)
+    if result.get("error"):
+        print(f"  ✗ Sandbox restart failed: {result['error']}")
+        return False
+
+    print(f"  ✓ Sandbox restarted (PID: {result.get('pid')})")
+    return result.get("status") == "running"
+

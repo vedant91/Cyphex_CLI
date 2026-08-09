@@ -42,32 +42,32 @@ class XSSAgent(BaseAgent):
     CANARY = "cYpH3x_X55"
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ XSS TESTING ═══", "info")
+        await self.log("=== XSS TESTING ===", "info")
 
-        # ─── 1. Test with dalfox if available ───
+        # --- 1. Test with dalfox if available ---
         has_dalfox = await self.terminal.check_tool("dalfox")
         if has_dalfox:
             await self._run_dalfox(context)
 
-        # ─── 2. Reflected XSS on forms ───
+        # --- 2. Reflected XSS on forms ---
         await self.log("Testing forms for reflected XSS...", "info")
         for form in context.all_forms:
             await self._test_reflected_form(form, context)
 
-        # ─── 3. Reflected XSS on URL parameters ───
+        # --- 3. Reflected XSS on URL parameters ---
         await self.log("Testing URL parameters for reflected XSS...", "info")
         for param in context.all_params:
             await self._test_reflected_param(param, context)
 
-        # ─── 4. DOM XSS detection ───
+        # --- 4. DOM XSS detection ---
         await self.log("Scanning for DOM-based XSS patterns...", "info")
         await self._check_dom_xss(context)
 
-        # ─── 5. Stored XSS test ───
+        # --- 5. Stored XSS test ---
         await self.log("Testing for stored XSS...", "info")
         await self._test_stored_xss(context)
 
-        # ─── 6. Admin/Dashboard XSS + Broken Access Control ───
+        # --- 6. Admin/Dashboard XSS + Broken Access Control ---
         await self.log("Testing admin endpoints for XSS & BAC...", "info")
         await self._test_admin_xss_and_bac(context)
 
@@ -272,7 +272,7 @@ class XSSAgent(BaseAgent):
             # Determine the display page: form.page if set, or derive from action
             display_url = form.page
             if not display_url:
-                # Derive: /blog/comment → /blog, /feedback → /feedback
+                # Derive: /blog/comment -> /blog, /feedback -> /feedback
                 action_path = form.action.split('?')[0].rstrip('/')
                 parts = action_path.split('/')
                 # If action ends with a verb like 'comment', go up one level
@@ -340,7 +340,7 @@ class XSSAgent(BaseAgent):
             ])
 
             if is_admin_page:
-                # ── Broken Access Control: admin page accessible without auth ──
+                # -- Broken Access Control: admin page accessible without auth --
                 # Only flag if there's no login redirect or auth challenge
                 if 'login' not in lower[:200] and '401' not in status:
                     await self.add_vuln(Vuln(
@@ -359,7 +359,7 @@ class XSSAgent(BaseAgent):
                         ),
                     ))
 
-                # ── Reflected XSS on admin params ──
+                # -- Reflected XSS on admin params --
                 for param_name in params:
                     xss_payload = '<script>alert(1)</script>'
                     test_url = f"{url}?{param_name}={quote(xss_payload, safe='')}"

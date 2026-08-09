@@ -263,6 +263,15 @@ class CyphexReasoner:
                 if system:
                     full_prompt = f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT: "
 
+                if os.environ.get("CYPHEX_DEBUG_MODE") == "1":
+                    try:
+                        from backend.backend.agents.terminal import Colors
+                        print(f"\n{Colors.MAGENTA}=== ORACLE DEBUG: PROMPT ({strategy_info['name']}) ==={Colors.RESET}")
+                        print(f"{Colors.DIM}{full_prompt}{Colors.RESET}")
+                        print(f"{Colors.MAGENTA}=========================================={Colors.RESET}\n")
+                    except ImportError:
+                        print(f"\n=== ORACLE DEBUG: PROMPT ({strategy_info['name']}) ===\n{full_prompt}\n==========================================\n")
+
                 model_with_strategy = f"{model}+{strategy}"
                 result = self.interceptor.generate(
                     model=model_with_strategy,

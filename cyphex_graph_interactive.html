@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CypheX v3 - Knowledge Graph</title>
+    <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        #header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #info {
+            padding: 10px 20px;
+            background: #2a2a2a;
+            border-bottom: 1px solid #444;
+        }
+        #mynetwork {
+            width: 100%;
+            height: 700px;
+            border: none;
+            background: #1a1a1a;
+        }
+        #legend {
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            background: rgba(42, 42, 42, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #667eea;
+            max-width: 250px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 0.9em;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            border: 2px solid #fff;
+        }
+        #details {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(42, 42, 42, 0.98);
+            padding: 20px;
+            border-top: 2px solid #667eea;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .stat {
+            display: inline-block;
+            margin: 0 20px 10px 0;
+            padding: 8px 15px;
+            background: #333;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+        }
+        .god-node { font-weight: bold; color: #ffd700; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>🛡️ CypheX v3 - Knowledge Graph</h1>
+        <p>Autonomous AI Cybersecurity Platform</p>
+    </div>
+    
+    <div id="info">
+        <span class="stat">📦 20 Nodes</span>
+        <span class="stat">🔗 23 Edges</span>
+        <span class="stat">🌟 7 God Nodes</span>
+        <span class="stat">🏘️ 8 Communities</span>
+    </div>
+
+    <div id="mynetwork"></div>
+    
+    <div id="legend">
+        <h3 style="margin-top:0; border-bottom: 1px solid #667eea; padding-bottom: 8px;">Communities</h3>
+        <div class="legend-item"><div class="legend-color" style="background:#FF6B6B"></div>Orchestration</div>
+        <div class="legend-item"><div class="legend-color" style="background:#4ECDC4"></div>Agent System</div>
+        <div class="legend-item"><div class="legend-color" style="background:#95E1D3"></div>Council</div>
+        <div class="legend-item"><div class="legend-color" style="background:#F38181"></div>Immune System</div>
+        <div class="legend-item"><div class="legend-color" style="background:#AA96DA"></div>Reasoning</div>
+        <div class="legend-item"><div class="legend-color" style="background:#FCBAD3"></div>RAG System</div>
+        <div class="legend-item"><div class="legend-color" style="background:#FFFFD2; color:#333"></div>API Layer</div>
+        <div class="legend-item"><div class="legend-color" style="background:#A8D8EA"></div>Patch Pipeline</div>
+    </div>
+
+    <div id="details">
+        <h3 id="nodeTitle">Click a node to see details</h3>
+        <p id="nodeInfo"></p>
+    </div>
+
+    <script>
+        const communityColors = {
+            orchestration: '#FF6B6B',
+            agent_system: '#4ECDC4',
+            council_system: '#95E1D3',
+            immune_system: '#F38181',
+            reasoning_engine: '#AA96DA',
+            rag_system: '#FCBAD3',
+            api_layer: '#FFFFD2',
+            patch_pipeline: '#A8D8EA'
+        };
+
+        const nodes = new vis.DataSet([
+            { id: 1, label: 'ScanOrchestrator', color: communityColors.orchestration, size: 45, title: '45 connections - Pipeline coordinator' },
+            { id: 2, label: 'ScanContext', color: communityColors.orchestration, size: 42, title: '42 connections - Data backbone' },
+            { id: 3, label: 'BaseAgent', color: communityColors.agent_system, size: 38, title: '38 connections - Agent foundation' },
+            { id: 4, label: 'ReconAgent', color: communityColors.agent_system, size: 20, title: 'Agent 01 - Recon' },
+            { id: 5, label: 'CrawlerAgent', color: communityColors.agent_system, size: 22, title: 'Agent 02 - Crawler' },
+            { id: 6, label: 'InjectionAgent', color: communityColors.agent_system, size: 25, title: 'SQLi + CMDi' },
+            { id: 7, label: 'XSSAgent', color: communityColors.agent_system, size: 23, title: 'XSS Testing' },
+            { id: 8, label: 'AuthAgent', color: communityColors.agent_system, size: 24, title: 'Auth Testing' },
+            { id: 9, label: 'CVS Terminal', color: communityColors.agent_system, size: 20, title: 'Virtual Linux' },
+            { id: 10, label: 'CouncilOrchestrator', color: communityColors.council_system, size: 35, title: '35 connections - Multi-model coordinator' },
+            { id: 11, label: 'PatchCouncil', color: communityColors.council_system, size: 28, title: '3-stage review' },
+            { id: 12, label: 'DebateProtocol', color: communityColors.council_system, size: 22, title: 'False positive filter' },
+            { id: 13, label: 'BehavioralGenome', color: communityColors.immune_system, size: 32, title: '32 connections - Blue Team ML' },
+            { id: 14, label: 'MutationEngine', color: communityColors.immune_system, size: 18, title: 'Red Team Attack' },
+            { id: 15, label: 'EvolutionController', color: communityColors.immune_system, size: 25, title: 'Co-evolution' },
+            { id: 16, label: 'OracleAdapter', color: communityColors.reasoning_engine, size: 40, title: '40 connections - 16 architectures' },
+            { id: 17, label: 'ReasoningTree', color: communityColors.reasoning_engine, size: 15, title: 'Thought traces' },
+            { id: 18, label: 'CodeIndexer', color: communityColors.rag_system, size: 30, title: '30 connections - Vectorless RAG' },
+            { id: 19, label: 'KnowledgeTreeBuilder', color: communityColors.rag_system, size: 20, title: 'Hierarchical context' },
+            { id: 20, label: 'FastAPI', color: communityColors.api_layer, size: 25, title: 'REST + WebSocket' },
+            { id: 21, label: 'PatchAgent', color: communityColors.patch_pipeline, size: 28, title: 'Auto-patching' }
+        ]);
+
+        const edges = new vis.DataSet([
+            { from: 1, to: 2, label: 'manages', color: { color: '#fff', opacity: 0.7 } },
+            { from: 1, to: 4, label: 'executes', dashes: false },
+            { from: 1, to: 5, label: 'executes', dashes: false },
+            { from: 1, to: 6, label: 'executes', dashes: false },
+            { from: 4, to: 3, label: 'inherits', dashes: true },
+            { from: 5, to: 3, label: 'inherits', dashes: true },
+            { from: 6, to: 3, label: 'inherits', dashes: true },
+            { from: 7, to: 3, label: 'inherits', dashes: true },
+            { from: 8, to: 3, label: 'inherits', dashes: true },
+            { from: 3, to: 2, label: 'modifies' },
+            { from: 3, to: 9, label: 'uses' },
+            { from: 10, to: 12, label: 'coordinates' },
+            { from: 10, to: 11, label: 'coordinates' },
+            { from: 15, to: 13, label: 'evolves' },
+            { from: 15, to: 14, label: 'coordinates' },
+            { from: 13, to: 14, label: 'adversarial', color: { color: '#ff0000' }, dashes: true },
+            { from: 21, to: 16, label: 'uses' },
+            { from: 21, to: 18, label: 'uses' },
+            { from: 16, to: 17, label: 'generates' },
+            { from: 18, to: 19, label: 'integrates', dashes: true },
+            { from: 20, to: 1, label: 'triggers' },
+            { from: 1, to: 20, label: 'emits events' },
+            { from: 11, to: 16, label: 'uses' },
+            { from: 12, to: 2, label: 'validates' }
+        ]);
+
+        const container = document.getElementById('mynetwork');
+        const data = { nodes: nodes, edges: edges };
+        const options = {
+            nodes: {
+                shape: 'dot',
+                font: { size: 16, color: '#ffffff', face: 'Arial' },
+                borderWidth: 2,
+                borderWidthSelected: 4,
+                shadow: { enabled: true, color: 'rgba(0,0,0,0.5)', size: 10, x: 3, y: 3 }
+            },
+            edges: {
+                width: 2,
+                color: { color: '#888888', highlight: '#667eea', hover: '#667eea' },
+                font: { size: 12, color: '#cccccc', background: 'rgba(0,0,0,0.7)' },
+                smooth: { enabled: true, type: 'cubicBezier', roundness: 0.5 },
+                arrows: { to: { enabled: true, scaleFactor: 0.5 } }
+            },
+            physics: {
+                enabled: true,
+                barnesHut: {
+                    gravitationalConstant: -20000,
+                    centralGravity: 0.3,
+                    springLength: 150,
+                    springConstant: 0.04,
+                    damping: 0.5,
+                    avoidOverlap: 0.5
+                },
+                stabilization: { iterations: 200 }
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 200,
+                navigationButtons: true,
+                keyboard: true
+            }
+        };
+
+        const network = new vis.Network(container, data, options);
+
+        // Node click handler
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const node = nodes.get(nodeId);
+                const detailsDiv = document.getElementById('details');
+                const titleEl = document.getElementById('nodeTitle');
+                const infoEl = document.getElementById('nodeInfo');
+                
+                const nodeDetails = {
+                    1: 'Central coordinator for the 5-stage scan pipeline. Manages Recon → Crawler → Attack (parallel) → Analysis → Patching stages.',
+                    2: 'Shared state object passed through entire pipeline. Contains target URL, sitemap, endpoints, forms, vulnerabilities, terminal logs.',
+                    3: 'Abstract base class for all 14 attack agents. Provides CVS terminal access, LLM calling, vulnerability reporting.',
+                    4: 'Agent 01 - Fingerprinting and reconnaissance. HTTP probing, tech detection, server signatures.',
+                    5: 'Agent 02 - Sitemap generation and endpoint discovery. HTML parsing, SPA detection, REST API discovery.',
+                    6: 'Combined SQLi + CMDi Agent. Union-based, Boolean, Time-based SQLi. OS Command Injection.',
+                    7: 'Agent 04 - Cross-Site Scripting testing. Reflected, DOM-based, Event handler injection.',
+                    8: 'Agent 05 - Authentication and session testing. Weak credentials, session fixation, JWT analysis.',
+                    9: 'Pure-Python virtual Linux terminal for agents. Simulated execution without subprocess spawning.',
+                    10: 'VRAM-aware multi-model debate coordinator. Agent-Centric Batching reduces swaps from O(N×M) to O(M).',
+                    11: '3-stage patch generation and review: Generation → Review → Reflexion loop if rejected.',
+                    12: 'False-positive elimination through multi-model debate. Agent-Centric Batching method.',
+                    13: 'Blue Team defense using Isolation Forest ML. 15-dimensional feature vector, combined ML + heuristic scoring.',
+                    14: 'Red Team attacker with obfuscation techniques. URL encoding, Unicode escape, LLM-powered mutation.',
+                    15: 'Adversarial co-evolution coordinator (Red vs Blue). Genetic evolution with convergence threshold at 99%.',
+                    16: '16 cognitive architectures for enhanced reasoning. Auto-selects by CWE type: CMDi → ToT, Critical → Self-Consistency.',
+                    17: 'Captures full thought traversal for decisions. Linear (CoT), Branching (ToT), Loops (Reflexion).',
+                    18: 'Vectorless code indexing for RAG. 0 VRAM overhead, <50ms queries. Keyword-based with smart scoring.',
+                    19: 'Hierarchical knowledge tree from code + docs. Code Tree (AST) + Knowledge Tree (LLM) + CWE Index.',
+                    20: 'REST API + WebSocket server. Endpoints: /api/scan, /api/sandbox/upload, /ws/{scan_id}.',
+                    21: 'AI-powered patch generation with verification. Oracle reasoning + RAG context + Template fallback + Verification gate.'
+                };
+                
+                titleEl.textContent = '📌 ' + node.label;
+                infoEl.textContent = nodeDetails[nodeId] || 'No additional details available.';
+                detailsDiv.style.display = 'block';
+            } else {
+                document.getElementById('details').style.display = 'none';
+            }
+        });
+
+        // Highlight god nodes after stabilization
+        network.on('stabilizationIterationsDone', function() {
+            const godNodes = [1, 2, 3, 10, 13, 16, 18];
+            godNodes.forEach(id => {
+                nodes.update({
+                    id: id,
+                    borderWidth: 4,
+                    shapeProperties: { borderDashes: [5, 5] }
+                });
+            });
+        });
+
+        // Double-click to focus
+        network.on('doubleClick', function(params) {
+            if (params.nodes.length > 0) {
+                network.focus(params.nodes[0], {
+                    scale: 1.5,
+                    animation: { duration: 1000, easingFunction: 'easeInOutQuad' }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

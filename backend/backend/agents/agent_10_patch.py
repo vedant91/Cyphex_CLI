@@ -20,7 +20,7 @@ from models.agent_result import AgentResult
 class PatchAgent(BaseAgent):
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ PATCH GENERATION PHASE ═══", "info")
+        await self.log("=== PATCH GENERATION PHASE ===", "info")
         await self.log(
             f"Generating fixes for {len(context.confirmed_vulns)} vulns "
             f"(framework: {context.framework or 'generic'})...",
@@ -96,7 +96,7 @@ Generate complete patches including:
                 if isinstance(patch, dict):
                     await self.log(
                         f"  Patch {i+1}: {patch.get('vuln_name', 'Unknown')} "
-                        f"→ {patch.get('file_path', 'N/A')}",
+                        f"-> {patch.get('file_path', 'N/A')}",
                         "info",
                     )
 

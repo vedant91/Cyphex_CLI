@@ -1,0 +1,704 @@
+{
+  "metadata": {
+    "project": "CypheX v3",
+    "type": "Autonomous AI Cybersecurity Platform",
+    "created": "2026-08-02",
+    "architecture": "Multi-Agent Exploitation Pipeline",
+    "paradigms": ["SAST", "DAST", "AI Council", "Immune System", "Auto-Patching"],
+    "offline_first": true,
+    "languages": ["Python", "TypeScript", "JavaScript"],
+    "ai_backend": "Ollama (100% Local)"
+  },
+  "nodes": [
+    {
+      "id": "scan_orchestrator",
+      "label": "ScanOrchestrator",
+      "type": "class",
+      "category": "orchestration",
+      "file": "backend/backend/scan_orchestrator.py",
+      "description": "Core coordinator for the 5-stage scan pipeline",
+      "responsibilities": ["Stage management", "Agent execution", "Event broadcasting", "Report generation"],
+      "god_node": true,
+      "degree_estimate": 45
+    },
+    {
+      "id": "scan_context",
+      "label": "ScanContext",
+      "type": "model",
+      "category": "data_model",
+      "file": "backend/backend/models/scan.py",
+      "description": "Shared state object flowing through all agents",
+      "fields": ["target_url", "sitemap", "all_forms", "all_endpoints", "confirmed_vulns", "terminal_logs"],
+      "god_node": true,
+      "degree_estimate": 42
+    },
+    {
+      "id": "base_agent",
+      "label": "BaseAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/base_agent.py",
+      "description": "Abstract base class for all 14 attack agents",
+      "methods": ["run", "call_cerebras", "log", "report_vuln"],
+      "god_node": true,
+      "degree_estimate": 38
+    },
+    {
+      "id": "recon_agent",
+      "label": "ReconAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/agent_01_recon.py",
+      "description": "Agent 01 - Fingerprinting and reconnaissance",
+      "attacks": ["HTTP probing", "tech detection", "server signatures"],
+      "stage": 1
+    },
+    {
+      "id": "crawler_agent",
+      "label": "CrawlerAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/agent_02_crawler.py",
+      "description": "Agent 02 - Sitemap generation and endpoint discovery",
+      "attacks": ["HTML parsing", "SPA detection", "REST API discovery"],
+      "stage": 2
+    },
+    {
+      "id": "injection_agent",
+      "label": "InjectionAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/agent_injection.py",
+      "description": "Combined SQLi + CMDi Agent",
+      "attacks": ["Union-based SQLi", "Boolean SQLi", "Time-based SQLi", "OS Command Injection"],
+      "stage": 3
+    },
+    {
+      "id": "xss_agent",
+      "label": "XSSAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/agent_04_xss.py",
+      "description": "Agent 04 - Cross-Site Scripting testing",
+      "attacks": ["Reflected XSS", "DOM-based XSS", "Event handler injection"],
+      "stage": 3
+    },
+    {
+      "id": "auth_agent",
+      "label": "AuthAgent",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/agent_05_auth.py",
+      "description": "Agent 05 - Authentication and session testing",
+      "attacks": ["Weak credentials", "Session fixation", "JWT analysis"],
+      "stage": 3
+    },
+    {
+      "id": "council_orchestrator",
+      "label": "CouncilOrchestrator",
+      "type": "class",
+      "category": "council_system",
+      "file": "backend/council/council_orchestrator.py",
+      "description": "VRAM-aware multi-model debate coordinator",
+      "responsibilities": ["Model loading", "Dynamic batching", "Execution strategy"],
+      "god_node": true,
+      "degree_estimate": 35
+    },
+    {
+      "id": "patch_council",
+      "label": "PatchCouncil",
+      "type": "class",
+      "category": "council_system",
+      "file": "backend/council/patch_council.py",
+      "description": "3-stage patch generation and review system",
+      "stages": ["Generation", "Review", "Reflexion loop"],
+      "degree_estimate": 28
+    },
+    {
+      "id": "debate_protocol",
+      "label": "DebateProtocol",
+      "type": "class",
+      "category": "council_system",
+      "file": "backend/council/debate_protocol.py",
+      "description": "False-positive elimination through multi-model debate",
+      "method": "Agent-Centric Batching",
+      "degree_estimate": 22
+    },
+    {
+      "id": "behavioral_genome",
+      "label": "BehavioralGenome",
+      "type": "class",
+      "category": "immune_system",
+      "file": "backend/backend/immune/behavioral_genome.py",
+      "description": "Blue Team defense using Isolation Forest ML",
+      "features": 15,
+      "ml_model": "Isolation Forest",
+      "god_node": true,
+      "degree_estimate": 32
+    },
+    {
+      "id": "mutation_engine",
+      "label": "MutationEngine",
+      "type": "class",
+      "category": "immune_system",
+      "file": "backend/backend/immune/mutation_engine.py",
+      "description": "Red Team attacker with obfuscation techniques",
+      "techniques": ["URL encoding", "Unicode escape", "Hex encode", "Comment injection", "LLM-powered mutation"],
+      "degree_estimate": 18
+    },
+    {
+      "id": "evolution_controller",
+      "label": "EvolutionController",
+      "type": "class",
+      "category": "immune_system",
+      "file": "backend/backend/immune/evolution_controller.py",
+      "description": "Adversarial co-evolution coordinator (Red vs Blue)",
+      "algorithm": "Genetic evolution with convergence threshold",
+      "degree_estimate": 25
+    },
+    {
+      "id": "oracle_adapter",
+      "label": "OracleAdapter",
+      "type": "class",
+      "category": "reasoning_engine",
+      "file": "backend/reasoning/oracle_adapter.py",
+      "description": "16 cognitive architectures for enhanced reasoning",
+      "strategies": ["CoT", "Self-Reflection", "ToT", "ReAct", "Decomposition", "Self-Consistency", "Complex Pipeline", "MCTS", "Meta-Reasoning"],
+      "god_node": true,
+      "degree_estimate": 40
+    },
+    {
+      "id": "reasoning_tree",
+      "label": "ReasoningTree",
+      "type": "class",
+      "category": "reasoning_engine",
+      "file": "backend/reasoning/reasoning_tree.py",
+      "description": "Captures full thought traversal for decisions",
+      "structures": ["Linear (CoT)", "Branching (ToT)", "Loops (Reflexion)"],
+      "degree_estimate": 15
+    },
+    {
+      "id": "code_indexer",
+      "label": "CodeIndexer",
+      "type": "class",
+      "category": "rag_system",
+      "file": "backend/rag/code_indexer.py",
+      "description": "Vectorless code indexing for RAG (0 VRAM, <50ms)",
+      "approach": "Keyword-based with smart scoring",
+      "features": ["Route extraction", "CWE relevance", "Secure pattern discovery"],
+      "god_node": true,
+      "degree_estimate": 30
+    },
+    {
+      "id": "knowledge_tree_builder",
+      "label": "KnowledgeTreeBuilder",
+      "type": "class",
+      "category": "rag_system",
+      "file": "backend/rag/knowledge_tree.py",
+      "description": "Hierarchical knowledge tree from code + docs",
+      "components": ["Code Tree (AST)", "Knowledge Tree (LLM)", "CWE Index"],
+      "degree_estimate": 20
+    },
+    {
+      "id": "fastapi_app",
+      "label": "FastAPI Application",
+      "type": "application",
+      "category": "api_layer",
+      "file": "backend/backend/api.py",
+      "description": "REST API + WebSocket server",
+      "endpoints": ["/api/scan", "/api/sandbox/upload", "/ws/{scan_id}"],
+      "degree_estimate": 25
+    },
+    {
+      "id": "patch_agent",
+      "label": "PatchAgent",
+      "type": "class",
+      "category": "patch_pipeline",
+      "file": "backend/backend/agents/agent_10_patch.py",
+      "description": "AI-powered patch generation with verification",
+      "features": ["Oracle reasoning", "RAG context", "Template fallback", "Verification gate"],
+      "degree_estimate": 28
+    },
+    {
+      "id": "cvs_terminal",
+      "label": "CVS Terminal",
+      "type": "class",
+      "category": "agent_system",
+      "file": "backend/backend/agents/terminal.py",
+      "description": "Pure-Python virtual Linux terminal",
+      "commands": ["curl", "grep", "bash", "cat", "ls", "cd"],
+      "degree_estimate": 20
+    }
+  ],
+  "edges": [
+    {
+      "source": "scan_orchestrator",
+      "target": "scan_context",
+      "relation": "manages",
+      "confidence": "EXTRACTED",
+      "description": "Orchestrator creates and passes ScanContext through pipeline"
+    },
+    {
+      "source": "scan_orchestrator",
+      "target": "recon_agent",
+      "relation": "executes",
+      "confidence": "EXTRACTED",
+      "description": "Stage 1: Sequential recon execution"
+    },
+    {
+      "source": "scan_orchestrator",
+      "target": "crawler_agent",
+      "relation": "executes",
+      "confidence": "EXTRACTED",
+      "description": "Stage 2: Sequential crawler execution"
+    },
+    {
+      "source": "scan_orchestrator",
+      "target": "injection_agent",
+      "relation": "executes",
+      "confidence": "EXTRACTED",
+      "description": "Stage 3: Parallel attack agent execution"
+    },
+    {
+      "source": "recon_agent",
+      "target": "base_agent",
+      "relation": "inherits",
+      "confidence": "EXTRACTED",
+      "description": "ReconAgent extends BaseAgent"
+    },
+    {
+      "source": "crawler_agent",
+      "target": "base_agent",
+      "relation": "inherits",
+      "confidence": "EXTRACTED",
+      "description": "CrawlerAgent extends BaseAgent"
+    },
+    {
+      "source": "injection_agent",
+      "target": "base_agent",
+      "relation": "inherits",
+      "confidence": "EXTRACTED",
+      "description": "InjectionAgent extends BaseAgent"
+    },
+    {
+      "source": "xss_agent",
+      "target": "base_agent",
+      "relation": "inherits",
+      "confidence": "EXTRACTED",
+      "description": "XSSAgent extends BaseAgent"
+    },
+    {
+      "source": "base_agent",
+      "target": "scan_context",
+      "relation": "modifies",
+      "confidence": "EXTRACTED",
+      "description": "All agents read and update ScanContext"
+    },
+    {
+      "source": "base_agent",
+      "target": "cvs_terminal",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "description": "Agents execute commands via CVS terminal"
+    },
+    {
+      "source": "council_orchestrator",
+      "target": "debate_protocol",
+      "relation": "coordinates",
+      "confidence": "EXTRACTED",
+      "description": "Orchestrator runs debate protocol for validation"
+    },
+    {
+      "source": "council_orchestrator",
+      "target": "patch_council",
+      "relation": "coordinates",
+      "confidence": "EXTRACTED",
+      "description": "Orchestrator runs patch council for generation/review"
+    },
+    {
+      "source": "evolution_controller",
+      "target": "behavioral_genome",
+      "relation": "evolves",
+      "confidence": "EXTRACTED",
+      "description": "Blue Team genome trained by controller"
+    },
+    {
+      "source": "evolution_controller",
+      "target": "mutation_engine",
+      "relation": "coordinates",
+      "confidence": "EXTRACTED",
+      "description": "Red Team mutations coordinated by controller"
+    },
+    {
+      "source": "behavioral_genome",
+      "target": "mutation_engine",
+      "relation": "adversarial",
+      "confidence": "EXTRACTED",
+      "description": "Blue vs Red adversarial co-evolution"
+    },
+    {
+      "source": "patch_agent",
+      "target": "oracle_adapter",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "description": "Patch agent uses Oracle reasoning for generation"
+    },
+    {
+      "source": "patch_agent",
+      "target": "code_indexer",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "description": "Patch agent retrieves context via RAG indexer"
+    },
+    {
+      "source": "oracle_adapter",
+      "target": "reasoning_tree",
+      "relation": "generates",
+      "confidence": "EXTRACTED",
+      "description": "Oracle creates reasoning trees for trace"
+    },
+    {
+      "source": "code_indexer",
+      "target": "knowledge_tree_builder",
+      "relation": "integrates",
+      "confidence": "INFERRED",
+      "description": "Code indexer may use knowledge tree for enhanced context"
+    },
+    {
+      "source": "fastapi_app",
+      "target": "scan_orchestrator",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "description": "API endpoint triggers scan orchestrator"
+    },
+    {
+      "source": "scan_orchestrator",
+      "target": "fastapi_app",
+      "relation": "emits_events",
+      "confidence": "EXTRACTED",
+      "description": "Orchestrator broadcasts WebSocket events via callback"
+    },
+    {
+      "source": "patch_council",
+      "target": "oracle_adapter",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "description": "Council uses Oracle for review reasoning"
+    },
+    {
+      "source": "debate_protocol",
+      "target": "scan_context",
+      "relation": "validates",
+      "confidence": "EXTRACTED",
+      "description": "Debate protocol validates vulnerabilities in context"
+    }
+  ],
+  "communities": [
+    {
+      "id": "orchestration",
+      "name": "Orchestration Layer",
+      "description": "Core scan coordination and pipeline management",
+      "members": ["scan_orchestrator", "scan_context"],
+      "color": "#FF6B6B"
+    },
+    {
+      "id": "agent_system",
+      "name": "Agent System",
+      "description": "14 specialized attack agents with CVS terminal",
+      "members": ["base_agent", "recon_agent", "crawler_agent", "injection_agent", "xss_agent", "auth_agent", "cvs_terminal"],
+      "color": "#4ECDC4"
+    },
+    {
+      "id": "council_system",
+      "name": "Council System",
+      "description": "Multi-model AI consensus and debate",
+      "members": ["council_orchestrator", "patch_council", "debate_protocol"],
+      "color": "#95E1D3"
+    },
+    {
+      "id": "immune_system",
+      "name": "Immune System",
+      "description": "Adversarial co-evolution (Red vs Blue)",
+      "members": ["behavioral_genome", "mutation_engine", "evolution_controller"],
+      "color": "#F38181"
+    },
+    {
+      "id": "reasoning_engine",
+      "name": "Reasoning Engine",
+      "description": "Oracle with 16 cognitive architectures",
+      "members": ["oracle_adapter", "reasoning_tree"],
+      "color": "#AA96DA"
+    },
+    {
+      "id": "rag_system",
+      "name": "RAG System",
+      "description": "Vectorless code intelligence",
+      "members": ["code_indexer", "knowledge_tree_builder"],
+      "color": "#FCBAD3"
+    },
+    {
+      "id": "api_layer",
+      "name": "API Layer",
+      "description": "FastAPI REST + WebSocket communication",
+      "members": ["fastapi_app"],
+      "color": "#FFFFD2"
+    },
+    {
+      "id": "patch_pipeline",
+      "name": "Patch Pipeline",
+      "description": "Auto-patching with verification",
+      "members": ["patch_agent"],
+      "color": "#A8D8EA"
+    }
+  ],
+  "god_nodes": [
+    {
+      "id": "scan_orchestrator",
+      "reason": "Central coordinator connecting all 5 pipeline stages",
+      "connections": 45,
+      "criticality": "Core execution flow"
+    },
+    {
+      "id": "scan_context",
+      "reason": "Shared state object touched by every agent",
+      "connections": 42,
+      "criticality": "Data flow backbone"
+    },
+    {
+      "id": "base_agent",
+      "reason": "Parent class for all 14 attack agents",
+      "connections": 38,
+      "criticality": "Agent system foundation"
+    },
+    {
+      "id": "oracle_adapter",
+      "reason": "16 reasoning strategies used by council and patches",
+      "connections": 40,
+      "criticality": "Intelligence amplification"
+    },
+    {
+      "id": "council_orchestrator",
+      "reason": "Multi-model coordination for all validation and patching",
+      "connections": 35,
+      "criticality": "Consensus mechanism"
+    },
+    {
+      "id": "behavioral_genome",
+      "reason": "Immune system core with ML-based anomaly detection",
+      "connections": 32,
+      "criticality": "Adaptive defense"
+    },
+    {
+      "id": "code_indexer",
+      "reason": "RAG retrieval for all patch context",
+      "connections": 30,
+      "criticality": "Code intelligence"
+    }
+  ],
+  "surprising_connections": [
+    {
+      "source": "oracle_adapter",
+      "target": "behavioral_genome",
+      "insight": "Oracle reasoning strategies auto-select based on CWE type, similar to how genome features map to attack patterns",
+      "composite_score": 0.92,
+      "why": "Both systems use pattern matching + heuristics, but Oracle is deterministic while Genome is ML-based"
+    },
+    {
+      "source": "code_indexer",
+      "target": "council_orchestrator",
+      "insight": "Both avoid expensive operations (RAG avoids embeddings, Council avoids model swaps via batching)",
+      "composite_score": 0.88,
+      "why": "Shared optimization philosophy: minimize VRAM/latency without sacrificing quality"
+    },
+    {
+      "source": "mutation_engine",
+      "target": "xss_agent",
+      "insight": "Red Team mutations use same obfuscation techniques as XSS payloads",
+      "composite_score": 0.85,
+      "why": "Both need to evade detection (WAF for immune, CSP for XSS)"
+    },
+    {
+      "source": "scan_context",
+      "target": "fastapi_app",
+      "insight": "ScanContext is thread-safe despite async execution because each scan gets its own instance",
+      "composite_score": 0.82,
+      "why": "Async coordination without explicit locking - each scan_id maps to isolated context"
+    },
+    {
+      "source": "reasoning_tree",
+      "target": "debate_protocol",
+      "insight": "Both capture multi-perspective reasoning but Tree is single-model sequential, Debate is multi-model parallel",
+      "composite_score": 0.80,
+      "why": "Different approaches to exploring solution space with audit trails"
+    },
+    {
+      "source": "patch_agent",
+      "target": "cvs_terminal",
+      "insight": "Patch agent could theoretically use terminal to verify patches by running tests, but currently relies on verification gate",
+      "composite_score": 0.75,
+      "why": "Missed integration opportunity - terminal is only used by attack agents, not remediation"
+    }
+  ],
+  "suggested_questions": [
+    "How does Oracle's automatic strategy selection prevent small 7B models from generating shallow patches?",
+    "What makes the vectorless RAG approach faster than embedding-based retrieval for code context?",
+    "How does the adversarial co-evolution converge without overfitting to specific attack patterns?",
+    "Why does the council use Agent-Centric Batching instead of loading all models simultaneously?",
+    "How does ScanContext flow through parallel attack agents without race conditions?",
+    "What's the relationship between CWE types and Oracle reasoning strategies?",
+    "How does the behavioral genome combine ML scores with heuristic scores for better accuracy?",
+    "Why is the CVS terminal implemented in pure Python instead of using subprocess?",
+    "How does the patch verification gate prevent bad fixes without requiring human review?",
+    "What role does the knowledge tree play in grounding LLM patch generation?"
+  ],
+  "architecture_insights": {
+    "offline_first_design": {
+      "description": "100% local execution with zero cloud dependencies",
+      "components": ["Ollama for LLM inference", "Scikit-learn for ML", "Local Docker sandboxes", "CVS terminal (no network)"],
+      "benefit": "Works in air-gapped environments, no data exfiltration risk"
+    },
+    "multi_paradigm_security": {
+      "description": "Combines 5 distinct security approaches in one pipeline",
+      "paradigms": ["SAST (Semgrep)", "DAST (14 agents)", "AI Council (multi-model)", "Immune System (ML)", "Auto-Patching (verification)"],
+      "benefit": "Each paradigm catches vulnerabilities the others miss"
+    },
+    "agent_centric_batching": {
+      "description": "Load model once, process all tasks, unload",
+      "optimization": "Reduces model swaps from O(N×M) to O(M)",
+      "benefit": "10x faster council execution on limited VRAM"
+    },
+    "vectorless_rag": {
+      "description": "Keyword-based code retrieval without embeddings",
+      "approach": "Multi-signal scoring: route match + CWE relevance + payload terms",
+      "benefit": "0 VRAM overhead, <50ms queries, no vector DB needed"
+    },
+    "adversarial_evolution": {
+      "description": "Red Team vs Blue Team genetic algorithm",
+      "mechanism": "Red mutates blocked payloads, Blue retrains on bypassed payloads",
+      "convergence": "Stops at 99%+ block rate or exhaustion",
+      "benefit": "Genome adapts to specific application behavior"
+    },
+    "oracle_reasoning": {
+      "description": "16 cognitive architectures wrap LLM calls",
+      "selection": "Auto-selected by CWE type, severity, and task",
+      "example": "CMDi (CWE-78) always gets Tree-of-Thoughts, Critical vulns get Self-Consistency",
+      "benefit": "7B models perform like 70B models through structured reasoning"
+    },
+    "council_consensus": {
+      "description": "Multi-model debate eliminates false positives",
+      "process": "Each model independently reviews findings, majority vote required",
+      "anti_hallucination": "No single model can hallucinate a vulnerability",
+      "benefit": "Higher confidence in confirmed vulnerabilities"
+    },
+    "verification_gate": {
+      "description": "Three-stage patch validation before application",
+      "stages": ["Syntax check (compile)", "Blast radius analysis", "Re-scan verification"],
+      "rejection": "Rejects patches with nosemgrep, eslint-disable, etc.",
+      "benefit": "Bad patches never reach production code"
+    },
+    "cvs_terminal": {
+      "description": "Pure-Python virtual Linux terminal for agents",
+      "isolation": "No actual subprocess spawning, simulated execution",
+      "benefit": "Safe attack simulation without system access"
+    }
+  },
+  "data_flow": {
+    "scan_pipeline": {
+      "stages": [
+        {
+          "stage": 1,
+          "name": "Reconnaissance",
+          "agent": "ReconAgent",
+          "execution": "Sequential",
+          "output": "Framework, server, tech stack → ScanContext"
+        },
+        {
+          "stage": 2,
+          "name": "Crawling",
+          "agent": "CrawlerAgent",
+          "execution": "Sequential",
+          "output": "Sitemap, forms, endpoints, params → ScanContext"
+        },
+        {
+          "stage": 3,
+          "name": "Attack",
+          "agents": ["InjectionAgent", "XSSAgent", "AuthAgent", "LFIAgent", "LogicAgent"],
+          "execution": "Parallel (asyncio.gather)",
+          "output": "Confirmed vulnerabilities → ScanContext"
+        },
+        {
+          "stage": 4,
+          "name": "Analysis",
+          "agent": "CerebrasAnalysisAgent",
+          "execution": "Sequential",
+          "output": "AI threat analysis report"
+        },
+        {
+          "stage": 5,
+          "name": "Patching",
+          "agent": "PatchAgent",
+          "execution": "Sequential",
+          "output": "Cure plan with verified patches"
+        }
+      ],
+      "context_propagation": "ScanContext passed through all stages, accumulating data"
+    },
+    "council_flow": {
+      "debate_protocol": "Vuln → Model A vote → Model B vote → Model C vote → Majority consensus",
+      "patch_review": "Patch → Generator LLM → Reviewer 1 → Reviewer 2 → Reflexion loop if rejected"
+    },
+    "immune_evolution": {
+      "generation_loop": "Red generates → Blue scores → Blocked → Red mutates → Blue retrains → Repeat",
+      "convergence": "Stops when block_rate >= 0.99 or max_generations reached",
+      "genome_persistence": "Saved to disk, reloaded for future scans"
+    }
+  },
+  "tech_stack": {
+    "backend": {
+      "language": "Python 3.11+",
+      "framework": "FastAPI",
+      "async": "asyncio for parallel agent execution",
+      "ai": "Ollama (local LLM inference)",
+      "ml": "scikit-learn (Isolation Forest)",
+      "static_analysis": "Semgrep + custom regex",
+      "dynamic_analysis": "14 custom agents + Nuclei",
+      "sandboxing": "Docker / Docker Compose"
+    },
+    "frontend": {
+      "language": "TypeScript",
+      "framework": "React",
+      "build_tool": "Vite",
+      "real_time": "WebSocket for live scan updates",
+      "ui": "Dashboard with agent progress, vulnerability findings, terminal output"
+    },
+    "models": {
+      "default": "qwen2.5-coder:7b",
+      "alternatives": ["llama3.1:8b", "deepseek-coder:6.7b", "phi3:mini"],
+      "cloud_backup": "Groq (llama-3.3-70b-versatile)",
+      "strategy": "Local-first with cloud fallback"
+    },
+    "external_tools": {
+      "semgrep": "5,000+ SAST rules",
+      "nuclei": "8,000+ DAST templates",
+      "cognee": "Agent memory (knowledge graph)",
+      "docker": "Sandbox isolation"
+    }
+  },
+  "security_philosophy": {
+    "core_principle": "Security tools should not be a security risk",
+    "offline_first": "100% local execution, zero cloud APIs, no data exfiltration",
+    "no_api_keys": "Runs entirely on Ollama, no OpenAI/Anthropic billing",
+    "multi_model_consensus": "No single AI can apply a patch (majority vote required)",
+    "verification_gates": "Every patch validated before application",
+    "audit_trails": "Full reasoning traces and terminal logs",
+    "open_source": "Fully auditable code"
+  },
+  "performance_metrics": {
+    "scan_timeout": "30 minutes max",
+    "command_timeout": "60 seconds per command",
+    "max_parallel_agents": 6,
+    "evolution_generations": "10 (configurable)",
+    "genome_block_threshold": 0.7,
+    "evolution_convergence": 0.99
+  }
+}

@@ -44,19 +44,19 @@ class CMDiAgent(BaseAgent):
     ]
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ COMMAND INJECTION & SSTI TESTING ═══", "info")
+        await self.log("=== COMMAND INJECTION & SSTI TESTING ===", "info")
 
-        # ─── 1. Commix (if available) ───
+        # --- 1. Commix (if available) ---
         has_commix = await self.terminal.check_tool("commix")
         if has_commix:
             await self._run_commix(context)
 
-        # ─── 2. Manual command injection on forms ───
+        # --- 2. Manual command injection on forms ---
         await self.log("Testing forms for command injection...", "info")
         for form in context.all_forms:
             await self._test_cmdi_form(form, context)
 
-        # ─── 3. Test URL parameters for command injection ───
+        # --- 3. Test URL parameters for command injection ---
         await self.log("Testing URL params for command injection...", "info")
         # Look for params likely to be command-injectable
         cmdi_params = [
@@ -82,7 +82,7 @@ class CMDiAgent(BaseAgent):
         for param in cmdi_params:
             await self._test_cmdi_param(param, context)
 
-        # ─── 4. SSTI testing ───
+        # --- 4. SSTI testing ---
         await self.log("Testing for Server-Side Template Injection...", "info")
         for form in context.all_forms:
             await self._test_ssti(form, context)
@@ -245,7 +245,7 @@ class CMDiAgent(BaseAgent):
                         evidence=out.stdout[:300],
                         description=(
                             f"Server-Side Template Injection detected. "
-                            f"Engine: {engine}. Payload {payload} → {expected}"
+                            f"Engine: {engine}. Payload {payload} -> {expected}"
                         ),
                         fix="Never render user input in templates. Use sandboxed template engines.",
                     ))
@@ -285,7 +285,7 @@ class CMDiAgent(BaseAgent):
 
         if out.stdout and ("uid=" in out.stdout or "root:" in out.stdout):
             await self.add_vuln(Vuln(
-                name=f"SSTI → Remote Code Execution",
+                name=f"SSTI -> Remote Code Execution",
                 severity="Critical",
                 cvss_score=10.0,
                 endpoint=form.action,

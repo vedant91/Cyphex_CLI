@@ -20,29 +20,29 @@ from models.agent_result import AgentResult
 class LogicAgent(BaseAgent):
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ BUSINESS LOGIC TESTING ═══", "info")
+        await self.log("=== BUSINESS LOGIC TESTING ===", "info")
 
-        # ─── 1. IDOR testing ───
+        # --- 1. IDOR testing ---
         await self.log("Testing for IDOR...", "info")
         await self._test_idor(context)
 
-        # ─── 2. Mass assignment ───
+        # --- 2. Mass assignment ---
         await self.log("Testing for mass assignment...", "info")
         await self._test_mass_assignment(context)
 
-        # ─── 3. SSRF ───
+        # --- 3. SSRF ---
         await self.log("Testing for SSRF...", "info")
         await self._test_ssrf(context)
 
-        # ─── 4. CSRF detection ───
+        # --- 4. CSRF detection ---
         await self.log("Checking for CSRF protection...", "info")
         await self._test_csrf(context)
 
-        # ─── 5. CORS misconfiguration ───
+        # --- 5. CORS misconfiguration ---
         await self.log("Checking CORS configuration...", "info")
         await self._test_cors(context)
 
-        # ─── 6. HTTP method tampering ───
+        # --- 6. HTTP method tampering ---
         await self.log("Testing HTTP method tampering...", "info")
         await self._test_method_tampering(context)
 
@@ -354,6 +354,6 @@ class LogicAgent(BaseAgent):
                 status = out.stdout.strip().replace("'", "")
                 if status == "200":
                     await self.log(
-                        f"  {method} {path} → 200 (potential method tampering)",
+                        f"  {method} {path} -> 200 (potential method tampering)",
                         "warning",
                     )

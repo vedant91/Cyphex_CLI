@@ -145,7 +145,7 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
 
     workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-    # ── Step 1: Resolve target directory ──
+    # -- Step 1: Resolve target directory --
     if repo_url:
         sandbox_name = f"onboard_{int(time.time())}"
         target_dir = os.path.join(workspace_dir, "backend", "sandboxes", sandbox_name)
@@ -167,7 +167,7 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
         print(f"  {C.B}[1/4] Using existing project...{C.RST}")
         print(f"  {C.G}[OK] Target: {target_dir}{C.RST}\n")
 
-    # ── Step 2: Locate the app directory (where package.json lives) ──
+    # -- Step 2: Locate the app directory (where package.json lives) --
     print(f"  {C.B}[2/4] Locating Express application...{C.RST}")
     app_dir = target_dir
     if os.path.exists(os.path.join(target_dir, "backend", "package.json")):
@@ -193,7 +193,7 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
         rel_entry = os.path.relpath(entry_file, app_dir)
         print(f"  {C.G}[OK] Entry point: {rel_entry}{C.RST}\n")
 
-    # ── Step 3: Copy SDK + Inject ──
+    # -- Step 3: Copy SDK + Inject --
     print(f"  {C.B}[3/4] Injecting Cyphex RASP SDK...{C.RST}")
     sdk_src = os.path.join(workspace_dir, "sdks", "node", "cyphex-rasp.js")
     sdk_dest = os.path.join(app_dir, "cyphex-rasp.js")
@@ -212,7 +212,7 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
         else:
             print(f"  {C.Y}[!] Auto-injection failed. Please inject manually (see above).{C.RST}\n")
 
-    # ── Step 4: Install dependencies ──
+    # -- Step 4: Install dependencies --
     print(f"  {C.B}[4/4] Installing dependencies...{C.RST}")
     npm_lock = os.path.join(app_dir, "node_modules")
     if os.path.exists(npm_lock):
@@ -225,7 +225,7 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
         )
     print(f"  {C.G}[OK] Dependencies ready.{C.RST}\n")
 
-    # ── Summary ──
+    # -- Summary --
     rel_app = os.path.relpath(app_dir, workspace_dir)
     print(f"{C.CY}{'=' * 58}")
     print(f"   ONBOARDING COMPLETE")

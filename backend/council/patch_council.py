@@ -8,36 +8,71 @@ from backend.council.model_selector import get_selector
 console = Console()
 
 PATCH_GENERATION_SYSTEM = """
-You are CYPHEX Patch Agent, a secure code analysis assistant.
-RULES:
-1. Return ONLY valid JSON: {"unsafe_reason": string, "fixed_code": string, "patch_safety": "safe"|"review_needed"}
-2. fixed_code must be a COMPLETE drop-in replacement for the vulnerable snippet provided. It will EXACTLY replace the snippet from start to end.
-3. VERY IMPORTANT: You must preserve ALL opening and closing braces, parentheses, and structural blocks present in the original snippet. Do not truncate the code. If the original snippet includes a `try {` block, make sure the `catch` block is fully preserved. Failure to output syntactically valid code will cause a fatal compiler error.
-4. Do not add imports unless strictly required, do not restructure, do not rename variables.
-5. IMPORTANT: Provide REAL, WORKING code. Never use pseudo-code, comments-as-placeholders, or stubs like "// add auth logic here".
-6. unsafe_reason: one sentence explaining why the original code is dangerous.
-7. patch_safety = "safe" only if the fix is unambiguous.
+You are CYPHEX Patch Agent, a surgical secure code transformation assistant.
+Return ONLY valid JSON: {"unsafe_reason": string, "fixed_code": string, "patch_safety": "safe"|"review_needed"}
 
-ANTI-REGRESSION RULES (CRITICAL — violations will be rejected by reviewers):
-8. NEVER remove existing try/catch/finally blocks or error handling.
-9. NEVER add new import/require statements in the middle of a function body — only at the top of the file.
-10. NEVER delete or comment out a route/handler to "fix" it — guard it behind auth/role checks instead.
-11. NEVER add scanner-suppression comments (nosemgrep, eslint-disable, # noqa, @ts-ignore).
-12. Preserve the function signature and surrounding control flow exactly.
-13. Your fix must be MINIMAL — change only what is needed to eliminate the vulnerability.
+═══ CRITICAL SCOPE RULE — read this CAREFULLY ═══
+The "Vulnerable code" block you receive is the COMPLETE code range that will be replaced in the file.
 
-VULNERABILITY-SPECIFIC FIX PATTERNS (use these):
-- SQL Injection: Replace template literals with parameterized queries using ? placeholders and [value] arrays.
-- XSS: Remove dangerouslySetInnerHTML entirely. Render content as text children: <h3>{a.title}</h3> instead of dangerouslySetInnerHTML={{__html: a.title}}.
-- Hardcoded Secrets: Replace literal values with ${ENV_VAR} references. Example: MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-- Sensitive Data Exposure (debug routes): Guard the route behind an admin role check (e.g., requireAdmin middleware). Do NOT comment it out.
-- SSRF: Add URL validation blocking private IPs (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16) and metadata endpoints.
-- IDOR: Use parameterized queries with ownership check: WHERE id = ? AND user_id = ?
-- Container as Root: Add USER node before CMD.
-- Debug UI routes/nav: Guard with admin role check middleware. Do NOT remove or comment out.
+TWO MODES — pick the one that matches the snippet:
 
-CRITICAL: Your fix must ELIMINATE the vulnerability, not just add a superficial check. The fix will be reviewed by other AI models — incomplete patches will be rejected.
+MODE A — FULL FUNCTION (snippet starts with router.*, app.*, function, async, def, class):
+  ✓ Return the ENTIRE function from its opening line to its closing `});` or `}`.
+  ✓ This is the safest mode — always preferred when you see a full function body.
+  ✓ Include all existing try/catch blocks, return statements, and closing braces.
+  ✗ NEVER return a partial function body — always include opening AND closing.
+
+MODE B — SURGICAL (snippet is 1-5 lines inside an existing function):
+  ✓ Replace ONLY the dangerous line(s) with the safe equivalent.
+  ✓ Do NOT add any extra opening/closing braces beyond what was in the snippet.
+  ✗ NEVER open a new function body (router.post, function) that wasn't in the snippet.
+
+WHAT TO NEVER DO (violations cause SYNTAX ERRORS and will be REJECTED):
+✗ Return a partial function body (opening brace with no closing, or closing with no opening)
+✗ Add closing braces `}` or `});` that don't match the snippet
+✗ Add import/require statements inside a function body
+✗ Add scanner-suppression comments (nosemgrep, eslint-disable, # noqa)
+✗ Remove existing try/catch/finally blocks
+✗ Add placeholder comments ("// add auth logic here")
+✗ Return LESS code than the input — always preserve surrounding structure
+
+WHAT TO DO:
+✓ If you see a full function → return the full function with the vulnerability fixed inside it
+✓ If you see a few lines → fix only those lines
+✓ Keep every surrounding variable, function call, and brace that was in the snippet
+✓ The result must be syntactically complete and valid — testable with `node --check`
+
+VULNERABILITY-SPECIFIC PATTERNS:
+
+CWE-89 SQL Injection — change query construction to parameterized:
+  BEFORE: const sql = `SELECT * FROM users WHERE id = ${id}`;  db.query(sql);
+  AFTER:  const sql = 'SELECT * FROM users WHERE id = ?';       db.query(sql, [id]);
+
+CWE-78 Command Injection — eliminate the shell call entirely:
+  BEFORE: exec(`ls ${userInput}`)
+  AFTER:  execFileSync('ls', [userInput], {encoding: 'utf8'})
+  Note: add `const { execFileSync } = require('child_process');` at the top of the function if not present.
+
+CWE-79 XSS — replace innerHTML with textContent:
+  BEFORE: element.innerHTML = userInput
+  AFTER:  element.textContent = userInput
+
+CWE-798 Hardcoded Secrets — replace literal values:
+  BEFORE: password: 'hardcoded123'
+  AFTER:  password: process.env.DB_PASSWORD
+
+CWE-22 Path Traversal — use path.basename() before file access:
+  BEFORE: fs.readFile(req.query.file, ...)
+  AFTER:  const safeFile = path.basename(req.query.file); fs.readFile(safeFile, ...)
+
+CWE-200 Sensitive Data Exposure — remove password/secret from JSON responses:
+  BEFORE: res.json(users)   // where users contains password field
+  AFTER:  res.json(users.map(u => { const {password, ...safe} = u; return safe; }))
+
+unsafe_reason: one sentence max, explaining the danger.
+patch_safety: "safe" only if unambiguous. "review_needed" if there is any uncertainty.
 """
+
 
 PATCH_REVIEW_SYSTEM = """
 You are a senior security code reviewer.
@@ -249,14 +284,38 @@ class PatchCouncil(CouncilOrchestrator):
         for i, v in enumerate(vuln_list, 1):
             console.print(f"[dim]  [{i}/{len(vuln_list)}] Patching: {v['vuln_name']}[/dim]")
             directive = CWE_DIRECTIVES.get(v['cwe'], "Eliminate the vulnerability completely. The fix must remove the dangerous pattern, not just add a superficial validation.")
+            vuln_snippet = v['vulnerable_code']
+            snippet_line_count = len(vuln_snippet.strip().splitlines())
+            # Detect if the snippet is a full function (Mode A) or partial (Mode B)
+            first_line = vuln_snippet.strip().splitlines()[0].strip() if vuln_snippet.strip() else ""
+            is_full_fn = any(first_line.startswith(kw) for kw in (
+                "router.", "app.", "function ", "async function", "async (", "module.exports",
+                "def ", "class ", "export default", "export async"
+            ))
+            if is_full_fn:
+                scope_instruction = (
+                    f"MODE A — FULL FUNCTION: This snippet is a complete function ({snippet_line_count} lines). "
+                    f"Return the ENTIRE function with the vulnerability fixed inside it, "
+                    f"from its opening line to its closing `}});` or `}}`. "
+                    f"Do NOT return a partial body. Do NOT truncate."
+                )
+            else:
+                scope_instruction = (
+                    f"MODE B — SURGICAL: This snippet is {snippet_line_count} lines inside an existing function. "
+                    f"Replace ONLY the dangerous lines. Do NOT add opening/closing braces "
+                    f"that weren't already in the snippet."
+                )
+
             prompt = (
                 f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
                 f"Severity: {v.get('severity', 'High')}\n"
                 f"File: {v['file_path']}\n\n"
-                f"Vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                f"Vulnerable code:\n```\n{vuln_snippet}\n```\n\n"
                 f"FIX REQUIREMENT: {directive}\n\n"
-                f"Generate the fixed version of this code. The fix must ELIMINATE the vulnerability, not just add a superficial check."
+                f"⚠️  SCOPE: {scope_instruction}\n"
+                f"Output the fixed code now."
             )
+
             try:
                 result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, prompt, task_name="Generating", severity=v.get('severity', ''), cwe=v.get('cwe', ''))
                 patch_results.append(result)
