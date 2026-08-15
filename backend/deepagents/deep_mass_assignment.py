@@ -1,22 +1,15 @@
 """
-CYPHEX DeepAgent — Mass Assignment (CWE-915)
+CYPHEX DeepAgent ΓÇö Mass Assignment (CWE-915)
 
 Tests for mass assignment vulnerabilities where the server accepts extra
 model attributes (isAdmin, role, balance, verified) passed in a POST body
 and binds them directly to the user/object model without a whitelist.
 """
 import json as _json
-<<<<<<< HEAD
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-=======
 from backend.deepagents.base_deep_agent import BaseDeepAgent
 from backend.backend.models.scan import ScanContext, Vuln
 from backend.backend.models.agent_result import AgentResult
 from backend.deepagents.oracle_attack import HttpRequest
->>>>>>> origin/main
 
 # Extra fields to inject alongside normal registration data
 MASS_ASSIGNMENT_PAYLOADS = [
@@ -39,14 +32,12 @@ ESCALATION_SIGNALS = [
 ]
 
 
-<<<<<<< HEAD
-=======
 def _preferred_write_method(profile, default: str = "POST") -> str:
     """
     Pick a state-changing HTTP method from an ASI EndpointProfile.
 
     `AttackSurfaceIndex.endpoints` maps path -> EndpointProfile, whose
-    `.methods` is a *set* of verbs actually observed — not a dict. Prefer a
+    `.methods` is a *set* of verbs actually observed ΓÇö not a dict. Prefer a
     write verb (POST/PUT/PATCH) since mass assignment only applies to those;
     fall back to `default` when the profile is missing or GET-only.
     """
@@ -57,7 +48,6 @@ def _preferred_write_method(profile, default: str = "POST") -> str:
     return default
 
 
->>>>>>> origin/main
 class DeepMassAssignmentAgent(BaseDeepAgent):
     """
     Mass Assignment / Parameter Pollution DeepAgent (CWE-915).
@@ -85,11 +75,7 @@ class DeepMassAssignmentAgent(BaseDeepAgent):
         for path in list(self.asi.endpoints):
             path_lower = path.lower()
             if any(kw in path_lower for kw in ("register", "signup", "create", "update", "profile", "user")):
-<<<<<<< HEAD
-                method = self.asi.endpoints.get(path, {}).get("method", "POST")
-=======
                 method = _preferred_write_method(self.asi.endpoints.get(path))
->>>>>>> origin/main
                 candidates.append((path, method))
         if not candidates:
             # Default targets for Express apps

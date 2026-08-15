@@ -1,5 +1,5 @@
 """
-CYPHEX DeepAgent — Race Condition (CWE-362)
+CYPHEX DeepAgent ΓÇö Race Condition (CWE-362)
 
 Tests for Time-of-Check to Time-of-Use (TOCTOU) vulnerabilities by sending
 concurrent requests to state-changing endpoints (orders, coupons, discounts,
@@ -9,17 +9,10 @@ the price of one.
 """
 import asyncio
 import json as _json
-<<<<<<< HEAD
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-=======
 from backend.deepagents.base_deep_agent import BaseDeepAgent
 from backend.backend.models.scan import ScanContext, Vuln
 from backend.backend.models.agent_result import AgentResult
 from backend.deepagents.oracle_attack import HttpRequest
->>>>>>> origin/main
 
 # Endpoints that are prime race condition targets
 RACE_TARGET_KEYWORDS = [
@@ -39,10 +32,10 @@ class DeepRaceConditionAgent(BaseDeepAgent):
     Sends N concurrent POST requests to the same state-changing endpoint
     within a tight time window. If the server doesn't use proper locking
     (DB transactions, Redis locks, SELECT FOR UPDATE), multiple requests
-    may succeed simultaneously — e.g., applying a discount N times.
+    may succeed simultaneously ΓÇö e.g., applying a discount N times.
     """
     PRIMARY_VULN_CLASS = "Race Condition / TOCTOU Business Logic Flaw"
-    # Use a smaller parallel batch — race attacks are inherently parallel
+    # Use a smaller parallel batch ΓÇö race attacks are inherently parallel
     PARALLEL_BATCH = 1
 
     async def run(self, context: ScanContext) -> AgentResult:
@@ -58,16 +51,9 @@ class DeepRaceConditionAgent(BaseDeepAgent):
                 await self._race_attack(endpoint, context)
         else:
             self.console.print(
-                "[cyan]DeepRaceConditionAgent[/cyan] No obvious race targets — "
+                "[cyan]DeepRaceConditionAgent[/cyan] No obvious race targets ΓÇö "
                 "probing generic POST endpoints..."
             )
-<<<<<<< HEAD
-            # Probe any POST endpoints
-            post_endpoints = [
-                ep for ep in list(self.asi.endpoints)
-                if self.asi.endpoints.get(ep, {}).get("method", "GET") == "POST"
-                or "create" in ep.lower() or "register" in ep.lower()
-=======
             # Probe any POST endpoints. asi.endpoints maps path -> EndpointProfile
             # whose `.methods` is a set of observed verbs (not a dict).
             def _has_post(ep: str) -> bool:
@@ -77,7 +63,6 @@ class DeepRaceConditionAgent(BaseDeepAgent):
             post_endpoints = [
                 ep for ep in list(self.asi.endpoints)
                 if _has_post(ep) or "create" in ep.lower() or "register" in ep.lower()
->>>>>>> origin/main
             ]
             for ep in post_endpoints[:2]:
                 await self._race_attack(ep, context)
@@ -133,7 +118,7 @@ class DeepRaceConditionAgent(BaseDeepAgent):
             f"  Race result: {len(successes)}/{RACE_CONCURRENCY} requests returned 200/201"
         )
 
-        # If more than 1 request succeeded on a state-changing endpoint → race condition
+        # If more than 1 request succeeded on a state-changing endpoint ΓåÆ race condition
         if len(successes) > 1:
             self.console.print(
                 f"[red]  [DeepRace] RACE CONDITION CONFIRMED at {endpoint}![/red]\n"
