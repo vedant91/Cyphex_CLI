@@ -9,10 +9,17 @@ the price of one.
 """
 import asyncio
 import json as _json
+<<<<<<< HEAD
 from deepagents.base_deep_agent import BaseDeepAgent
 from models.scan import ScanContext, Vuln
 from models.agent_result import AgentResult
 from deepagents.oracle_attack import HttpRequest
+=======
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+>>>>>>> origin/main
 
 # Endpoints that are prime race condition targets
 RACE_TARGET_KEYWORDS = [
@@ -54,11 +61,23 @@ class DeepRaceConditionAgent(BaseDeepAgent):
                 "[cyan]DeepRaceConditionAgent[/cyan] No obvious race targets — "
                 "probing generic POST endpoints..."
             )
+<<<<<<< HEAD
             # Probe any POST endpoints
             post_endpoints = [
                 ep for ep in list(self.asi.endpoints)
                 if self.asi.endpoints.get(ep, {}).get("method", "GET") == "POST"
                 or "create" in ep.lower() or "register" in ep.lower()
+=======
+            # Probe any POST endpoints. asi.endpoints maps path -> EndpointProfile
+            # whose `.methods` is a set of observed verbs (not a dict).
+            def _has_post(ep: str) -> bool:
+                profile = self.asi.endpoints.get(ep)
+                return "POST" in (getattr(profile, "methods", None) or set())
+
+            post_endpoints = [
+                ep for ep in list(self.asi.endpoints)
+                if _has_post(ep) or "create" in ep.lower() or "register" in ep.lower()
+>>>>>>> origin/main
             ]
             for ep in post_endpoints[:2]:
                 await self._race_attack(ep, context)

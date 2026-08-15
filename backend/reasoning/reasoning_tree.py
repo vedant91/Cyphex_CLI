@@ -14,6 +14,7 @@ Storage: .cyphex/reasoning_trees/{tree_id}.json
 """
 
 import os
+import re
 import json
 import uuid
 import time
@@ -22,10 +23,29 @@ from typing import Optional
 from dataclasses import dataclass, field, asdict
 
 
-# Save reasoning trees to a STABLE global directory — NOT inside temporary sandboxes.
-# This ensures reasoning trees persist across scans for auditability.
-_CYPHEX_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TREE_DIR = os.path.join(_CYPHEX_ROOT, ".cyphex", "reasoning_trees")
+TREE_DIR = os.path.join(".cyphex", "reasoning_trees")
+
+# tree_id is attacker-influenceable on the load path (unlike the writer, which
+# always generates it internally via uuid.uuid4().hex). Restrict to a safe
+# charset before it's ever joined into a filesystem path.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_tree_path(tree_id: str, base_dir: str) -> Optional[str]:
+    """
+    Validate tree_id and resolve it to a path guaranteed to stay inside the
+    trees directory. Returns None if tree_id is missing, malformed, or would
+    resolve outside the trees directory (path traversal attempt).
+    """
+    if not tree_id or not _SAFE_ID_RE.match(tree_id):
+        return None
+    trees_dir = os.path.join(base_dir, TREE_DIR)
+    filepath = os.path.join(trees_dir, f"{tree_id}.json")
+    real_base = os.path.realpath(trees_dir)
+    real_path = os.path.realpath(filepath)
+    if os.path.dirname(real_path) != real_base:
+        return None
+    return real_path
 
 
 @dataclass
@@ -205,16 +225,17 @@ class ReasoningTree:
         for n in self.nodes:
             children_map[n["id"]] = n.get("children", [])
 
-        def depth(node_id, visited=None):
-            if visited is None:
-                visited = set()
-            if node_id in visited:
-                return 0
-            visited.add(node_id)
+        def depth(node_id):
+            # No visited-tracking needed: add_node() only ever creates a brand
+            # new node with a monotonically increasing id and attaches it to
+            # exactly one parent at creation time, so this graph is always a
+            # proper tree — no shared nodes, no cycles are possible. A shared
+            # mutable `visited` set across sibling branches previously made
+            # visiting one subtree cause its siblings to be undercounted as 0.
             kids = children_map.get(node_id, [])
             if not kids:
                 return 1
-            return 1 + max(depth(c, visited) for c in kids)
+            return 1 + max(depth(c) for c in kids)
 
         root_ids = [n["id"] for n in self.nodes if n.get("type") == "root"]
         if root_ids:
@@ -246,19 +267,19 @@ def create_tree(
 
 
 def save_tree(tree: ReasoningTree, base_dir: str = "."):
-    """Save reasoning tree to the stable global .cyphex/reasoning_trees/ dir."""
-    # Always save to global stable dir, ignoring base_dir for storage
-    os.makedirs(TREE_DIR, exist_ok=True)
-    filepath = os.path.join(TREE_DIR, f"{tree.tree_id}.json")
+    """Save reasoning tree to .cyphex/reasoning_trees/{tree_id}.json"""
+    trees_dir = os.path.join(base_dir, TREE_DIR)
+    os.makedirs(trees_dir, exist_ok=True)
+    filepath = os.path.join(trees_dir, f"{tree.tree_id}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(tree.to_dict(), f, indent=2, ensure_ascii=False)
     return filepath
 
 
 def load_tree(tree_id: str, base_dir: str = ".") -> Optional[ReasoningTree]:
-    """Load a reasoning tree by ID from the stable global dir."""
-    filepath = os.path.join(TREE_DIR, f"{tree_id}.json")
-    if not os.path.exists(filepath):
+    """Load a reasoning tree by ID."""
+    filepath = _safe_tree_path(tree_id, base_dir)
+    if not filepath or not os.path.exists(filepath):
         return None
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -274,14 +295,15 @@ def load_tree(tree_id: str, base_dir: str = ".") -> Optional[ReasoningTree]:
 
 def list_trees(thread_id: str = "", base_dir: str = ".") -> list:
     """List all reasoning trees, optionally filtered by thread_id."""
-    if not os.path.isdir(TREE_DIR):
+    trees_dir = os.path.join(base_dir, TREE_DIR)
+    if not os.path.isdir(trees_dir):
         return []
     trees = []
-    for fname in os.listdir(TREE_DIR):
+    for fname in os.listdir(trees_dir):
         if not fname.endswith(".json"):
             continue
         try:
-            with open(os.path.join(TREE_DIR, fname), "r") as f:
+            with open(os.path.join(trees_dir, fname), "r") as f:
                 data = json.load(f)
             if thread_id and data.get("thread_id") != thread_id:
                 continue

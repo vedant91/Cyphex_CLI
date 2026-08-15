@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 import sys
 import os
@@ -32,14 +33,34 @@ class TestPatchCouncil:
 
     @pytest.fixture
     def council(self):
-        return PatchCouncil()
+        # Hermetic selector: fix the patcher/reviewer roster so these tests do
+        # not depend on a live Ollama instance.
+        fake_models = [
+            SimpleNamespace(name="cyphex-patch", param_size=7.0),
+            SimpleNamespace(name="deepseek-coder:1.3b", param_size=1.3),
+            SimpleNamespace(name="llama3.1:8b", param_size=8.0),
+        ]
+        fake_selector = MagicMock()
+        fake_selector.models = fake_models
+        fake_selector.get.return_value = "cyphex-patch"
+        fake_selector.get_reviewers.return_value = ["deepseek-coder:1.3b", "llama3.1:8b"]
+        fake_selector.get_vram_costs.return_value = {}
+        with patch(
+            "backend.council.patch_council.get_selector",
+            new_callable=AsyncMock,
+            return_value=fake_selector,
+        ):
+            yield PatchCouncil()
 
     @pytest.mark.asyncio
     async def test_both_validators_approve(self, council):
         """Parameterised query patch approved by both validators -> safety=safe"""
         call_count = 0
 
-        async def mock_call(model, system, prompt, task_name=""):
+        # **kwargs, not a fixed keyword list: the real _call has grown
+        # `severity` and `cwe` since these were written, and a stub that
+        # mirrors the signature exactly breaks again on the next addition.
+        async def mock_call(model, system, prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             if model == "cyphex-patch":
@@ -71,7 +92,10 @@ class TestPatchCouncil:
         """Incomplete patch rejected by one validator -> safety=review_needed"""
         call_count = 0
 
-        async def mock_call(model, system, prompt, task_name=""):
+        # **kwargs, not a fixed keyword list: the real _call has grown
+        # `severity` and `cwe` since these were written, and a stub that
+        # mirrors the signature exactly breaks again on the next addition.
+        async def mock_call(model, system, prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             if model == "cyphex-patch":
@@ -102,7 +126,10 @@ class TestPatchCouncil:
     @pytest.mark.asyncio
     async def test_both_validators_reject(self, council):
         """Bad patch rejected by both -> safety=rejected, fixed_code still returned"""
-        async def mock_call(model, system, prompt, task_name=""):
+        # **kwargs, not a fixed keyword list: the real _call has grown
+        # `severity` and `cwe` since these were written, and a stub that
+        # mirrors the signature exactly breaks again on the next addition.
+        async def mock_call(model, system, prompt, **kwargs):
             if model == "cyphex-patch":
                 return {
                     "unsafe_reason": "eval with user input",
@@ -133,7 +160,10 @@ class TestPatchCouncil:
         import re
         CVE_PATTERN = re.compile(r'CVE-\d{4}-\d{4,}')
 
-        async def mock_call(model, system, prompt, task_name=""):
+        # **kwargs, not a fixed keyword list: the real _call has grown
+        # `severity` and `cwe` since these were written, and a stub that
+        # mirrors the signature exactly breaks again on the next addition.
+        async def mock_call(model, system, prompt, **kwargs):
             if model == "cyphex-patch":
                 return {
                     "unsafe_reason": "Hardcoded secret in source code (CWE-798)",
@@ -167,7 +197,10 @@ class TestPatchCouncil:
             unloaded_models.append(model)
             council.vram.loaded.pop(model, None)
 
-        async def mock_call(model, system, prompt, task_name=""):
+        # **kwargs, not a fixed keyword list: the real _call has grown
+        # `severity` and `cwe` since these were written, and a stub that
+        # mirrors the signature exactly breaks again on the next addition.
+        async def mock_call(model, system, prompt, **kwargs):
             if model == "cyphex-patch":
                 return {"unsafe_reason": "test", "fixed_code": "test", "patch_safety": "safe"}
             return {"approved": True, "reason": "ok"}

@@ -1,0 +1,1081 @@
+
+
+   _____ __     __ _____   _    _  ______ __   __
+  / ____|\ \   / /|  __ \ | |  | ||  ____|\ \ / /
+ | |      \ \_/ / | |__) || |__| || |__    \ V /
+ | |       \   /  |  ___/ |  __  ||  __|    > <
+ | |____    | |   | |     | |  | || |____  / . \
+  \_____|   |_|   |_|     |_|  |_||______|/_/ \_\
+
+  Autonomous Cyber Defence | v4.3 | OFFLINE-FIRST
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+INFO:cyphex.reasoning:Oracle agent-reasoning loaded (15 cognitive architectures)
+
+  ██████╗██╗   ██╗██████╗ ██╗  ██╗███████╗██╗  ██╗
+  ██╔════╝╚██╗ ██╔╝██╔══██╗██║  ██║██╔════╝╚██╗██╔╝
+  ██║      ╚████╔╝ ██████╔╝███████║█████╗   ╚███╔╝
+  ██║       ╚██╔╝  ██╔═══╝ ██╔══██║██╔══╝   ██╔██╗
+  ╚██████╗   ██║   ██║     ██║  ██║███████╗██╔╝ ██╗
+   ╚═════╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Multi-Agent Security Pipeline  │  v2.0  │  AI-Powered
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Scan ID: cli_cdd68028
+
+INFO:httpx:HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+  ┌─ Tool Readiness (4/5 active) ─────────────────────┐
+  │  ✓ Git
+  │  ✓ Docker
+  │  ✓ Ollama       10 model(s)
+  │  ○ Semgrep      (Requires WSL on Windows (optional))
+  │  ✓ Nuclei
+  └──────────────────────────────────────────────────┘
+    Models: llama3.1:8b, llama3.2:3b, deepseek-coder:1.3b, glm-5.1:cloud
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 1/8   GETTING SOURCE CODE  [SCAN t=4.3s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Cloning https://github.com/vedant91/cyphex-vibemart-demo (branch: main)
+  [OK] Cloned to D:\cyphex_v3\backend\sandboxes\cli_cdd68028
+  Framework   Node.js (Express)
+  Entry       src/index.js
+  Files       6 code files
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 2/8   STATIC CODE ANALYSIS  [SCAN t=5.6s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+  SAST: 6 files scanned, 0 issues
+  Running Built-in (20 languages) scanner...
+  [Critical] SQL Injection (Template Literal) (CWE-89)
+       src\db.js:39
+       function query(sql, params = []) {
+  [Critical] SQL Injection (Template Literal) (CWE-89)
+       src\routes\orders.js:20
+       db.query(sql, );
+  [Critical] Command Injection (child_process) (CWE-78)
+       src\routes\orders.js:34
+       const output = execSync(`echo "Exporting orders as ${format}" && ls`).toString();
+  [Critical] SQL Injection (Template Literal) (CWE-89)
+       src\routes\orders.js:63
+       const results = db.query(sql, );
+  [Critical] SQL Injection (Template Literal) (CWE-89)
+       src\routes\products.js:24
+       const results = db.query(sql, [`%${searchTerm}%`]);
+  [Critical] SQL Injection (Template Literal) (CWE-89)
+       src\routes\users.js:21
+       const results = db.query(sql, ) || [];
+  [OK] Built-in (20 languages): +6 additional findings
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 3/8   DEPLOYING SANDBOX  [SCAN t=5.7s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Creating sandbox package...
+  Deploying sandbox (native)...
+INFO:httpx:HTTP Request: GET http://localhost:56798 "HTTP/1.1 404 Not Found"
+  ✓ Sandbox deployed successfully!
+  PID: 1608, Port: 56798
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ▸ SANDBOX LIVE AT:  http://localhost:56798
+    Open in browser to see the target app
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 4/8   DYNAMIC VULNERABILITY SCAN  [SCAN t=43.7s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 02] Crawler
+  Discover pages, forms, parameters
+  ────────────────────────────────────────────────────────────────────
+  [Crawler]$ curl -sL "http://localhost:56798/"
+INFO:httpx:HTTP Request: GET http://localhost:56798/ "HTTP/1.1 404 Not Found"
+  [Crawler] HTTP 404 http://localhost:56798/
+
+  [Crawler][OK] pages=1 forms=0
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 02b] API Discovery
+  SPA detected (0 HTML forms). Probing REST API surface...
+  ────────────────────────────────────────────────────────────────────
+  [API]$ curl -s -X POST "http://localhost:56798/api/auth/login" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/auth/login "HTTP/1.1 404 Not Found"
+  [API] POST /api/auth/login => 404
+  [API]$ curl -s -X POST "http://localhost:56798/api/login" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/login "HTTP/1.1 404 Not Found"
+  [API] POST /api/login => 404
+  [API]$ curl -s -X POST "http://localhost:56798/login" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/login "HTTP/1.1 404 Not Found"
+  [API] POST /login => 404
+  [API]$ curl -s "http://localhost:56798/api/employees"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees "HTTP/1.1 404 Not Found"
+  [API] GET /api/employees => 404
+  [API]$ curl -s "http://localhost:56798/api/employees/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees/1 "HTTP/1.1 404 Not Found"
+  [API] GET /api/employees/1 => 404
+  [API]$ curl -s "http://localhost:56798/api/employees/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees/2 "HTTP/1.1 404 Not Found"
+  [API] GET /api/employees/2 => 404
+  [API]$ curl -s "http://localhost:56798/api/payroll/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payroll/1 "HTTP/1.1 404 Not Found"
+  [API] GET /api/payroll/1 => 404
+  [API]$ curl -s "http://localhost:56798/api/payroll/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payroll/2 "HTTP/1.1 404 Not Found"
+  [API] GET /api/payroll/2 => 404
+  [API]$ curl -s "http://localhost:56798/api/announcements"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/announcements "HTTP/1.1 404 Not Found"
+  [API] GET /api/announcements => 404
+  [API]$ curl -s -X POST "http://localhost:56798/api/announcements" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/announcements "HTTP/1.1 404 Not Found"
+  [API] POST /api/announcements => 404
+  [API]$ curl -s -X POST "http://localhost:56798/api/ping" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/ping "HTTP/1.1 404 Not Found"
+  [API] POST /api/ping => 404
+  [API]$ curl -s "http://localhost:56798/api/ping?host=127.0.0.1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/ping?host=127.0.0.1 "HTTP/1.1 404 Not Found"
+  [API] GET /api/ping?host=127.0.0.1 => 404
+  [API]$ curl -s -X POST "http://localhost:56798/api/fetch" -H "Content-Type: application/json" -d '{...}'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/fetch "HTTP/1.1 404 Not Found"
+  [API] POST /api/fetch => 404
+  [API]$ curl -s "http://localhost:56798/api/fetch?url=http://localhost"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/fetch?url=http://localhost "HTTP/1.1 404 Not Found"
+  [API] GET /api/fetch?url=http://localhost => 404
+  [API]$ curl -s "http://localhost:56798/api/debug"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/debug "HTTP/1.1 404 Not Found"
+  [API] GET /api/debug => 404
+  [API]$ curl -s "http://localhost:56798/api/env"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/env "HTTP/1.1 404 Not Found"
+  [API] GET /api/env => 404
+  [API]$ curl -s "http://localhost:56798/api/health"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/health "HTTP/1.1 200 OK"
+  [API] GET /api/health => HTTP 200 (218 bytes)
+  [API]$ curl -s "http://localhost:56798/api/config"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/config "HTTP/1.1 404 Not Found"
+  [API] GET /api/config => 404
+  [API]$ curl -s "http://localhost:56798/api/users"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/users "HTTP/1.1 404 Not Found"
+  [API] GET /api/users => 404
+
+  [API Discovery][OK] live_apis=1 synthetic_forms=0
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 04] XSS
+  Probe reflected XSS payload execution paths
+  ────────────────────────────────────────────────────────────────────
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 03] Injection (SQLi)
+  Probe SQL injection indicators
+  ────────────────────────────────────────────────────────────────────
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 05] Auth
+  Try weak/default credential flows
+  ────────────────────────────────────────────────────────────────────
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 07] LFI
+  Try file traversal payloads
+  ────────────────────────────────────────────────────────────────────
+  [LFI]$ curl -s "http://localhost:56798/download?file=../../../etc/passwd"
+INFO:httpx:HTTP Request: GET http://localhost:56798/download?file=../../../etc/passwd "HTTP/1.1 404 Not Found"
+  [Agent 07 ▶ Reasoning] Testing path traversal: /download?file=../../../etc/passwd
+    Response: HTTP 404 (309 bytes)
+    Decision: No file content leaked → endpoint clean
+  [LFI]$ curl -s "http://localhost:56798/api/file?path=../../../etc/passwd"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/file?path=../../../etc/passwd "HTTP/1.1 404 Not Found"
+  [Agent 07 ▶ Reasoning] Testing path traversal: /api/file?path=../../../etc/passwd
+    Response: HTTP 404 (309 bytes)
+    Decision: No file content leaked → endpoint clean
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 06] CMDi
+  Probe command execution sinks
+  ────────────────────────────────────────────────────────────────────
+  [CMDi]$ curl -s "http://localhost:56798/api/ping?host=127.0.0.1;id"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/ping?host=127.0.0.1;id "HTTP/1.1 404 Not Found"
+  [Agent 06 ▶ Reasoning] Testing command injection via GET: /api/ping?host=127.0.0.1;id
+    Response: HTTP 404 (309 bytes)
+    Decision: No OS output → endpoint clean
+  [CMDi]$ curl -s "http://localhost:56798/ping?host=127.0.0.1|whoami"
+INFO:httpx:HTTP Request: GET http://localhost:56798/ping?host=127.0.0.1|whoami "HTTP/1.1 404 Not Found"
+  [Agent 06 ▶ Reasoning] Testing command injection via GET: /ping?host=127.0.0.1|whoami
+    Response: HTTP 404 (305 bytes)
+    Decision: No OS output → endpoint clean
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 08] Logic
+  Check insecure CORS and basic authz gaps
+  ────────────────────────────────────────────────────────────────────
+  [Logic]$ curl -sI -H "Origin: https://evil.example" "http://localhost:56798"
+INFO:httpx:HTTP Request: GET http://localhost:56798 "HTTP/1.1 500 Internal Server Error"
+  [Agent 08 ▶ Reasoning] Sending spoofed Origin header to test CORS policy
+    Access-Control-Allow-Origin: not-set
+    Decision: CORS policy properly restrictive
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 11] Supply Chain
+  Check exposed dependency manifests
+  ────────────────────────────────────────────────────────────────────
+  [SupplyChain]$ curl -s -o /dev/null -w "%{http_code}" "http://localhost:56798/package.json"
+INFO:httpx:HTTP Request: GET http://localhost:56798/package.json "HTTP/1.1 404 Not Found"
+  [SupplyChain] /package.json status=404
+  [SupplyChain]$ curl -s -o /dev/null -w "%{http_code}" "http://localhost:56798/requirements.txt"
+INFO:httpx:HTTP Request: GET http://localhost:56798/requirements.txt "HTTP/1.1 404 Not Found"
+  [SupplyChain] /requirements.txt status=404
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 09] IDOR
+  Probe insecure direct object references by enumerating sequential IDs
+  ────────────────────────────────────────────────────────────────────
+  [IDOR]$ curl -s "http://localhost:56798/api/employees/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees/1 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/employees/1 => HTTP 404 (316 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/employees/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees/2 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/employees/2 => HTTP 404 (316 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/employees/3"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/employees/3 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/employees/3 => HTTP 404 (316 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payroll/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payroll/1 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payroll/1 => HTTP 404 (314 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payroll/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payroll/2 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payroll/2 => HTTP 404 (314 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payroll/3"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payroll/3 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payroll/3 => HTTP 404 (314 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/users/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/users/1 "HTTP/1.1 403 Forbidden"
+  [IDOR] GET /api/users/1 => HTTP 403 (59 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/users/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/users/2 "HTTP/1.1 403 Forbidden"
+  [IDOR] GET /api/users/2 => HTTP 403 (59 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/users/3"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/users/3 "HTTP/1.1 403 Forbidden"
+  [IDOR] GET /api/users/3 => HTTP 403 (59 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payslips/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payslips/1 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payslips/1 => HTTP 404 (315 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payslips/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payslips/2 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payslips/2 => HTTP 404 (315 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/payslips/3"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/payslips/3 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/payslips/3 => HTTP 404 (315 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/orders/1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/orders/1 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/orders/1 => HTTP 404 (313 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/orders/2"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/orders/2 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/orders/2 => HTTP 404 (313 bytes)
+  [IDOR]$ curl -s "http://localhost:56798/api/orders/3"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/orders/3 "HTTP/1.1 404 Not Found"
+  [IDOR] GET /api/orders/3 => HTTP 404 (313 bytes)
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 10] SSRF
+  Probe server-side request forgery via URL parameters
+  ────────────────────────────────────────────────────────────────────
+  [SSRF]$ curl -s -X POST "http://localhost:56798/api/fetch" -d 'url=http://127.0.0.1'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/fetch "HTTP/1.1 404 Not Found"
+  [SSRF] POST /api/fetch => HTTP 404 internal_data=no
+  [SSRF]$ curl -s -X POST "http://localhost:56798/api/fetch" -d 'url=http://169.254.169.254/latest/meta-data/'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/fetch "HTTP/1.1 404 Not Found"
+  [SSRF] POST /api/fetch => HTTP 404 internal_data=no
+  [SSRF]$ curl -s -X POST "http://localhost:56798/api/proxy" -d 'url=http://127.0.0.1'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/proxy "HTTP/1.1 404 Not Found"
+  [SSRF] POST /api/proxy => HTTP 404 internal_data=no
+  [SSRF]$ curl -s "http://localhost:56798/api/fetch?url=http://127.0.0.1"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/fetch?url=http://127.0.0.1 "HTTP/1.1 404 Not Found"
+  [SSRF] GET /api/fetch?url=http://127.0.0.1 => 404
+  [SSRF]$ curl -s "http://localhost:56798/api/fetch?url=http://169.254.169.254/latest/meta-data/"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/fetch?url=http://169.254.169.254/latest/meta-data/ "HTTP/1.1 404 Not Found"
+  [SSRF] GET /api/fetch?url=http://169.254.169.254/latest/meta-data/ => 404
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 12] Data Exposure
+  Probe debug and config endpoints for sensitive data leaks
+  ────────────────────────────────────────────────────────────────────
+  [SDE]$ curl -s "http://localhost:56798/api/debug"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/debug "HTTP/1.1 404 Not Found"
+  [SDE] /api/debug => HTTP 404
+  [SDE]$ curl -s "http://localhost:56798/api/env"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/env "HTTP/1.1 404 Not Found"
+  [SDE] /api/env => HTTP 404
+  [SDE]$ curl -s "http://localhost:56798/api/config"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/config "HTTP/1.1 404 Not Found"
+  [SDE] /api/config => HTTP 404
+  [SDE]$ curl -s "http://localhost:56798/debug"
+INFO:httpx:HTTP Request: GET http://localhost:56798/debug "HTTP/1.1 404 Not Found"
+  [SDE] /debug => HTTP 404
+  [SDE]$ curl -s "http://localhost:56798/env"
+INFO:httpx:HTTP Request: GET http://localhost:56798/env "HTTP/1.1 404 Not Found"
+  [SDE] /env => HTTP 404
+  [SDE]$ curl -s "http://localhost:56798/api/health"
+INFO:httpx:HTTP Request: GET http://localhost:56798/api/health "HTTP/1.1 200 OK"
+  [SDE] /api/health => HTTP 200 but no sensitive keys found
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 13] CMDi (API)
+  Probe command injection via API ping/exec endpoints
+  ────────────────────────────────────────────────────────────────────
+  [CMDi]$ curl -s -X POST "http://localhost:56798/api/ping" -d 'host=127.0.0.1; id'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/ping "HTTP/1.1 404 Not Found"
+  [CMDi] POST /api/ping => 404 (no OS output)
+  [CMDi]$ curl -s -X POST "http://localhost:56798/api/ping" -d 'host=127.0.0.1 && whoami'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/ping "HTTP/1.1 404 Not Found"
+  [CMDi] POST /api/ping => 404 (no OS output)
+  [CMDi]$ curl -s -X POST "http://localhost:56798/api/ping" -d 'host=127.0.0.1 | cat /etc/passwd'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/ping "HTTP/1.1 404 Not Found"
+  [CMDi] POST /api/ping => 404 (no OS output)
+  [CMDi]$ curl -s -X POST "http://localhost:56798/api/exec" -d 'host=id'
+INFO:httpx:HTTP Request: POST http://localhost:56798/api/exec "HTTP/1.1 404 Not Found"
+  [CMDi] POST /api/exec => 404 (no OS output)
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 14] JWT Inspector
+  Analyze JWT tokens for weak secrets and algorithm flaws
+  ────────────────────────────────────────────────────────────────────
+  [JWT] No JWT tokens found in any endpoint responses
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [Agent 01] Recon
+  Fingerprint headers and tech hints
+  ────────────────────────────────────────────────────────────────────
+  [Recon] X-Powered-By: VibeMart/1.0.0-Express
+
+  ────────────────────────────────────────────────────────────────────
+  ▸ [DAST] Nuclei
+  Running Nuclei scan for additional coverage
+  ────────────────────────────────────────────────────────────────────
+  [OK] builtin: No additional findings
+
+  [SCAN][OK] endpoints=2 forms=0 vulns=0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 5/8   IMMUNE SYSTEM - BUILD GENOME  [SCAN t=44.5s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [OK] Genome built: 2 endpoints
+
+  🧬 Starting Adversarial Co-Evolution (10 generations)...
+  🧬 Payloads per generation: 30
+  🔵 BLUE TEAM: Building behavioral genome from scan data...
+  🔵 Genome profiled 2 endpoints
+  🔴 RED TEAM: Generating initial attack payloads...
+  🔴 Generated 30 initial payloads
+  🟡 Generation 0: blocked 23/30 (76.7%) | ⏱ 0.2s
+  🟢 Generation 1: blocked 17/20 (85.0%) | ⏱ 0.2s
+  🟢 Generation 2: blocked 20/20 (100.0%) | ⏱ 0.1s
+  🟢 Generation 3: blocked 20/20 (100.0%) | ⏱ 0.1s
+  🟢 Generation 4: blocked 20/20 (100.0%) | ⏱ 0.1s
+  ✅ Genome converged at 100.0% — stopping evolution
+
+  🧬 ══════ EVOLUTION COMPLETE ══════
+  📈 Block rate: 76.7% → 100.0%
+  🔬 Generations: 5
+  🛡️  Genome is now hardened against 20 attack patterns
+
+  [OK] Genome saved to D:\cyphex_v3\backend\backend\..\workdir\genomes\genome_1206299114df
+╭──────────────────────────────────────────────────── ENDPOINT MAP ────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│      >> http://localhost:56798/                                                                                      │
+│      >> http://localhost:56798/api/health                                                                            │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── BEHAVIORAL GENOME ──────────────────────────────────────────────────╮
+│                                                                                                                      │
+│      Generation:     10                                                                                              │
+│      Trained:        YES                                                                                             │
+│      Profiles:       2                                                                                               │
+│      Block History:  5 gens                                                                                          │
+│                                                                                                                      │
+│      Feature Vector (15 dims):                                                                                       │
+│        [0] input_length      [1] entropy         [2] special_char_ratio                                              │
+│        [3] url_encoding_ratio [4] uppercase_ratio [5] digit_ratio                                                    │
+│        [6] max_token_length   [7] keyword_score   [8] sqli_pattern_score                                             │
+│        [9] null_byte         [10] traversal_depth [11] bracket_imbalance                                             │
+│       [12] unicode_ratio     [13] repetition_ratio[14] token_count                                                   │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                     Genome Scoring
+╭───────────────────────────┬────────┬───────┬─────────╮
+│ Payload                   │  Type  │ Score │ Verdict │
+├───────────────────────────┼────────┼───────┼─────────┤
+│ ' OR 1=1--                │  sqli  │ 1.000 │  BLOCK  │
+│ <script>alert(1)</script> │  xss   │ 1.000 │  BLOCK  │
+│ ; cat /etc/passwd         │  cmdi  │ 1.000 │  BLOCK  │
+│ normal search             │ benign │ 0.000 │  ALLOW  │
+│ John O'Brien              │ benign │ 0.000 │  ALLOW  │
+╰───────────────────────────┴────────┴───────┴─────────╯
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 6/8   AI ATTACK SIMULATION - GENOME DEFENSE  [SCAN t=45.5s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                              Before / After Simulation
+╭───────────────────┬──────────────────────────┬────────┬─────────┬─────────┬───────╮
+│ Attack            │ Payload                  │  Type  │ Before  │  After  │ Score │
+├───────────────────┼──────────────────────────┼────────┼─────────┼─────────┼───────┤
+│ SQLi Auth Bypass  │ ' OR '1'='1' --          │  sqli  │ ALLOWED │ BLOCKED │ 1.000 │
+│ SQLi UNION        │ ' UNION SELECT NULL--    │  sqli  │ ALLOWED │ BLOCKED │ 1.000 │
+│ XSS Script Tag    │ <script>alert(1)</script │  xss   │ ALLOWED │ BLOCKED │ 1.000 │
+│ XSS Event Handler │ "><img src=x onerror=1>  │  xss   │ ALLOWED │ BLOCKED │ 1.000 │
+│ CMDi Semicolon    │ ; whoami                 │  cmdi  │ ALLOWED │ BLOCKED │ 0.500 │
+│ CMDi Pipe         │ | cat /etc/passwd        │  cmdi  │ ALLOWED │ BLOCKED │ 0.600 │
+│ LFI Traversal     │ ../../etc/passwd         │  lfi   │ ALLOWED │ BLOCKED │ 1.000 │
+│ SSRF Internal     │ http://169.254.169.254/  │  ssrf  │ ALLOWED │ ALLOWED │ 0.100 │
+│ Normal Search     │ laptop                   │ benign │ ALLOWED │ ALLOWED │ 0.000 │
+│ Normal Apostrophe │ John O'Brien             │ benign │ ALLOWED │ ALLOWED │ 0.000 │
+│ Normal Email      │ user@example.com         │ benign │ ALLOWED │ ALLOWED │ 0.000 │
+│ Normal Number     │ 42                       │ benign │ ALLOWED │ ALLOWED │ 0.000 │
+╰───────────────────┴──────────────────────────┴────────┴─────────┴─────────┴───────╯
+
+  Blocked: 7/8 (88%)  |  False positives: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 7/8   SECURITY REPORT  [SCAN t=45.5s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+╭────────────────────────────────────────────── ◈ SECURITY ASSESSMENT ◈ ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│    ███████████████░░░░░░░░░░░░░░░  52/100  AT RISK                                                                   │
+│                                                                                                                      │
+│    ▲ Critical: 6  ● High: 0  ◆ Medium: 0  ○ Low: 0  │  Total: 6                                                      │
+│    Duration: 45.5s  │  Scan ID: cli_cdd68028                                                                         │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                                   Confirmed Vulnerabilities (6)
+╭─────┬────────────┬─────────────────────────────────────┬────────────┬───────────────────────────╮
+│   # │    Sev     │ Vulnerability                       │ CWE        │ Location                  │
+├─────┼────────────┼─────────────────────────────────────┼────────────┼───────────────────────────┤
+│   1 │ ▲ Critical │ ⚡ SQL Injection (Template Literal) │ CWE-89     │ src\db.js:39              │
+│   2 │ ▲ Critical │ ⚡ SQL Injection (Template Literal) │ CWE-89     │ src\routes\orders.js:20   │
+│   3 │ ▲ Critical │ ⚡ Command Injection                │ CWE-78     │ src\routes\orders.js:34   │
+│     │            │ (child_process)                     │            │                           │
+│   4 │ ▲ Critical │ ⚡ SQL Injection (Template Literal) │ CWE-89     │ src\routes\orders.js:63   │
+│   5 │ ▲ Critical │ ⚡ SQL Injection (Template Literal) │ CWE-89     │ src\routes\products.js:24 │
+│   6 │ ▲ Critical │ ⚡ SQL Injection (Template Literal) │ CWE-89     │ src\routes\users.js:21    │
+╰─────┴────────────┴─────────────────────────────────────┴────────────┴───────────────────────────╯
+INFO:cyphex.reasoning:CyphexReasoner initialized with agent-reasoning (host=http://localhost:11434)
+
+Analysis Council: Drafting Security Report...
+INFO:httpx:HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+  Report Writer: qwen2.5-coder:7b
+  Validator:     llama3.1:8b
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 13451ms)
+Report Drafted. llama3.1:8b validating claims...
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 22620ms)
+✓ llama3.1:8b validated all claims in the report.
+
+  ◈ Council Security Analysis
+╭───────────────────────────────────── SQL Injection (Template Literal) (CWE-89) ──────────────────────────────────────╮
+│  Business Impact: The database could be completely compromised, leading to the loss of sensitive user data,          │
+│  financial information, and the ability to perform further malicious activities.                                     │
+│  Attack Scenario: An attacker could inject malicious SQL code through the input fields. For example, they might      │
+│  input `'; DROP TABLE users; --` to delete the entire users table.                                                   │
+│  Root Cause: The SQL queries are constructed using template literals with user input directly included in the query  │
+│  string without proper sanitization.                                                                                 │
+│                                                                                                                      │
+│  ✓ Validated by AI Council: True                                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ◆ STEP 8/8   PATCH & VERIFY  [SCAN t=97.5s]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+╭────────────────────────────────────────────── ◈ VECTORLESS RAG ENGINE ───────────────────────────────────────────────╮
+│ Building Vectorless Code Index...                                                                                    │
+│ Walking source tree → keyword index (no embeddings, no vector DB)                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────── Code Tree Index — 9 files indexed ──────────────────────────────────────────╮
+│                                                                                                                      │
+│   📄 .gitignore                               —                   fn: —                                              │
+│   📄 package-lock.json                        AUTH          fn: —                                                    │
+│   📄 package.json                             —                   fn: —                                              │
+│   📄 src/db.js                                DB AUTH fn: users, products, orders                                    │
+│   📄 src/index.js                             AUTH          fn: express, cors, app                                   │
+│   📄 src/routes/admin.js                      DB AUTH INPUT fn: express, router, os                                  │
+│   📄 src/routes/orders.js                     DB INPUT fn: express, router, db                                       │
+│   📄 src/routes/products.js                   DB INPUT fn: express, router, db                                       │
+│   📄 src/routes/users.js                      DB AUTH INPUT fn: express, router, db                                  │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ✓ Detected framework: express
+  ✓ Patch manifest: .cyphex/patches.json
+  ✓ Patch memory: .cyphex/patch_memory.json
+╭────────────────────────────────────────────── ◈ AGENT REASONING ENGINE ──────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Oracle Agent-Reasoning Engine                                                                                       │
+│  github.com/jasperan/agent-reasoning — 16 cognitive architectures                                                    │
+│                                                                                                                      │
+│  Available Strategies (8/16):                                                                                        │
+│    ✓ 📝 Standard               (1 call) — Direct generation (baseline, fastest)                                      │
+│    ✓ 🔗 Chain-of-Thought       (1 call) — Step-by-step logical reasoning                                             │
+│    ✓ 🪞 Self-Reflection        (3 calls) — Draft → Critique → Improve loop                                           │
+│    ✗ 🌳 Tree of Thoughts       (5 calls) — BFS multi-path exploration with pruning                                   │
+│    ✗ 🛠️ ReAct                  (3 calls) — Reason + Act (tool-use reasoning loop)                                     │
+│    ✓ 🧩 Decomposition          (3 calls) — Break complex problems into sub-tasks                                     │
+│    ✗ 📶 Least-to-Most          (3 calls) — Solve easy sub-problems first, build up                                   │
+│    ✓ 🗳️ Self-Consistency       (3 calls) — Majority voting across K candidates                                        │
+│    ✗ 🔄 Recursive (RLM)        (3 calls) — Code REPL agent (self-executing code)                                     │
+│    ✓ 🔧 Refinement Loop        (4 calls) — Score-based iterative improvement                                         │
+│    ✗ 📊 Complex Pipeline       (6 calls) — 5-stage optimization (accuracy→structure→depth→examples→polish)           │
+│    ✗ ⚔️ Adversarial Debate     (4 calls) — Multi-perspective adversarial challenge                                    │
+│    ✗ 🎲 Monte Carlo Search     (5 calls) — MCTS tree search with UCB1 scoring                                        │
+│    ✓ 🔀 Analogical             (2 calls) — Analogy-based reasoning from known patterns                               │
+│    ✗ ❓ Socratic               (3 calls) — Guided questioning to find the root cause                                 │
+│    ✓ 🧠 Meta-Reasoning         (2 calls) — Auto-select best strategy for the task                                    │
+│                                                                                                                      │
+│  Strategy Selection:                                                                                                 │
+│    • CWE-78 (CMDi) → 🌳 Tree of Thoughts (multi-path search)                                                         │
+│    • Critical vulns → 🗳️ Self-Consistency (majority vote)                                                             │
+│    • High vulns → 🪞 Self-Reflection (draft→critique→improve)                                                        │
+│    • Standard vulns → 🔗 Chain-of-Thought (step-by-step)                                                             │
+│    • Patch review → ⚔️ Adversarial Debate (multi-perspective)                                                         │
+│                                                                                                                      │
+│  Status: ENHANCED — All strategies active                                                                            │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────── ◈ SESSION MEMORY ──────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Thread ID:     d41f773d-40b4-425e-9df1-89b22f12e537                                                                 │
+│  Session File:  .cyphex/sessions/d41f773d...json                                                                     │
+│  Prior Scans:   0 patches from previous sessions                                                                     │
+│  Lessons:       0 learned patterns                                                                                   │
+│  First scan — no prior context yet. Lessons will be saved for future scans.                                          │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── ◈ VECTORLESS RAG PIPELINE ──────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Code Tree Index: 9 files indexed (vectorless)                                                                       │
+│  Functions:      53 extracted for context enrichment                                                                 │
+│  Security Flags:                                                                                                     │
+│    DB:     5 files with database operations                                                                          │
+│    AUTH:   5 files with authentication logic                                                                         │
+│    INPUT:  4 files with user input handling                                                                          │
+│  KB Recipes:    CWE-89, CWE-79, CWE-78, CWE-798, CWE-942 + framework-specific                                        │
+│  Framework:     express                                                                                              │
+│                                                                                                                      │
+│  Context flow: Code Tree → Function Extraction → KB Recipe → Imports → Model Prompt                                  │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────── PATCH WORKFLOW ───────────────────────────────────────────────────╮
+│ Found 6 vulnerabilities to review.                                                                                   │
+│ Pipeline: V2 (RAG + Verification + Agent Reasoning)                                                                  │
+│ Council: ENABLED  |  Agent Reasoning: ENABLED (8 strategies)  |  RAG: ENABLED  |  Session: ACTIVE (d41f773d)         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────── ◈ Context Enrichment — RAG Pipeline + Strategy Selection ──────────────────────────────╮
+│                                                                                                                      │
+│ RAG Context → Model Prompt Assembly:                                                                                 │
+│ Each vuln gets: function body + file imports + KB recipe + repo secure pattern                                       │
+│                                                                                                                      │
+│   [CWE-89    ] src\db.js                      ctx=function KB=✓ imp=✗ → 🔗 Chain-of-Thought                          │
+│   [CWE-89    ] src\routes\orders.js           ctx=function KB=✓ imp=✓ → 🔗 Chain-of-Thought                          │
+│   [CWE-78    ] src\routes\orders.js           ctx=function KB=✓ imp=✓ → 🗳️ Self-Consistency                           │
+│   [CWE-89    ] src\routes\orders.js           ctx=function KB=✓ imp=✓ → 🔗 Chain-of-Thought                          │
+│   [CWE-89    ] src\routes\products.js         ctx=function KB=✓ imp=✓ → 🔗 Chain-of-Thought                          │
+│   [CWE-89    ] src\routes\users.js            ctx=function KB=✓ imp=✓ → 🔗 Chain-of-Thought                          │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+═══ Batch Patch Mode: 6 vulnerabilities ═══
+  Patcher:   qwen2.5-coder:7b
+  Reviewers: llama3.1:8b, deepseek-coder:6.7b (SOLO_POWERHOUSE)
+
+Stage 1/3: Generating 6 patches (qwen2.5-coder:7b)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+  [1/6] Patching: SQL Injection (Template Literal)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Evaluating                                                                                                           │
+  [2/6] Patching: SQL Injection (Template Literal)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 11090ms)
+  [3/6] Patching: Command Injection (child_process)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 10375ms)
+  [4/6] Patching: SQL Injection (Template Literal)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 7435ms)
+  [5/6] Patching: SQL Injection (Template Literal)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 7834ms)
+  [6/6] Patching: SQL Injection (Template Literal)
+VRAM Manager: Loading qwen2.5-coder:7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 6831ms)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+
+Stage 2/3: Reviewing ALL patches (llama3.1:8b)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 20080ms)
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 18806ms)
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Evaluating                                                                                                           │
+╭─────────────────────────────────────────────────  Thinking Process ──────────────────────────────────────────────────╮
+│ The patch adds an input allowlist to restrict the format parameter, but the vulnerable execSync call remains         │
+│ unchanged.                                                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  └─ llama3.1:8b review: False - The patch does not address the command injection vulnerability.
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 22250ms)
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 19510ms)
+VRAM Manager: Loading llama3.1:8b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 20623ms)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+
+Stage 3/3: Reviewing ALL patches (deepseek-coder:6.7b)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 34131ms)
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 37460ms)
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 42624ms)
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Evaluating                                                                                                           │
+  └─ deepseek-coder:6.7b review: True - Meaningful change to reduce SQL Injection vulnerability
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Evaluating                                                                                                           │
+  └─ deepseek-coder:6.7b review: True - The patch uses parameterized queries (`?` placeholders) to prevent SQL
+injection.
+VRAM Manager: Loading deepseek-coder:6.7b...
+  ◈ Agent-Reasoning: cot strategy
+  ◈ Reasoning complete (cot, 26127ms)
+INFO:httpx:HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+
+═══ Batch complete: 6 patches (sequential review) ═══
+
+──────────────────────────────────────────────────────────────────────
+[1/6] SQL Injection (Template Literal) (Critical)
+File: src\db.js:39
+Context: function extraction | CWE: CWE-89 | Lang: js
+
+Vulnerable Code:
+       37 |  * vulnerable to SQL injection (which Cyphex should catch).
+       38 |  */
+  ->   39 | function query(sql, params = []) {
+       40 |   // Simulate: SELECT * FROM users WHERE username = ?
+       41 |   const usersMatch = sql.match(/SELECT \* FROM users WHERE username\s*=\s*\'([^\']*)\'/i);
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  APPROVED  │ Parameterized queries replace template        │
+│                        │            │ literals to fix SQL Injection vulnerability   │
+│ deepseek-coder:6.7b    │  REJECTED  │ The patch does not address the vulnerability  │
+│                        │            │ at all                                        │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • The patch does not address the vulnerability at all                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: The SQL query uses template literals with user input, which is vulnerable to SQL injection.             │
+│                                                                                                                      │
+│  Justifications: 1/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ -  * vulnerable to SQL injection (which Cyphex should catch).                                                        │
+│ -  */                                                                                                                │
+│ - function query(sql, params = []) {                                                                                 │
+│ -   // Simulate: SELECT * FROM users WHERE username = ?                                                              │
+│ -   const usersMatch = sql.match(/SELECT \* FROM users WHERE username\s*=\s*\'([^\']*)\'/i);                         │
+│ + function query(sql, params = []) {                                                                                 │
+│ +   // Simulate: SELECT * FROM users WHERE username = ?                                                              │
+│ +   const usersMatch = sql.match(/SELECT \* FROM users WHERE username\s*=\s*\'([^\                                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q):
+[SKIPPED]
+
+
+──────────────────────────────────────────────────────────────────────
+[2/6] SQL Injection (Template Literal) (Critical)
+File: src\routes\orders.js:20
+Context: function extraction | CWE: CWE-89 | Lang: js
+
+Vulnerable Code:
+       18 | const sql = 'INSERT INTO orders (user_id, product_id, quantity) VALUES (?, ?, ?)';
+       19 |   try {
+  ->   20 |     db.query(sql, );
+       21 |     res.json({ message: 'Order placed successfully', order: { user_id, product_id, quantity } });
+       22 |   } catch(e) {
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  REJECTED  │ Patch introduces a worse vulnerability and    │
+│                        │            │ does not effectively address the SQL          │
+│                        │            │ Injection vulnerability                       │
+│ deepseek-coder:6.7b    │  REJECTED  │ The patch still has room for improvement in   │
+│                        │            │ error handling and code change, potentially   │
+│                        │            │ creating a worse situation                    │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • Patch introduces a worse vulnerability and does not effectively address the SQL Injection vulnerability            │
+│ • The patch still has room for improvement in error handling and code change, potentially creating a worse situation │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: The user input is concatenated directly into the SQL query, allowing attackers to manipulate the query  │
+│  logic.                                                                                                              │
+│                                                                                                                      │
+│  Justifications: 0/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ - const sql = 'INSERT INTO orders (user_id, product_id, quantity) VALUES (?, ?, ?)';                                 │
+│ -   try {                                                                                                            │
+│ -     db.query(sql, [user_id, product_id, quantity]);                                                                │
+│ -     res.json({ message: 'Order placed successfully', order: { user_id, product_id, quantity } });                  │
+│ -   } catch(e) {                                                                                                     │
+│ + const { user_id, product_id, quantity } = req.body;                                                                │
+│ + const sql = 'INSERT INTO orders (user_id, product_id, quantity) VALUES (?, ?, ?)';                                 │
+│ + try {                                                                                                              │
+│ +   db.query(sql, [user_id, product_id, quantity], (err, results) => {                                               │
+│ +     if (err) {                                                                                                     │
+│ +       res.status(500).json({ error: err.message });                                                                │
+│ +     } else {                                                                                                       │
+│ +       res.json({ message: 'Order placed successfully', order: { user_id, product_id, quantity } });                │
+│ +     }                                                                                                              │
+│ +   });                                                                                                              │
+│ + } catch(e) {                                                                                                       │
+│ +   res.status(500).json({ error: e.message });                                                                      │
+│ + }                                                                                                                  │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q): n
+[SKIPPED]
+
+
+──────────────────────────────────────────────────────────────────────
+[3/6] Command Injection (child_process) (Critical)
+File: src\routes\orders.js:34
+Context: function extraction | CWE: CWE-78 | Lang: js
+
+Vulnerable Code:
+       32 |   try {
+       33 |     // VULN: Direct shell command injection via format parameter
+  ->   34 |     const output = execSync(`echo "Exporting orders as ${format}" && ls`).toString();
+       35 |     res.json({ export: output, format: format });
+       36 |   } catch(e) {
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  REJECTED  │ The patch does not address the command        │
+│                        │            │ injection vulnerability.                      │
+│ deepseek-coder:6.7b    │  APPROVED  │ The patch addresses the vulnerability at all, │
+│                        │            │ and it reduces or eliminates the attack       │
+│                        │            │ surface by adding a format validation and     │
+│                        │            │ protecting against command injection. It also │
+│                        │            │ handles errors, reduces code changes, and     │
+│                        │            │ avoids common anti-patterns.                  │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • The patch does not address the command injection vulnerability.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: Directly using user input in the shell command allows arbitrary command execution.                      │
+│                                                                                                                      │
+│  Justifications: 1/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ -   try {                                                                                                            │
+│ -     // VULN: Direct shell command injection via format parameter                                                   │
+│ -     const output = execSync(`echo "Exporting orders as ${format}" && ls`).toString();                              │
+│ -     res.json({ export: output, format: format });                                                                  │
+│ -   } catch(e) {                                                                                                     │
+│ + const express = require('express');                                                                                │
+│ + const db = require('../db');                                                                                       │
+│ + const router = express.Router();                                                                                   │
+│ + router.get('/export', (req, res) => {                                                                              │
+│ +   const format = req.query.format || 'json';                                                                       │
+│ +   const allowedFormats = ['json', 'csv', 'xml'];                                                                   │
+│ +   if (!allowedFormats.includes(format)) {                                                                          │
+│ +     return res.status(400).send('Invalid format');                                                                 │
+│ +   }                                                                                                                │
+│ +   try {                                                                                                            │
+│ +     const output = execSync(`echo "Exporting orders as ${format}" && ls`).toString();                              │
+│ +     res.json({ export: output, format: format });                                                                  │
+│ +   } catch(e) {                                                                                                     │
+│ +     res.status(500).json({ error: e.message });                                                                    │
+│ +   }                                                                                                                │
+│ + });                                                                                                                │
+│ + module.exports = router;                                                                                           │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q): y
+╭──────────────────────────────────────────────── ◈ VERIFICATION GATE ─────────────────────────────────────────────────╮
+│ Verdict: FAIL                                                                                                        │
+│ finding_gone=True  builds=True  no_suppression=True  blast_ok=False                                                  │
+│ Evidence: {'blast_radius': 'Diff exceeds 40 lines'}                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[ROLLED BACK] Verification failed — patch reverted
+
+──────────────────────────────────────────────────────────────────────
+[4/6] SQL Injection (Template Literal) (Critical)
+File: src\routes\orders.js:63
+Context: function extraction | CWE: CWE-89 | Lang: js
+
+Vulnerable Code:
+       61 | const email = req.query.email;
+       62 | const sql = 'SELECT * FROM orders WHERE user_email = ?';
+  ->   63 | const results = db.query(sql, );
+       64 | res.json({ orders: results, query_used: sql });
+       65 | });
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  REJECTED  │ The proposed patch does not address the SQL   │
+│                        │            │ injection vulnerability.                      │
+│ deepseek-coder:6.7b    │  APPROVED  │ Meaningful change to reduce SQL Injection     │
+│                        │            │ vulnerability                                 │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • The proposed patch does not address the SQL injection vulnerability.                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: The use of template literals with user input in the SQL query makes it vulnerable to SQL injection.     │
+│                                                                                                                      │
+│  Justifications: 1/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ - const email = req.query.email;                                                                                     │
+│ - const sql = 'SELECT * FROM orders WHERE user_email = ?';                                                           │
+│ - const results = db.query(sql, [email]);                                                                            │
+│ - res.json({ orders: results, query_used: sql });                                                                    │
+│ - });                                                                                                                │
+│ + const email = req.query.email;                                                                                     │
+│ + const sql = 'SELECT * FROM orders WHERE user_email = ?';                                                           │
+│ + const results = await db.query(sql, [email]);                                                                      │
+│ + res.json({ orders: results, query_used: sql });                                                                    │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q): y
+[REJECTED] Apply failed: Patch produced invalid syntax — auto-rolled back
+
+──────────────────────────────────────────────────────────────────────
+[5/6] SQL Injection (Template Literal) (Critical)
+File: src\routes\products.js:24
+Context: function extraction | CWE: CWE-89 | Lang: js
+
+Vulnerable Code:
+       22 |   const searchTerm = req.query.q || '';
+       23 | const sql = 'SELECT * FROM products WHERE name LIKE ?';
+  ->   24 | const results = db.query(sql, [`%${searchTerm}%`]);
+       25 | // Fixed (CWE-79): Reflected XSS mitigated by standard JSON response
+       26 |   res.json({
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  REJECTED  │ Patch does not address the vulnerability and  │
+│                        │            │ has a large blast radius                      │
+│ deepseek-coder:6.7b    │  APPROVED  │ The patch uses parameterized queries (`?`     │
+│                        │            │ placeholders) to prevent SQL injection.       │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • Patch does not address the vulnerability and has a large blast radius                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: The original code concatenates user input directly into the SQL query, which can be exploited by        │
+│  attackers to modify the query logic.                                                                                │
+│                                                                                                                      │
+│  Justifications: 1/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ -   const searchTerm = req.query.q || '';                                                                            │
+│ - const sql = 'SELECT * FROM products WHERE name LIKE ?';                                                            │
+│ - const results = db.query(sql, [`%${searchTerm}%`]);                                                                │
+│ - // Fixed (CWE-79): Reflected XSS mitigated by standard JSON response                                               │
+│ -   res.json({                                                                                                       │
+│ + const searchTerm = req.query.q || '';                                                                              │
+│ + const sql = 'SELECT * FROM products WHERE name LIKE ?';                                                            │
+│ + const results = db.query(sql, [`%${searchTerm}%`]);                                                                │
+│ + res.json({                                                                                                         │
+│ +   query: searchTerm,                                                                                               │
+│ +   message: `Found ${results.length} results for "${searchTerm}"`,                                                  │
+│ +   results: results                                                                                                 │
+│ + });                                                                                                                │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q): y
+[REJECTED] Apply failed: Patch produced invalid syntax — auto-rolled back
+
+──────────────────────────────────────────────────────────────────────
+[6/6] SQL Injection (Template Literal) (Critical)
+File: src\routes\users.js:21
+Context: function extraction | CWE: CWE-89 | Lang: js
+
+Vulnerable Code:
+       19 |   return res.status(400).json({ error: 'Username and password required' });
+       20 | const sql = 'SELECT * FROM users WHERE username = ?';
+  ->   21 | const results = db.query(sql, ) || [];
+       22 | if (results.length === 0) {
+       23 |   return res.status(401).json({ error: 'User not found' });
+                               Council Patch Validation
+╭────────────────────────┬────────────┬───────────────────────────────────────────────╮
+│ Model                  │  Verdict   │ Reason                                        │
+├────────────────────────┼────────────┼───────────────────────────────────────────────┤
+│ llama3.1:8b            │  REJECTED  │ Patch does not address SQL Injection          │
+│                        │            │ vulnerability, leaving it intact.             │
+│ deepseek-coder:6.7b    │  APPROVED  │ The patch meaningfully reduces the attack     │
+│                        │            │ surface and fixes the core vulnerability.     │
+╰────────────────────────┴────────────┴───────────────────────────────────────────────╯
+╭───────────────────────────────────────────────── Dissenting Reasons ─────────────────────────────────────────────────╮
+│ • Patch does not address SQL Injection vulnerability, leaving it intact.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────── Vulnerability Analysis ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Root Cause: The SQL query uses template literals, which allows attackers to inject malicious SQL code.              │
+│                                                                                                                      │
+│  Justifications: 1/2 validators approved                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────── Proposed Changes (COUNCIL) ─────────────────────────────────────────────╮
+│ -   return res.status(400).json({ error: 'Username and password required' });                                        │
+│ - const sql = 'SELECT * FROM users WHERE username = ?';                                                              │
+│ - const results = db.query(sql, [username]) || [];                                                                   │
+│ - if (results.length === 0) {                                                                                        │
+│ -   return res.status(401).json({ error: 'User not found' });                                                        │
+│ + if (!username || !password) {                                                                                      │
+│ +   return res.status(400).json({ error: 'Username and password required' });                                        │
+│ + }                                                                                                                  │
+│ + const sql = 'SELECT * FROM users WHERE username = ?';                                                              │
+│ + const results = db.query(sql, [username]) || [];                                                                   │
+│ + if (results.length === 0) {                                                                                        │
+│ +   return res.status(401).json({ error: 'User not found' });                                                        │
+│ + }                                                                                                                  │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  Apply this patch? (y/n/q): y
+[REJECTED] Apply failed: Patch produced invalid syntax — auto-rolled back
+
+──────────────────────────────────────────────────
+Applied: 0  Skipped: 6  Verified: 0  Templates: 0
+╭─────────────────────────────────────────────── ◈ SESSION MEMORY SAVED ───────────────────────────────────────────────╮
+│                                                                                                                      │
+│  Thread ID:        d41f773d-40b4-425e-9df1-89b22f12e537                                                              │
+│  Session:                                                                                                            │
+│  D:\cyphex_v3\backend\sandboxes\cli_cdd68028\.cyphex\sessions\d41f773d-40b4-425e-9df1-89b22f12e537.json              │
+│  Patches recorded: 0                                                                                                 │
+│  Verified:         0                                                                                                 │
+│  Lessons learned:  0                                                                                                 │
+│  Reasoning Stats:                                                                                                    │
+│    Calls: 20  |  Avg: 21991ms  |  Total: 439827ms                                                                    │
+│    Strategies used: cot×20                                                                                           │
+│                                                                                                                      │
+│  Session persisted — will be loaded on next scan for continuity                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────── ◈ SECURITY SCORE: BEFORE vs AFTER ◈ ─────────────────────────────────────────╮
+│                                                                                                                      │
+│    Before Patching:  █████████████░░░░░░░░░░░░  52/100                                                               │
+│    After Patching:   ███████████████░░░░░░░░░░  63/100                                                               │
+│                                                                                                                      │
+│    Improvement:  +11 points  │  Patched: 0  Remaining: 6  │  Crit: 6  High: 0  Med: 0  Low: 0                        │
+│                                                                                                                      │
+│    * Note: Dynamic runtime findings cannot be auto-marked as patched. Run a re-scan to clear them!                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  [OK] Sandbox stopped.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✓ CYPHEX SCAN COMPLETE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Security Score   ██████████░░░░░░░░░░  52/100  AT RISK
+
+  ● Critical: 6  ● High: 0  ● Medium: 0  ● Low: 0  │  Total: 6
+
+  Duration    623.2s
+  Scan ID     cli_cdd68028
+  Agents      13 deployed (Crawler, XSS, SQLi, Auth, LFI, CMDi, CORS, IDOR, SSRF, SDE, JWT, SupplyChain, API)
+  Tools       Semgrep + Nuclei + Built-in Scanner + Immune System
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  cyphex — Multi-Agent Security Pipeline v2.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+D:\cyphex_v3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

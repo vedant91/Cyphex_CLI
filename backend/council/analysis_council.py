@@ -107,10 +107,12 @@ class AnalysisCouncil(CouncilOrchestrator):
         console.print(f"[dim]Report Drafted. {validator_model} validating claims...[/dim]")
 
         # Validator cross-checks: are any claims unsupported by the evidence?
+        cross_model = True
         try:
             await self.vram.ensure_loaded(validator_model)
         except Exception:
             validator_model = narrator_model  # fallback to same model
+            cross_model = False  # narrator grading its own report — not independent
 
         validation_prompt = (
             f"Evidence:\n{json.dumps(clean_vulns, indent=2)}\n\n"
@@ -121,7 +123,10 @@ class AnalysisCouncil(CouncilOrchestrator):
             validation = await self._call(validator_model, ANALYSIS_VALIDATION_SYSTEM, validation_prompt, task_name="Report Validation")
         except Exception as e:
             console.print(f"[red]Validation failed: {e}[/red]")
-            validation = {"valid": True}  # fallback
+            # Fail CLOSED: a validator error means the claims were NOT
+            # independently checked, so do not stamp them "validated".
+            validation = {"valid": False,
+                          "unsupported_claims": ["validator model unavailable — not independently validated"]}
 
         if not validation.get("valid", False):
             unsupported = validation.get("unsupported_claims", [])
@@ -132,8 +137,14 @@ class AnalysisCouncil(CouncilOrchestrator):
                 item["_validated"] = False
                 item["_unsupported_claims"] = unsupported
         else:
-            console.print(f"[green]✓ {validator_model} validated all claims in the report.[/green]")
+            if cross_model:
+                console.print(f"[green]✓ {validator_model} validated all claims in the report.[/green]")
+            else:
+                console.print(f"[yellow]⚠ Report self-validated by {validator_model} "
+                              f"(no independent validator model available — not cross-checked).[/yellow]")
             for item in analysis:
-                item["_validated"] = True
+                # Only a genuine, cross-model validation earns the green badge.
+                item["_validated"] = cross_model
+                item["_self_validated"] = not cross_model
 
         return analysis

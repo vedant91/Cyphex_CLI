@@ -1,7 +1,7 @@
 import json
 import time
 from rich.console import Console
-from backend.council.council_orchestrator import CouncilOrchestrator
+from backend.council.council_orchestrator import CouncilOrchestrator, is_approved_vote
 from backend.council.model_selector import get_selector
 
 console = Console()
@@ -98,9 +98,9 @@ class DebateProtocol(CouncilOrchestrator):
         # Count only actual votes (not abstentions)
         actual_votes = [v for v in votes if v.get("status") == "voted"]
         abstained = len(votes) - len(actual_votes)
-        confirmed_count = sum(1 for v in actual_votes if v.get("confirmed", False))
-        rejected_count = sum(1 for v in actual_votes if not v.get("confirmed", True))
         num_actual = len(actual_votes)
+        confirmed_count = sum(1 for v in actual_votes if is_approved_vote(v.get("confirmed")))
+        rejected_count = num_actual - confirmed_count
 
         # If majority abstained → not enough data to reject, KEEP the finding
         if num_actual == 0:
@@ -230,7 +230,7 @@ class DebateProtocol(CouncilOrchestrator):
                 validated.append(v)
                 continue
 
-            confirmed_count = sum(1 for vote in actual_votes if vote.get("confirmed", False))
+            confirmed_count = sum(1 for vote in actual_votes if is_approved_vote(vote.get("confirmed")))
 
             if confirmed_count >= 1:
                 validated.append(v)

@@ -1,8 +1,25 @@
-version: '3.9'
-
 services:
   # ═══════════════════════════════════════
-  # Vulnerable target application
+  # Vulnerable target — STANDALONE mode
+  # No MySQL needed, uses in-memory SQLite.
+  # Start quickly with: docker compose up vulncorp-standalone
+  # ═══════════════════════════════════════
+  vulncorp-standalone:
+    build:
+      context: ./sandbox/vulncorp
+      dockerfile: Dockerfile.standalone
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - cyphex-net
+
+  # ═══════════════════════════════════════
+  # Vulnerable target — FULL MySQL mode
+  # 14 vulns including real DB-backed SQLi.
+  # Start with: docker compose up vulncorp db
   # ═══════════════════════════════════════
   vulncorp:
     build: ./sandbox/vulncorp
@@ -30,7 +47,7 @@ services:
       MYSQL_ROOT_PASSWORD: vulncorp_pass
       MYSQL_DATABASE: vulncorp
     ports:
-      - "3306:3306"
+      - "13306:3306"   # Host 13306 avoids conflict with other projects using 3306
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:

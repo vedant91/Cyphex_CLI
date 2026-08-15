@@ -1,16 +1,16 @@
 """DeepIDORAgent — Oracle-guided IDOR via sequential, UUID, and hash-based object traversal."""
 import re
 import uuid
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
 
 class DeepIDORAgent(BaseDeepAgent):
     """
     Insecure Direct Object Reference testing agent.
     Covers:
-    - Sequential integer IDs (1, 2, 3 -> check access without auth)
+    - Sequential integer IDs (1, 2, 3 → check access without auth)
     - UUID enumeration (random UUIDs to find collision)
     - Hash-based IDs (predict/brute)
     - Mass assignment (PUT body with escalated role)
@@ -46,7 +46,7 @@ class DeepIDORAgent(BaseDeepAgent):
         """Try sequential IDs 1-5 on IDOR-prone paths without authentication."""
         # Build list from ASI discovered paths + known base paths
         paths_to_test = set(self.IDOR_BASE_PATHS)
-        for path in list(self.asi.endpoints):
+        for path in self.asi.endpoints:
             for pattern in self.IDOR_PATH_PATTERNS:
                 if re.search(pattern, path):
                     # Strip the ID to get the base
@@ -65,7 +65,7 @@ class DeepIDORAgent(BaseDeepAgent):
                     responses.append((test_id, body))
 
             if len(responses) >= 2:
-                # At least 2 different IDs return data without auth -> IDOR
+                # At least 2 different IDs return data without auth → IDOR
                 self.console.print(
                     f"[red][DeepIDOR] Sequential IDOR at {base_path} "
                     f"({len(responses)} IDs accessible without auth)[/red]"

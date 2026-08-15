@@ -11,6 +11,7 @@ Builds the full attack surface:
 """
 
 import re
+import shlex
 from urllib.parse import urlparse, urljoin, parse_qs
 
 from agents.base_agent import BaseAgent
@@ -66,7 +67,7 @@ class CrawlerAgent(BaseAgent):
 
             out = await self.terminal.run(
                 f'curl -sL -w "\\n__STATUS__%{{http_code}}" '
-                f'--max-time 10 "{url}"'
+                f'--max-time 10 {shlex.quote(url)}'
             )
 
             if not out.stdout:
@@ -131,7 +132,7 @@ class CrawlerAgent(BaseAgent):
         for gql_path in gql_paths:
             gql_url = f"{target.rstrip('/')}{gql_path}"
             out = await self.terminal.run(
-                f'curl -s -X POST "{gql_url}" '
+                f'curl -s -X POST {shlex.quote(gql_url)} '
                 f'-H "Content-Type: application/json" '
                 f"""-d "{{\\"query\\":\\"{{__schema{{types{{name}}}}}}\\"}}\" """
                 f"--max-time 5"
@@ -146,7 +147,7 @@ class CrawlerAgent(BaseAgent):
             await self.log(f"Analyzing {len(js_links)} JavaScript files...", "info")
             for js_url in js_links[:10]:  # Limit to 10 JS files
                 out = await self.terminal.run(
-                    f'curl -sL --max-time 10 "{js_url}"'
+                    f'curl -sL --max-time 10 {shlex.quote(js_url)}'
                 )
                 if out.success:
                     js_endpoints = self._extract_js_endpoints(out.stdout, target)
@@ -183,18 +184,18 @@ class CrawlerAgent(BaseAgent):
             if full and urlparse(full).hostname == parsed_base.hostname:
                 links.append(full)
 
-        # src links (scripts, images)
+        # src links (scripts, images) — restrict to same host to prevent SSRF
         for match in re.finditer(r'src=["\']([^"\']+)["\']', html, re.IGNORECASE):
             src = match.group(1)
             full = self._resolve_url(src, current_url, base)
-            if full:
+            if full and urlparse(full).hostname == parsed_base.hostname:
                 links.append(full)
 
-        # action attributes
+        # action attributes — restrict to same host to prevent SSRF
         for match in re.finditer(r'action=["\']([^"\']+)["\']', html, re.IGNORECASE):
             action = match.group(1)
             full = self._resolve_url(action, current_url, base)
-            if full:
+            if full and urlparse(full).hostname == parsed_base.hostname:
                 links.append(full)
 
         return list(set(links))

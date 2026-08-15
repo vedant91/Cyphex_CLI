@@ -1,639 +1,635 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/Ollama-Local_AI-000000?style=for-the-badge&logo=ollama&logoColor=white" />
+  <img src="https://img.shields.io/badge/Ollama-Local_LLM-000000?style=for-the-badge&logo=ollama&logoColor=white" />
   <img src="https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
-  <img src="https://img.shields.io/badge/Semgrep-SAST-4B275F?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Nuclei-DAST-FF6C37?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/DeepAgents-13_Oracle--Guided-D64545?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Genome-91.3%25_Recall-6D28D9?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/tests-136_passing-2ea44f?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 </p>
 
-<h1 align="center">
-  <br>
-  🛡️ CYPHEX
-  <br>
-  <sub>Autonomous AI Cyber Defence Engine</sub>
-</h1>
+<h1 align="center">CYPHEX</h1>
 
 <p align="center">
-  <b>An offline-first, multi-agent autonomous security platform that scans, attacks, debates, evolves, and patches — all without a single API key.</b>
+  <b>Point CYPHEX at a repo. It deploys the app in a sandbox, attacks it with local-LLM agents,<br/>
+  patches what it confirms, and re-scans to prove the fix. No cloud LLM, no API keys, no billing.</b>
 </p>
 
-<p align="center">
-  Cyphex doesn't just find vulnerabilities — it deploys your app in an isolated Docker sandbox,<br>
-  unleashes 14 specialized AI attack agents, validates findings through multi-model council debate,<br>
-  evolves a behavioral immune system via adversarial co-evolution,<br>
-  and auto-patches your source code with AI-verified fixes.
-</p>
+> **Two subsystems carry the weight of that claim; everything else exists to feed or verify them.**
+> **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** — 13 attack agents that run no fixed script. Each asks a local LLM what to try next, tests it live, and mutates on failure, chaining confirmed exploits into multi-step attack paths.
+> **[Behavioural Genome](#the-behavioural-immune-system)** — a per-endpoint anomaly detector that trains itself by fighting its own AI-generated attacks across generations, then proves the result: 91.3% recall, 97.7% precision, 3.3% false-positive rate.
 
 <p align="center">
-  <b>🔒 100% offline. Zero cloud APIs. Your code never leaves your machine.</b>
-</p>
-
-<p align="center">
-  <a href="#-quick-start-2-minutes">Quick Start</a> •
-  <a href="#-the-problem">Problem</a> •
-  <a href="#-our-solution">Solution</a> •
-  <a href="#-key-features">Features</a> •
-  <a href="#-the-8-step-scan-pipeline">Pipeline</a> •
-  <a href="#-system-architecture">Architecture</a> •
-  <a href="#-tech-stack">Tech Stack</a> •
-  <a href="#-usage">Usage</a> •
-  <a href="#-project-structure">Structure</a> •
-  <a href="#-future-roadmap">Roadmap</a>
-</p>
-
-<p align="center">
-  <code>#vibecoders</code>
+  <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
+  <a href="#the-verify-gate">Verify Gate</a> · <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
+  <a href="#usage">Usage</a> · <a href="#configuration">Config</a> ·
+  <a href="#troubleshooting">Troubleshooting</a> · <a href="#what-cyphex-cant-do-yet">Limitations</a>
 </p>
 
 ---
 
-## 🚀 Quick Start (2 Minutes)
+## Table of Contents
 
-> **One command to see Cyphex in action.** A bundled vulnerable Express.js app is included for demo.
+| | |
+|---|---|
+| **[Why CYPHEX exists](#why-cyphex-exists)** | The gap it fills |
+| **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
+| **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
+| **[The Verify Gate](#the-verify-gate)** | The honesty guarantee |
+| **[The 8-step pipeline](#how-it-works--the-8-step-pipeline)** · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
+| **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** · [Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays) · [RAG](#3-vectorless-rag--knowledge-tree--context-without-a-vector-db) · [Council](#4-the-council--multi-model-validation) | The four subsystems |
+| **[Immune system](#the-behavioural-immune-system)** · [Benchmark](#benchmarked-quality) | Anomaly detection |
+| **[Network scanning](#network-scanning-optional)** · [RASP + auto-heal](#rasp--auto-heal-daemon) | Beyond the codebase |
+| **[Usage](#usage)** · [Configuration](#configuration) · [CI](#using-cyphex-in-ci) | Operating it |
+| **[Repository layout](#repository-layout)** · [Testing](#testing) · [Troubleshooting](#troubleshooting) | Working on it |
+| **[Limitations](#what-cyphex-cant-do-yet)** · [Security & ethics](#security--ethics) | What to know before trusting it |
+
+---
+
+## Why CYPHEX Exists
+
+Most security tooling stops short.
+
+- **SAST** flags a line but can't tell if it's reachable, attacker-controlled, or a false positive.
+- **DAST** proves exploitability but not which line caused it — a URL, not a fix.
+- **Neither writes the patch.**
+- **Cloud AI tools** will patch it — after uploading your source to their servers, on their billing.
+
+CYPHEX closes the loop locally: **find → attack → verify → fix → prove**. Findings correlate to `file:line`, a local model patches with real code context, and the patch only counts if a re-scan confirms the finding is gone — all against your own Ollama on `127.0.0.1`.
+
+It refuses to overclaim: an unverifiable patch reports UNVERIFIABLE, not success; the 76-sample benchmark is directional, not certified; unresolved gaps [say so](#what-cyphex-cant-do-yet).
+
+---
+
+## Quick Start
 
 ```bash
 # 1. Clone
-git clone -b update_y1 https://github.com/vedant91/Cyphex_CLI.git
+git clone https://github.com/Punya23/Cyphex_CLI.git
 cd Cyphex_CLI
 
-# 2. Install
+# 2. Install (extras: '.[memory]' cognee graph · '.[reasoning]' · '.[dev]')
 pip install -e .
 
-# 3. Pull at least one Ollama model
-ollama pull llama3.1:8b
+# 3. Pull at least one local model
+ollama pull qwen2.5-coder:7b     # patcher / oracle
+ollama pull llama3.1:8b          # reviewer / analyst
 
-# 4. Run the demo scan (scans a bundled vulnerable web app)
-cyphex scan --path ./demo/vuln-webapp --patch
+# 4. Verify your machine, then scan the bundled vulnerable Express app
+cyphex doctor
+cyphex scan ./vuln-webapp
 ```
 
-**What happens in ~60 seconds:**
+Run `cyphex doctor` first — it checks binaries, Ollama, pulled models, and hardware tier before you sink 18 minutes into a scan.
 
-```
-✅ Source code copied & analyzed (SAST — 7 files, 20+ language scanner)
-✅ Semgrep scan (5,000+ rules via WSL)
-✅ Sandbox deployed (Docker or native Node.js)
-✅ 14 AI agents attack the running app (SQLi, XSS, CMDi, SSRF, IDOR, JWT…)
-✅ Multi-model AI council debates each finding (false positive elimination)
-✅ Nuclei DAST scan (8,000+ templates)
-✅ Behavioral Genome evolves defenses (Red Team vs Blue Team, 10 generations)
-✅ AI generates and verifies patches for every confirmed vulnerability
-✅ Security report with score, findings, and applied fixes
-```
+> **Does it edit my code?** No — not during a scan. `cyphex scan <path|--repo>` copies your tree into a sandbox and patches *that copy*; your working tree is untouched. Only the opt-in `/watch` auto-heal daemon writes to real source.
 
 ### Prerequisites
 
-| Tool | Required | Install |
-|------|----------|---------|
-| **Python 3.11+** | ✅ Yes | [python.org](https://python.org) |
-| **Ollama** | ✅ Yes | [ollama.com](https://ollama.com) — then `ollama pull llama3.1:8b` |
-| **Docker** | ⚡ Recommended | [docker.com](https://docker.com) — enables sandbox isolation |
-| **Node.js 18+** | ⚡ Recommended | [nodejs.org](https://nodejs.org) — for scanning JS/TS projects |
-| **Semgrep** | 🔧 Optional | `pip install semgrep` (or via WSL on Windows) — adds 5,000+ SAST rules |
-| **Nuclei** | 🔧 Optional | [nuclei.projectdiscovery.io](https://nuclei.projectdiscovery.io) — adds 8,000+ DAST templates |
+| Tool | Required | Why |
+|---|---|---|
+| **Python 3.11+** | Required | Runtime |
+| **Ollama** | Required | Local models — all inference hits `127.0.0.1:11434` |
+| **Docker** | Recommended | Hardened sandbox; falls back to a capped subprocess without it |
+| **Node.js 18+** | Recommended | Deploy + syntax-check JS/TS; without it, JS patches verify as UNVERIFIABLE |
+| **Semgrep / Nuclei** | Optional | Extra SAST/DAST rules; `cyphex setup` installs both, SHA256-verified |
+| **numpy / scikit-learn** | Optional | Isolation-Forest layer of the immune system; falls back to heuristics if missing |
+| **tsc** | Optional | TypeScript syntax validation for `.ts`/`.tsx` patches |
 
-### Verify Your Setup
+### Hardware tiers
 
-```bash
-cyphex doctor          # Checks all tools: Git, Docker, Ollama, Semgrep, Nuclei
-cyphex council-doctor  # Verifies AI models are loaded and responding
+CYPHEX detects usable VRAM and picks the largest models that fit — small models produce poor patches.
+
+| Tier | VRAM | Code model | General model |
+|---|---|---|---|
+| `ultra` | 24+ GB | `qwen2.5-coder:14b` | `llama3.1:14b` |
+| `high` | 12+ GB | `qwen2.5-coder:7b` | `llama3.1:8b` |
+| `mid` | 6+ GB | `deepseek-coder:6.7b` | `phi3:medium` |
+| `low` | 4+ GB | `deepseek-coder:1.3b` | `phi3:mini` |
+| `minimal` | 2+ GB | `deepseek-coder:1.3b` | — |
+| `cloud` | < 2 GB | cloud API | cloud API |
+
+Tier also gates reasoning strategies — a low-VRAM machine skips expensive ones. See [The Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays).
+
+---
+
+## What a Scan Actually Does
+
+Measured run, 2026-08-11 — deliberately-vulnerable Express app (8 files), standard scan + auto-patch, Apple Silicon, 7B/8B models, exit 0.
+
+| Stage | Measured result |
+|---|---|
+| **Static** | 8 files scanned; Semgrep contributed **+3** findings over the built-in rules (2× SQLi CWE-89, 1× CMDi CWE-78 in `src/routes/orders.js`) |
+| **Council validation** | 2 findings confirmed, 0 discarded as false positives (SQLi 3/3 votes; Sensitive Data Exposure 1/3) |
+| **Genome** | 15 endpoints profiled; adversarial co-evolution converged to a **100% block rate by generation 3** (gen 0: 90.0%, 27/30); hardened against 20 attack patterns |
+| **Attack arena** | Defense rate **7/8 (88%)**, **0** false positives on benign traffic |
+| **Vectorless RAG** | 12 files indexed · 4 function-level extractions · 1 window fallback · 4 CWE-KB fix strategies applied · Knowledge-Tree recipe enrichment active |
+| **Meta-reasoning** | 9 of 16 reasoning strategies enabled; reflexion loop re-tried 2 council-rejected patches |
+| **Patching** | 5 attempted → **4 applied *and* verified**; 1 rejected by the Verify Gate for invalid syntax and auto-rolled-back |
+| **Memory** | 4/4 verified fixes persisted to the cognee cross-project knowledge graph |
+| **Security Posture Score** | **51/100 → 67/100** (computed from verified fixes only) |
+| **Wall clock** | **~1093 s (~18 min)** |
+
+18 minutes is honest for a full patching run on 7B/8B — mostly LLM time. `--no-patch` runs are much quicker.
+
+### How the Security Posture Score is computed
+
+A log-scaled penalty per severity bucket, subtracted from 100 and clamped to `[0, 100]`:
+
+```
+penalty = 0
+if critical: penalty += 20 + 10 · log₂(1 + n_critical)
+if high:     penalty += 10 +  8 · log₂(1 + n_high)
+if medium:   penalty +=  3 +  4 · log₂(1 + n_medium)
+if low/info: penalty +=  1 +  2 · log₂(1 + n_low)
+
+score = clamp(100 − penalty, 0, 100)
+```
+
+Log scaling means the first Critical costs 30 points, the tenth costs a few — it distinguishes "has Criticals" from "has none", not a full ranking. The **after** score uses the same coefficients, with a hard guard: **zero applied patches ⇒ `score_after = score_before`**, so a no-op run never shows improvement.
+
+### Artifacts it leaves behind
+
+| Path | Contents |
+|---|---|
+| `report.json` (scan dir) | Findings, severities, `file:line`, posture score, duration |
+| `cyphex_judge_artifacts/report.{json,md,sarif}` | Deterministic report set, written under `--judge` |
+| `.cyphex/patches.json` | Patch manifest — every applied patch and its verdict |
+| `.cyphex/patch_memory.json` | Verified-fix cache, reused on later scans with zero AI calls |
+| `.cyphex/sessions/<id>.json` | Reasoning trace / session memory for the run |
+| `.cyphex/knowledge_tree.json` | Cached Knowledge Tree for the target |
+| `benchmark_report.json` | Immune-system metrics (from `--json`) |
+| genome storage dir | `genome_<target>.pkl` + `.hmac` sidecar — evolution resumes here next scan |
+
+```jsonc
+// excerpt from a real report.json
+{ "scan_id": "cli_82a5c0f4", "score": 14,
+  "summary": { "critical": 2, "high": 16, "medium": 1, "total_vulns": 19, "duration_seconds": 214.8 },
+  "vulnerabilities": [
+    { "name": "[STATIC] SQL Injection (Template Literal)", "severity": "Critical", "endpoint": "app.js:405" },
+    { "name": "[STATIC] Container Running as Root",        "severity": "Medium",   "endpoint": "Dockerfile:20" }
+  ] }
 ```
 
 ---
 
-## 🎯 The Problem
+## The Verify Gate
 
-> **Vibe coding is the future. But vibe-coded apps ship with vulnerabilities that no one checks.**
+*A patch counts as "fixed" only if a re-scan proves it.* This is the single most important thing in the codebase — everything else produces candidates, and this decides which are real.
 
-Modern developers build fast with AI assistance — but security is an afterthought. Traditional security tools have critical gaps:
+Every candidate must clear all of:
 
-- **Static scanners (SAST)** find patterns in code but can't catch runtime vulnerabilities
-- **Dynamic scanners (DAST)** test running apps but don't understand the source code
-- **Neither can fix what they find** — developers are left with noisy reports and zero patches
-- **Cloud-based tools require API keys**, upload your code to third-party servers, and cost money
-- **No tool adapts** — they run the same rules every time, never learning from your app's behavior
+- the finding is **gone on re-scan**;
+- the file still **compiles** (`node --check` / `py_compile` / `tsc --noEmit`);
+- **no suppression comments** were added (`nosemgrep`, `eslint-disable`, `# noqa`, `@ts-ignore`, `@ts-expect-error`, `noinspection`, `pragma: no cover`);
+- **no more than 70%** of the file's non-blank lines were deleted;
+- the diff stays inside a **severity-scaled blast radius** — Critical 80 lines · High 60 · Medium 40 · Low 30 — with the target line range validated before any splice.
 
-**Result:** Vulnerabilities ship to production. Breaches happen. Developers lose sleep.
+### The three verdicts
 
----
+| Verdict | Meaning | Effect |
+|---|---|---|
+| **PASS** | Every check ran and passed | Counts toward the score; stores a reusable `CWE:strategy` pattern + a cross-project memory entry |
+| **FAIL** | A check ran and failed | **Rolled back** to the original bytes; writes a "try a different remediation approach" lesson into session memory |
+| **UNVERIFIABLE** | A check could not be run at all | Patch stays applied but **never counts toward the score** |
 
-## 💡 Our Solution
+`finding_gone` and `builds` are tri-state (`True`/`False`/`None`) — `None` means *unmeasured*, and is never coerced into a PASS. A check that ran and failed always outranks one that never ran.
 
-**Cyphex is an autonomous AI-powered cybersecurity platform** that operates entirely on your local machine — no API keys, no cloud, no data leaving your device.
+### Why comment-matching flips during verification
 
-It combines **five security paradigms** into a single CLI command:
+Ordinary scans ignore a regex match inside a code comment — a commented-out query isn't a vulnerability. If verification did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
 
-| # | Paradigm | What Cyphex Does |
-|---|----------|------------------|
-| 1 | **Static Analysis (SAST)** | Scans source code across 20+ languages with 5,000+ Semgrep rules + built-in regex patterns |
-| 2 | **Dynamic Analysis (DAST)** | Deploys your app in a Docker sandbox and attacks it with 14 specialized AI agents + Nuclei |
-| 3 | **AI Verdict Council** | Multiple LLMs independently review each finding and debate to eliminate false positives |
-| 4 | **Behavioral Immune System** | A self-evolving genome using Isolation Forest ML that learns what "normal" looks like for *your* app |
-| 5 | **Auto-Patching + Verification** | AI generates fixes, council reviews them, verification gate confirms the vuln is actually resolved |
-
-### Why Offline-First?
-
-> **Security tools that upload your code to the cloud are a security vulnerability themselves.**
-
-Cyphex runs 100% locally via [Ollama](https://ollama.com). Your proprietary source code, vulnerability reports, and patches never leave your machine. No OpenAI API key. No cloud billing. No data leaks. **This is cybersecurity without API keys.**
+So the re-scan flips comment-matching back on: commenting-out still fails and rolls back. Meanwhile *parameterised-SQL* suppression stays active both ways, because adding placeholders genuinely is a fix and must verify as one. Deliberate asymmetry, covered by tests.
 
 ---
 
-## ✨ Key Features
+## How It Works — the 8-Step Pipeline
 
-### 🔍 14 Specialized Attack Agents
+<p align="center"><img src="cyphex_final_architecture.png" width="820" alt="CYPHEX architecture" /></p>
 
-Each agent is a domain expert with curated payloads, evasion techniques, and contextual awareness:
+| # | Waypoint | What happens |
+|---|---|---|
+| 1 | **Get Source** | Copy/clone the target into a per-scan sandbox copy; detect framework. Clone URLs are restricted to `https://` / `git@` / `ssh://`. |
+| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) + a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — merged and de-duplicated, then [confidence-scored](#false-positive-scoring). |
+| 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
+| 3b | **Network Scan** *(opt)* | Host/port sweep + per-device network genome. |
+| 4 | **Dynamic Scan** | Crawler + API discovery, then Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — mutually exclusive. A multi-model council debates findings and drops false positives. |
+| 5 | **Build Genome** | Learn "normal" per endpoint, run adversarial co-evolution to convergence. Genomes load from disk for the same target, so evolution *continues* across scans. |
+| 6 | **Attack Arena** | BEFORE/AFTER defence demo — defence rate plus false positives on benign traffic. |
+| 7 | **Security Report** | The AI council writes it; a **second model fact-checks** it for invented findings. |
+| 8 | **Patch + Verify + Score** | Per vuln: **memory cache** → deterministic **template** → **council** (RAG + Knowledge-Tree context, multi-model vote) → **[Verify Gate](#the-verify-gate)** → score from PASS-verified fixes only. |
 
-| Agent | ID | Role | Attack Techniques |
-|-------|-----|------|-------------------|
-| **Recon** | 01 | Fingerprint target stack & headers | HTTP probing, tech detection, server signatures |
-| **Crawler** | 02 | Discover pages, forms, APIs | HTML parsing, SPA detection, REST API discovery |
-| **API Discovery** | 02b | Probe REST endpoints on SPA apps | Route enumeration, OpenAPI detection |
-| **SQLi** | 03 | SQL Injection testing | Union, Boolean, Time-based, Error-based, Stacked |
-| **XSS** | 04 | Cross-Site Scripting testing | Reflected, DOM-based, Event handler, WAF bypass |
-| **Auth** | 05 | Authentication & session testing | Weak creds, session fixation, token analysis |
-| **CMDi** | 06 | OS Command Injection | Shell metacharacters, encoding bypass, chaining |
-| **LFI** | 07 | Local File Inclusion / Path Traversal | Directory traversal, null byte, encoding bypass |
-| **Logic** | 08 | Business logic & CORS flaws | Insecure CORS, parameter tampering, authz gaps |
-| **IDOR** | 09 | Insecure Direct Object References | Sequential ID enumeration, UUID prediction |
-| **SSRF** | 10 | Server-Side Request Forgery | Internal service probing, cloud metadata access |
-| **Supply Chain** | 11 | Dependency vulnerability audit | NPM/Pip CVE databases, manifest analysis |
-| **Data Exposure** | 12 | Debug & config endpoint probing | Env leaks, debug routes, stack traces |
-| **CMDi (API)** | 13 | API-specific command injection | Ping/exec endpoints, JSON body injection |
-| **JWT Inspector** | 14 | JWT token analysis | Weak secrets, algorithm confusion, none attack |
+### The patch ladder (step 8, in order)
 
-### 🧬 Behavioral Genome — The Cyber Immune System
+Cheapest rung tried first:
 
-Cyphex's **flagship innovation**. Inspired by biological immune systems, it uses adversarial co-evolution to build a defense model that adapts to your specific application:
+1. **Patch-memory cache** — semantic hash of the enclosing function, keyed by CWE. A hit reuses a previously *verified* fix with **zero model calls**.
+2. **Deterministic template** — regex transform for the four CWEs that have one, no model, no variance:
 
-```
-🔴 RED TEAM (Attacker)              🔵 BLUE TEAM (Defender)
-─────────────────────               ─────────────────────
-Generate attack payloads    →       Build behavioral genome (Isolation Forest ML)
-                                    Score payloads → Block 60%
-Mutate BLOCKED payloads     →       Retrain on BYPASSED payloads
-to evade detection                  Block rate improves to 85%
-                                    
-Mutate again, harder        →       Retrain again
-                                    Block rate: 95%
-                                    
-Generation N:               →       Block rate: 99%+
-Both teams exhausted                Genome is hardened ✅
-```
+   | CWE | Transform |
+   |---|---|
+   | CWE-89 | `` db.query(`...${id}`) `` → `db.query("...?", [id])` |
+   | CWE-78 | `` execSync(`ping ${host}`) `` → `execFileSync("ping", [host])` — removes the shell entirely |
+   | CWE-798 | `const password = "hunter2"` → `const password = process.env.PASSWORD` |
+   | CWE-942 | `cors({ origin: "*" })` → `cors({ origin: [process.env.ALLOWED_ORIGIN ...] })` |
 
-The genome uses a **15-dimensional feature vector** per request:
+3. **Council generation** — LLM path, RAG + Knowledge-Tree context, multi-model vote.
+4. **Verify Gate** — on FAIL, a **reflexion** retry feeds the failure evidence back into the next prompt.
 
-```
-[0] input_length       [1] entropy            [2] special_char_ratio
-[3] url_encoding_ratio [4] uppercase_ratio     [5] digit_ratio
-[6] max_token_length   [7] keyword_score       [8] sqli_pattern_score
-[9] null_byte          [10] traversal_depth    [11] bracket_imbalance
-[12] unicode_ratio     [13] repetition_ratio   [14] token_count
-```
+### False-positive scoring
 
-### 🏛️ AI Verdict Council — Multi-Model Consensus
+Every finding carries a `confidence` (Semgrep 0.90, built-in regex 0.85) and, if marked down, an `fp_reason`. Findings ≤ `FP_DROP_THRESHOLD` (0.15) are dropped from ordinary scans.
 
-A debate-based validation system that **eliminates false positives** through adversarial reasoning:
+| Signal | Effect |
+|---|---|
+| SQL call is already parameterised (`?` / `$1` / params array / `prepare(`) | dropped outright — on **every** path, verification included |
+| Match sits inside a code comment | confidence 0.0 — dropped from scans, but **visible to the verifier** |
+| File is test / fixture / mock code | −0.45, kept but marked |
 
-- Multiple LLMs (Qwen, Llama, DeepSeek, Phi) independently review each finding
-- Each model votes **CONFIRM** or **REJECT** with a confidence score and reasoning
-- Findings require **consensus** — no single model can hallucinate a vulnerability
-- Built-in anti-hallucination rules enforced across all models
-- Powered by the **Oracle Reasoning Engine** (see below)
+On `vuln-webapp` this drops 2 Critical false positives — the scanner matching its own comment text: `query (should` inside `// Safe: parameterized query (should NOT be flagged)`.
 
-### 🧠 Oracle Agent-Reasoning — Making Small Models Think Big
-
-> **The core innovation that makes Cyphex work with local 3B-7B models instead of GPT-4.**
-
-Small local LLMs (Llama 3.1 8B, Qwen 2.5 7B) are fast and free — but they hallucinate, miss context, and generate shallow patches. Cyphex solves this through **Oracle's Agent-Reasoning framework**, which wraps every LLM call in a **cognitive architecture** that forces structured, multi-step reasoning:
-
-```
-Without reasoning:  model("Fix this SQL injection")  →  "Use prepared statements" (vague, often wrong)
-With reasoning:     model+cot("Fix this SQL injection")  →  Step-by-step analysis → Specific fix → Verified
-```
-
-**16 cognitive architectures**, each selected automatically based on task type, vulnerability severity, and CWE:
-
-| Strategy | When Used | How It Works |
-|----------|-----------|--------------|
-| 🔗 **Chain-of-Thought** | SQLi, XSS patches (CWE-89, CWE-79) | Forces step-by-step logical reasoning before generating code |
-| 🪞 **Self-Reflection** | High severity vulns, missing auth (CWE-306) | Draft → Critique → Improve loop (3 LLM calls) |
-| 🌳 **Tree of Thoughts** | CMDi, SSRF (CWE-78, CWE-918) | Explores multiple fix approaches via BFS, prunes bad paths |
-| 🗳️ **Self-Consistency** | Critical severity vulns | Generates K candidates, majority vote picks the best |
-| ⚔️ **Adversarial Debate** | Council patch review | Multi-perspective challenge: "Why would this fix fail?" |
-| 🧩 **Decomposition** | Auth bypass, IDOR (CWE-287, CWE-284) | Breaks complex fix into sub-tasks, solves each |
-| 📶 **Least-to-Most** | Path traversal (CWE-22) | Solves simple cases first, builds up to complex |
-| 🔧 **Refinement Loop** | Iterative code improvement | Score-based improvement over 4 rounds |
-| 📊 **Complex Pipeline** | Production-grade patches | 5-stage pipeline: accuracy → structure → depth → examples → polish |
-| 🎲 **Monte Carlo Search** | Exploring fix search space | MCTS with UCB1 scoring across candidate fixes |
-| 🔀 **Analogical** | Pattern matching from past fixes | Reasons from known CWE fix patterns by analogy |
-| ❓ **Socratic** | Code understanding & analysis | Guided questioning to find the root cause |
-| 🛠️ **ReAct** | Tool-augmented reasoning | Reason + Act loop with code context tools |
-| 🔄 **Recursive** | Self-executing code verification | Code REPL agent that tests its own output |
-| 🧠 **Meta-Reasoning** | Auto-selection | Automatically picks the best strategy for each task |
-| 📝 **Standard** | Hardcoded secrets, CORS (CWE-798, CWE-942) | Direct generation for deterministic fixes |
-
-**Automatic strategy selection** based on three signals:
-
-```
- CWE Override        → CWE-78 (CMDi) always gets Tree-of-Thoughts
- Severity Escalation → Critical vulns get Self-Consistency (3× majority vote)
- Task Mapping        → Patch generation → CoT, Patch review → Self-Reflection
- VRAM Tier Guard     → Low VRAM? Only lightweight strategies. High VRAM? All 16.
-```
-
-**Result:** A 7B local model with Oracle reasoning produces patches **comparable to GPT-4** — because it's not just generating text, it's *thinking through the problem* using the right cognitive framework. Zero API cost.
-
-### 📚 Vectorless RAG — Full Code Context Without Embeddings
-
-> **Traditional RAG needs vector databases, embeddings, and GPU VRAM. Cyphex doesn't.**
-
-When an LLM generates a patch, it needs to understand the **full context** — not just the vulnerable line, but the entire function, the route structure, the project's existing coding patterns, and its dependencies. Cloud tools use expensive embedding models + vector DBs. Cyphex uses a **Vectorless RAG** approach:
-
-```
-Traditional RAG:    Code → Embedding Model (GPU) → Vector DB → Similarity Search → Context
-Cyphex Vectorless:  Code → Keyword Index (CPU) → Regex + Scoring → Context
-                    Zero VRAM. Zero external dependencies. Instant.
-```
-
-**How it works:**
-
-1. **Code Indexer** walks the source tree and builds a keyword-based index of every file:
-   - Route patterns (`/api/users`, `/orders/:id`)
-   - Database usage (`db.query`, `SELECT`, `mongoose`, `prisma`)
-   - Auth patterns (`session`, `jwt`, `bcrypt`, `passport`)
-   - Input handling (`req.body`, `req.query`, `request.form`)
-   - Function names, imports, and dependency graph
-
-2. **Smart Retrieval** for each vulnerability uses multi-signal scoring:
-   - Route match (strongest) — finds the file that serves the vulnerable endpoint
-   - CWE-type relevance — SQLi vuln? Prioritize files with DB queries
-   - Payload term match — searches for attack-relevant code patterns
-   - Direct location match — exact file:line from the scanner
-
-3. **Secure Pattern Discovery** — finds how the **repo already writes safe code**:
-   ```
-   CWE-89 → Finds existing parameterized queries in the codebase
-   CWE-79 → Finds existing HTML sanitization calls
-   CWE-78 → Finds existing execFile/spawn usage (safe subprocess)
-   ```
-   The LLM is told: *"Fix it the way this project already does it."*
-
-4. **API Route Extraction** — Two-pass route discovery:
-   - **Pass 1:** Scans entry files for `app.use('/prefix', require('./routes/xxx'))` mount prefixes
-   - **Pass 2:** Scans route files for `router.get/post(...)` with correct prefixes applied
-   - Result: Full API map with methods, paths, source files, and parameters
-
-**Why this matters:**
-
-| Approach | VRAM Cost | Speed | Accuracy |
-|----------|-----------|-------|----------|
-| Cloud RAG (OpenAI embeddings + Pinecone) | N/A (cloud) | ~2s per query | High |
-| Local RAG (sentence-transformers + ChromaDB) | 2-4 GB VRAM | ~500ms per query | Medium |
-| **Cyphex Vectorless RAG** | **0 GB VRAM** | **<50ms per query** | **High** |
-
-The code indexer runs on CPU, uses zero VRAM (leaving it all for the LLM), and provides richer context than embedding-based approaches because it understands *code structure*, not just semantic similarity.
-
-### 🔧 Auto-Patching Pipeline with Verification Gate
-
-```
-Vulnerability Found → Oracle Reasoning selects strategy → Vectorless RAG provides context →
-LLM generates fix → Template fallback if needed → Council reviews →
-Verification Gate (syntax + blast radius + re-scan) → Applied & Confirmed
-```
-
-- **Oracle-enhanced generation**: Every patch is generated through the optimal cognitive architecture
-- **RAG-grounded context**: Full function, route, and secure-pattern context — not blind 5-line snippets
-- **Deterministic template transforms** for common CWEs (SQLi → parameterized queries, XSS → escaping)
-- **Patch memory**: Learns from verified fixes to improve future patches
-- **Verification gate**: Re-checks that the vulnerability is actually gone after patching
-- Anti-suppression: Rejects patches that add `nosemgrep`, `eslint-disable`, `# noqa`, etc.
-
-### 🛡️ RASP Daemon (Runtime Protection)
-
-```bash
-cyphex watch --port 3004
-```
-
-Deploys a persistent daemon that:
-- Receives real-time attack telemetry from your app's RASP SDK
-- Scores requests against the trained behavioral genome
-- Auto-patches vulnerable source code when attacks are detected
-- Integrates with GitHub webhooks for continuous protection
+Semgrep never runs `--config auto` (uploads project metadata on every run). Ladder: a local `cyphex/semgrep_rules.yml` if present (fully offline) → the static `p/owasp-top-ten` pack, cached after the first fetch.
 
 ---
 
-## ⚙️ The 8-Step Scan Pipeline
+## The Four Subsystems
 
-Every `cyphex scan` command executes this fully autonomous pipeline:
+### 1. DeepAgents — an Oracle-guided attack swarm
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                                                                     │
-│  STEP 1 ➜ SOURCE ACQUISITION                                       │
-│            Clone repo or copy local directory                       │
-│                                                                     │
-│  STEP 2 ➜ STATIC ANALYSIS (SAST)                                   │
-│            Semgrep (5,000+ rules) + Built-in scanner (20 languages) │
-│            Languages: JS, TS, Python, Java, Go, PHP, Ruby, C/C++,  │
-│            Rust, C#, Swift, Kotlin, SQL, YAML, Docker, and more     │
-│                                                                     │
-│  STEP 3 ➜ SANDBOX DEPLOYMENT                                       │
-│            Auto-detects framework → Deploys in Docker/Node.js       │
-│            Supports: Express, Flask, Django, Docker Compose, static │
-│                                                                     │
-│  STEP 4 ➜ DYNAMIC VULNERABILITY SCAN (DAST)                        │
-│            14 specialized agents attack the live application        │
-│            + Nuclei (8,000+ templates) + AI Verdict Council         │
-│            + Multi-model debate for false positive elimination      │
-│                                                                     │
-│  STEP 5 ➜ BEHAVIORAL GENOME EVOLUTION                              │
-│            Red Team vs Blue Team adversarial co-evolution            │
-│            N generations → genome converges toward 99%+ block rate  │
-│                                                                     │
-│  STEP 6 ➜ AI ATTACK SIMULATION                                     │
-│            Test genome against real-world attack patterns            │
-│            Verify zero false positives on benign input               │
-│                                                                     │
-│  STEP 7 ➜ SECURITY REPORT                                          │
-│            Score (0-100), confirmed vulns, CWE mapping, severity    │
-│                                                                     │
-│  STEP 8 ➜ AUTO-PATCHING + VERIFICATION                             │
-│            AI generates fixes → Council reviews → Verified applied  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+**13 specialized AI attack agents**, one per vulnerability class, that don't run a fixed script — they *adapt*.
 
----
+| Agent | Targets | Agent | Targets |
+|---|---|---|---|
+| `DeepSQLiAgent` | SQL Injection | `DeepXXEAgent` | XML External Entity |
+| `DeepXSSAgent` | Cross-Site Scripting | `DeepBusinessLogicAgent` | Business-Logic Flaws |
+| `DeepCMDiAgent` | Command Injection | `DeepPromptInjectionAgent` | Prompt Injection / LLM safety bypass (CWE-1336, OWASP LLM01) |
+| `DeepAuthAgent` | Auth Bypass / Priv-Esc | `DeepRaceConditionAgent` | Race Condition / TOCTOU (CWE-362) |
+| `DeepIDORAgent` | Insecure Direct Object Ref | `DeepMassAssignmentAgent` | Mass Assignment / Parameter Pollution (CWE-915) |
+| `DeepSSRFAgent` | SSRF — incl. the AWS metadata endpoint `169.254.169.254` | `DeepSSTIAgent` | Template Injection |
+| `DeepPathTraversalAgent` | Path Traversal / LFI | | |
 
-## 🏗️ System Architecture
+**The loop each agent runs:**
+
+1. **Baseline** — one GET to root, establishes a response-time baseline for timing-based inference (blind SQLi, sleep payloads).
+2. **Plan** — the Oracle reads the attack-surface summary, returns ranked hypotheses. Capped at `MAX_HYPOTHESES = 10`.
+3. **Probe** — hypotheses execute in parallel batches of `PARALLEL_BATCH = 3`, up to `MAX_ATTEMPTS_PER_HYPOTHESIS = 5` probes each.
+4. **Decide** — the Oracle judges the response as *confirmed / adapt / abandoned*. Abandoned ends the hypothesis immediately.
+5. **Mutate** — on *adapt*, the Oracle evolves the payload into an evasion variant and the loop repeats.
+6. **Chain** — a confirmed exploit updates the shared **attack graph**; new edges surface as multi-step attack paths (`unauth data leak → admin takeover`).
 
 ```mermaid
 flowchart TD
-    subgraph Input["📥 Input"]
-        A["GitHub Repo / Local Directory"] --> CLI["Cyphex CLI"]
-        GH["GitHub Webhook"] --> CLI
-    end
+    Baseline["Baseline: one GET to root URL,<br/>measure response-time baseline"] --> Plan["Plan: Oracle.plan reads AttackSurfaceIndex,<br/>returns hypotheses capped at MAX_HYPOTHESES = 10"]
+    Plan --> Probe["Probe: batches of PARALLEL_BATCH = 3 in parallel,<br/>up to MAX_ATTEMPTS_PER_HYPOTHESIS = 5 attempts each"]
+    Probe --> Decide{"Decide: Oracle.decide judges status, body,<br/>size, and timing vs baseline"}
+    Decide -->|confirmed| Chain["Chain: graph.update_from_finding(vuln)<br/>updates the shared AttackGraph;<br/>new edges printed as attack chains"]
+    Decide -->|adapt| Mutate["Mutate: Oracle.mutate evolves the<br/>failing payload into an evasion variant"]
+    Mutate --> Probe
+    Decide -->|abandoned| End["Hypothesis ends immediately;<br/>remaining attempts not spent"]
+```
 
-    subgraph Detection["🔍 Detection"]
-        CLI --> SAST["SAST Engine<br>Semgrep + Built-in Scanner<br>20+ Languages • 5000+ Rules"]
-        CLI --> SANDBOX["Docker Sandbox<br>Isolated Deployment"]
-        SANDBOX --> DAST["14 DAST Agents<br>SQLi, XSS, CMDi, SSRF, IDOR, JWT..."]
-        SANDBOX --> NUCLEI["Nuclei Scanner<br>8,000+ Templates"]
-    end
+A dead-route guard skips endpoints that don't exist; crawler, API-discovery and network-recon agents feed the attack-surface index the Oracle plans against.
 
-    subgraph Validation["🏛️ AI Validation"]
-        SAST --> COUNCIL["AI Verdict Council<br>Multi-Model Consensus<br>Oracle Reasoning Engine"]
-        DAST --> COUNCIL
-        NUCLEI --> COUNCIL
-        COUNCIL -->|"❌ False Positive"| DISCARD["Discard"]
-        COUNCIL -->|"✅ Confirmed"| VULNS["Confirmed Vulnerabilities"]
-    end
+### 2. The Oracle — local-model reasoning, spent where it pays
 
-    subgraph Immune["🧬 Immune System"]
-        VULNS --> GENOME["Behavioral Genome<br>Isolation Forest ML<br>15-Dimension Feature Vector"]
-        GENOME --> EVOLUTION["Adversarial Co-Evolution<br>Red Team vs Blue Team"]
-        EVOLUTION -->|"Hardened Genome"| WAF["Runtime Protection<br>RASP Daemon"]
-    end
+The local-LLM brain behind every DeepAgent has three entry points:
 
-    subgraph Remediation["🔧 Remediation"]
-        VULNS --> PATCHER["Patch Agent<br>RAG + Templates + LLM"]
-        PATCHER --> REVIEW["Council Review<br>+ Verification Gate"]
-        REVIEW --> APPLY["Apply & Verify"]
-    end
+- **`plan()`** — returns 5–8 ranked attack hypotheses (highest impact / cheapest to test first).
+- **`decide()`** — judges status, body, size and timing vs. baseline; returns confirmed/adapt/abandoned + confidence + evidence.
+- **`mutate()`** — evolves a failing payload into evasion variants.
 
-    subgraph Output["📊 Output"]
-        APPLY --> REPORT["Security Report<br>Score • Findings • Patches"]
-        WAF --> REPORT
-    end
+A **meta-reasoning router** then picks a *patch-generation* strategy per finding, from a bank of 16 (**9 enabled**):
+
+| Router | Availability | Routing |
+|---|---|---|
+| **Built-in** | Always on | Critical **or** a hard CWE (78, 918, 89, 94, 77, 22) → **Self-Consistency** K-vote · High → **Chain-of-Thought** · everything else → direct generation |
+| **`.[reasoning]` extra** | Optional install | CWE override first, then severity: Critical → Self-Consistency · High → **Self-Reflection** (draft → critique → improve) · Medium/Low → CoT. CMDi/SSRF → **Tree-of-Thoughts**, auth-bypass/IDOR → **Decomposition**, path traversal → **Least-to-Most**. Expensive strategies gated off on low-VRAM tiers. |
+
+Every patch keeps its reasoning tree for audit. → [PRD §11.20](CYPHEX_PRD.md)
+
+### 3. Vectorless RAG + Knowledge Tree — context without a vector DB
+
+Small models need good context. No embeddings, no vector store — a regex code-tree index extracts, per vulnerability, the enclosing function, imports, a CWE fix recipe, and an in-repo secure example so patches match the codebase's own style.
+
+On top: a **PageIndex-style Knowledge Tree** (`backend/rag/`) — `code_tree` + `knowledge_tree` + a deterministic `cwe_index`, built from your repo plus a bundled security corpus, cached under `.cyphex/knowledge_tree.json`.
+
+Fast path is **0-LLM**: `CWE + file:line` → function, fix recipe, secure example. Measured on `vuln-webapp`: CWE-89 returns a 502-char recipe, 543-char function, 547-char in-repo example. The deep path shows the model only branch *summaries*, never the whole tree.
+
+> No embeddings in the RAG path. The optional `[memory]` extra (cognee) is the exception — `nomic-embed-text`, 768 dims, local LanceDB.
+
+### 4. The Council — multi-model validation
+
+One model grading its own patch is a single point of failure. CYPHEX assigns three roles — `detector`, `validator`, `patcher` — and scores every Ollama model for each.
+
+Scoring is deliberately blunt: **parameter count drives it**, code specialisation is only a 15% bonus. An 8B general model beats a 7B code model at most tasks, including code — the extra parameters buy better reasoning.
+
+The **debate protocol**: the patcher proposes, validators vote with reasons, the finding is confirmed, sent back, or dropped as a false positive. A separate **fact-check pass** has a second model re-read the report hunting for findings the first model invented.
+
+`cyphex council-doctor` reports which model landed in which role.
+
+---
+
+## The Behavioural Immune System
+
+CYPHEX learns what *normal* looks like for *your* app and blocks the anomalies, instead of matching known signatures.
+
+**The 15-dimension feature vector**, extracted per input string:
+
+| # | Feature | # | Feature |
+|---|---|---|---|
+| 1 | `input_length` | 9 | `sqli_pattern_score` (24-pattern injection bank) |
+| 2 | `entropy` (Shannon) | 10 | `null_byte_present` |
+| 3 | `special_char_ratio` | 11 | `path_traversal_depth` |
+| 4 | `url_encoding_ratio` | 12 | `bracket_imbalance` |
+| 5 | `uppercase_ratio` | 13 | `unicode_ratio` |
+| 6 | `digit_ratio` | 14 | `repetition_ratio` |
+| 7 | `max_token_length` | 15 | `token_count` |
+| 8 | `sql_keyword_score` | | |
+
+- **Scoring** — `max(isolation-forest, heuristic)`; heuristic is 15 threshold rules over those features (one fed by the 24-pattern injection bank), plus an agreement boost when both fire. **BLOCK ≥ 0.7** (`GENOME_BLOCK_THRESHOLD`). Heuristic alone still scores without numpy/scikit-learn.
+- **Coverage** — past SQLi/XSS: SSTI, NoSQLi, SSRF/cloud-metadata, LDAP injection, CRLF header injection, XXE (100% detection on each in the benchmark corpus).
+- **Adversarial co-evolution** — red team mutates attacks, blue team retrains on blocked + bypassed + fresh diverse payloads. Defaults: 10 generations × 20 payloads, early-stop at ≥99% block rate for 3 consecutive generations. Not strictly monotonic run to run.
+- **Persistence** — genomes saved with an **HMAC sidecar** (`.pkl` + `.pkl.hmac`, key mode `0600`); refuse to load an unsigned or tampered file. Attack history round-trips too, so run *N+1* keeps hardening from run *N*'s bypasses.
+
+The co-evolution loop, visualised:
+
+```mermaid
+flowchart TD
+    Start["Generation start:<br/>up to EVOLUTION_GENERATIONS = 10 generations,<br/>EVOLUTION_PAYLOADS_PER_GEN = 20 payloads/generation"] --> Red["Red team mutates attack payloads<br/>against the current genome"]
+    Red --> Blue["Blue team retrains the genome on<br/>blocked + bypassed + freshly<br/>injected diverse payloads"]
+    Blue --> Check{"Block rate ≥ EVOLUTION_CONVERGENCE_THRESHOLD (0.99)<br/>for 3 consecutive generations?"}
+    Check -->|no| Start
+    Check -->|yes| Converged["Converged: early-stop"]
+    Converged --> Persist["genome_TARGET.pkl +<br/>HMAC-SHA256 sidecar (.pkl.hmac),<br/>keyed by .genome_hmac.key, chmod 0600"]
+```
+
+Sample scores (`/search` endpoint, untrained genome):
+
+| Payload | Score | Verdict |
+|---|---|---|
+| `' OR 1=1--` | 1.00 | BLOCK |
+| `<script>alert(1)</script>` | 1.00 | BLOCK |
+| `; cat /etc/passwd` | 1.00 | BLOCK |
+| `http://169.254.169.254/latest/meta-data/` | 0.80 | BLOCK |
+| `{{7*7}}` | 0.80 | BLOCK |
+| `normal search query` | 0.00 | allow |
+
+### Benchmarked quality
+
+**91.3% recall · 97.7% precision · 94.4% F1 · 3.3% FPR · ~0.04 ms/sample** on a 76-sample corpus (46 attack / 30 benign). Small *n* — directional, not certified. Co-evolution rates are in-distribution, not a generalization claim.
+
+```bash
+python3 cyphex_benchmark.py                       # exits non-zero if recall < 80% or FPR > 10% → CI gate
+python3 cyphex_benchmark.py --data cic-ids2018.csv --threshold 0.6 --json out.json
+./cx benchmark --data cic-ids2018.csv             # same engine from the launcher (reports the gate
+                                                  # verdict, but does NOT set an exit code)
+```
+
+Output includes the confusion matrix, per-class detection rates, and every miss/false positive — current misses: `admin'--`, `" OR ""="`, `| whoami`, a Windows-style traversal path. `--data` accepts any labelled CSV with `payload,label[,attack]` columns.
+
+---
+
+## Network Scanning (optional)
+
+`--network` / `/net` adds host discovery, port sweep, service/device-type inference from banners, and a per-host risk score weighted on high-risk ports (21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5432…) and cleartext protocols (21, 23, 25, 80, 110, 143, 8080). `NetworkVulnMapper` correlates open services against known weaknesses.
+
+A separate **25-dimension network genome** covers traffic-level anomalies (ARP rate, ICMP rate, SYN-without-ACK rate), HMAC-signed. `/netwatch` runs it live.
+
+> `/net <cidr>` attacks the range you name **directly** — no sandbox, no authorization check. See [Security & Ethics](#security--ethics).
+
+---
+
+## RASP + Auto-Heal Daemon
+
+A **zero-dependency Express shield** (`sdks/node/cyphex-rasp.js`, a single `app.use()` — or let `python3 cyphex_cli.py onboard --path <app>` inject it) inspects query strings, JSON bodies, and cookie/referer/UA headers. Blocks with a **403** above a tunable `confidenceThreshold` (default 0.7), or runs **detect-only** (`blockMode: false`) for a staged rollout.
+
+Events ship to the **`/watch` auto-heal daemon** on `127.0.0.1:3004`, which applies its own 70% floor before the AI council **patches your real source in place**. `GET /api/status` and `GET /api/heal-log` expose the healing history. API-key auth is enforced — **the same `CYPHEX_API_KEY` must be set on both sides** or telemetry is silently dropped.
+
+> **Stack-trace caveat.** Mounted globally via `app.use()`, the RASP fires *before* any route handler runs, so no `file:line` is resolved. **Mount it per-route** (`app.get('/x', cyphexRasp(opts), handler)`) to get the exact vulnerable line.
+
+---
+
+## Usage
+
+**Non-interactive CLI** — `cyphex <command>`:
+
+```bash
+cyphex scan ./my-app                    # bare positional target (path or URL) also works
+cyphex scan --repo https://github.com/user/app.git --deepagents --network
+cyphex scan --path ./vuln-webapp --deep --format sarif      # --deep aliases --deepagents
+cyphex scan --path ./my-app --judge                         # deterministic JSON/MD/SARIF artifacts
+cyphex setup | doctor | council-doctor | version
+cyphex                                  # no args → slash-command workspace (also: repl / workspace / shell)
+```
+
+| Flag | Effect |
+|---|---|
+| `--path` / `--repo` / bare positional | Target: local dir, git URL, or live URL |
+| `--deepagents` (alias `--deep`) | Oracle-guided swarm instead of Nuclei/ZAP |
+| `--network` | Add the host/port sweep |
+| `--no-patch` | Scan and report only — no remediation |
+| `--format {table,json,sarif,markdown}` | Output format (default `table`) |
+| `--judge` | Deterministic artifact set for benchmarking |
+| `--mode {full,standard,lite,cloud}` | **Declared but not yet read by the engine** — see limitations |
+
+**REPL / workspace** — these are slash commands *inside* `cyphex`, not shell commands:
+
+```
+/scan <target> [--network] [--deepagents] [--full] [--no-patch]
+/deep <target>     · /full <target>     # DeepAgents swarm · + network sweep
+/net [host]        · /netaudit · /netwatch
+/watch                                  # RASP auto-heal daemon
+/benchmark [--threshold N] [--json out.json]
+/setup /doctor /models /version /history /clear /help /exit
+<bare path or URL>                      # auto-scans it; Tab completes commands
+```
+
+**`./cx` launcher** — same engine, non-interactively: `cx scan`, `cx deep`, `cx net`, `cx benchmark`, `cx doctor`, `cx models`, `cx --version`, or `cx <path|url>` to auto-scan.
+
+**Legacy** (`python3 cyphex_cli.py <cmd>`): `watch`, `github-hook`, `onboard`, `netmap`, `netwatch`, `netaudit`, `scan --branch` — not yet ported to the `cyphex` binary.
+
+---
+
+## Configuration
+
+Defaults live in `backend/backend/config.py`; environment variables override them.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_URL` | `http://localhost:11434` | Local model endpoint |
+| `OLLAMA_MODEL` | `qwen2.5-coder:7b` | Default model when the selector has nothing better |
+| `CYPHEX_API_KEY` | — | Shared secret between the RASP SDK and the `/watch` daemon. **Must match on both sides** |
+| `CYPHEX_API_HOST` / `CYPHEX_API_PORT` | `127.0.0.1` / `8000` | Local API bind address |
+| `CYPHEX_GIT_ALLOWED_HOSTS` | — | Allow-list for `--repo` clone hosts |
+| `GITHUB_TOKEN` | — | Only for the opt-in `github-hook` PR flow |
+| `GITHUB_WEBHOOK_SECRET` | — | Verifies inbound webhook signatures |
+| `COGNEE_EMBEDDING_MODEL` | `nomic-embed-text` | Optional `[memory]` extra only |
+| `COGNEE_RECALL_TIMEOUT_S` | `20.0` | Memory recall budget |
+| `COGNEE_REMEMBER_TIMEOUT_S` | `300.0` | `cognify()` runs an LLM extraction pass — hence the wide budget |
+
+Notable non-env knobs:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `SCAN_TIMEOUT_SECONDS` | `1800` | Hard ceiling on a single scan |
+| `COMMAND_TIMEOUT_SECONDS` | `60` | Per-command default |
+| `MAX_PARALLEL_AGENTS` | `6` | Concurrency cap for the agent suite |
+| `GENOME_BLOCK_THRESHOLD` | `0.7` | Anomaly score at/above which a payload is blocked |
+| `EVOLUTION_GENERATIONS` | `10` | Co-evolution generations per run |
+| `EVOLUTION_PAYLOADS_PER_GEN` | `20` | Payloads bred per generation |
+| `EVOLUTION_CONVERGENCE_THRESHOLD` | `0.99` | Early-stop block rate |
+
+> `config.py` also carries `GROQ_*`/`CEREBRAS_*`/`AI_BACKEND_MODE` for a cloud fallback path. Default is `AI_BACKEND_MODE = "local"`; a cloud key sends your code off-box.
+
+---
+
+## Using CYPHEX in CI
+
+The immune benchmark is the gate — exits non-zero if recall drops below 80% or FPR climbs above 10%:
+
+```yaml
+- name: Immune-system regression gate
+  run: python3 cyphex_benchmark.py
+
+- name: Security scan (report only, no patching)
+  run: cyphex scan . --no-patch --format sarif > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+Use `--no-patch` in CI — a full patching run needs Ollama and ~18 minutes. `--judge` gives deterministic artifacts for diffing scan-over-scan.
+
+---
+
+## Repository Layout
+
+```
+cyphex/                     # The pip-installed package — CLI entry point
+  cli.py                    #   argparse surface, `cyphex <cmd>`
+  scanner.py                #   static analysis: Semgrep + 16 built-in rulesets + FP scoring
+  dynamic_scanner.py        #   Nuclei / ZAP integration
+  docker_sandbox.py         #   hardened container deployment
+  daemon.py                 #   /watch auto-heal daemon (127.0.0.1:3004)
+  doctor.py  hardware.py    #   environment checks, VRAM tiering, model selection
+  onboarder.py              #   zero-click RASP injection into a target app
+  github_hook.py            #   opt-in PR flow (the one path that leaves your machine)
+
+backend/
+  deepagents/               # 13 Oracle-guided attack agents + attack graph + surface index
+  council/                  # multi-model debate, model selection, reasoning strategies
+  rag/                      # vectorless code index, Knowledge Tree, security KB, cognee memory
+  reasoning/                # reflexion, self-consistency, session memory, reasoning trees
+  patch/                    # resolver → applier → verifier → templates → manifest → regression
+  network/                  # discovery, network genome, topology, vuln mapping
+  backend/immune/           # behavioural genome + adversarial evolution controller
+  backend/agents/           # the classic (non-Deep) agent suite
+  sandboxes/                # per-scan working copies (gitignored)
+
+sdks/node/cyphex-rasp.js    # the runtime shield
+cli_engine.py               # pipeline orchestrator — wires all of the above together
+cyphex_benchmark.py         # immune-system benchmark + CI gate
+tests/                      # 136 tests
+vuln-webapp/                # bundled deliberately-vulnerable Express app
 ```
 
 ---
 
-## 🛠️ Tech Stack
-
-> **No cloud APIs. No subscriptions. Everything runs locally.**
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **CLI Engine** | Python 3.11+ | Core orchestration — 3,000+ line scan pipeline |
-| **AI Inference** | Ollama (100% Local) | LLM-powered analysis, patching, council debate |
-| **Models** | Qwen 2.5 Coder, Llama 3.1, DeepSeek Coder | Multi-model council + patch generation |
-| **Oracle Reasoning** | agent-reasoning | 15 cognitive architectures (CoT, debate, verification) |
-| **Static Analysis** | Semgrep + Custom Regex Engine | 5,000+ rules across 20+ languages |
-| **Dynamic Analysis** | 14 Custom Agents + Nuclei | Specialized attack agents + 8,000+ Nuclei templates |
-| **Machine Learning** | scikit-learn + NumPy | Isolation Forest for behavioral anomaly detection |
-| **Sandboxing** | Docker / Docker Compose | Isolated app deployment for safe DAST testing |
-| **Code Intelligence** | RAG Code Indexer | Vectorless code context for grounded LLM patching |
-| **Terminal UI** | Rich | Premium terminal output — panels, tables, progress bars |
-| **Runtime** | RASP Daemon + GitHub Webhooks | Continuous runtime protection |
-
-### Languages Supported (SAST)
-
-```
-JavaScript • TypeScript • Python • Java • Go • PHP • Ruby • C • C++ •
-Rust • C# • Swift • Kotlin • Scala • SQL • HTML • CSS • YAML •
-Dockerfile • Shell/Bash
-```
-
----
-
-## 🚀 Usage
-
-### Scan a Local Project
+## Testing
 
 ```bash
-cyphex scan --path ./my-project
-```
-
-### Scan a GitHub Repository
-
-```bash
-cyphex scan --repo https://github.com/user/vulnerable-app.git
-```
-
-### Scan with Auto-Patching
-
-```bash
-cyphex scan --path ./my-project --patch
-```
-
-### Advanced Options
-
-```bash
-# Scan a specific branch
-cyphex scan --repo https://github.com/user/app.git --branch develop
-
-# Control evolution generations (default: 10)
-cyphex scan --path ./app --generations 15
-
-# Scan without patching
-cyphex scan --path ./app --no-patch
-
-# Save report to file
-cyphex scan --path ./app --output report.json
-
-# Non-interactive mode (for CI/CD)
-cyphex scan --path ./app --non-interactive
-
-# Judge mode (deterministic output)
-cyphex scan --path ./app --judge
-```
-
-### RASP Daemon (Runtime Protection)
-
-```bash
-cyphex watch --port 3004
-```
-
-### GitHub Webhook Integration
-
-```bash
-cyphex github-hook --port 3005 --secret your_webhook_secret
-```
-
-### Zero-Click Onboarding
-
-```bash
-cyphex onboard --repo https://github.com/user/app.git --scan
-```
-
----
-
-## 📁 Project Structure
-
-```
-Cyphex_CLI/
-├── cyphex_cli.py                 # CLI entry point — all commands
-├── cli_engine.py                 # Core scan engine (3,000+ lines)
-├── terminal_ui.py                # SOC-style Rich terminal panels
-├── pyproject.toml                # Package config & dependencies
-│
-├── cyphex/                       # Core modules
-│   ├── scanner.py                # SAST (Semgrep + 20-language regex)
-│   ├── dynamic_scanner.py        # DAST coordination (Nuclei/ZAP)
-│   ├── daemon.py                 # RASP auto-healing daemon
-│   ├── github_hook.py            # GitHub webhook receiver
-│   ├── onboarder.py              # Zero-click RASP integration
-│   ├── hardware.py               # VRAM/GPU detection & model assignment
-│   ├── doctor.py                 # System readiness checker
-│   └── cli.py                    # CLI argument parser
-│
-├── backend/
-│   ├── council/                  # AI Verdict Council
-│   │   ├── council_orchestrator.py   # Multi-model debate orchestration
-│   │   ├── patch_council.py          # Patch generation + review
-│   │   ├── debate_protocol.py        # False-positive filtering
-│   │   ├── model_selector.py         # Hardware-aware model assignment
-│   │   └── route_tracer.py           # Route → handler mapping
-│   │
-│   ├── backend/
-│   │   ├── agents/               # 14 DAST Attack Agents
-│   │   ├── immune/               # Behavioral Genome (Immune System)
-│   │   │   ├── behavioral_genome.py      # Isolation Forest detector
-│   │   │   ├── evolution_controller.py   # Red/Blue co-evolution
-│   │   │   └── mutation_engine.py        # Payload mutation strategies
-│   │   ├── models/               # Data models (Vuln, ScanContext)
-│   │   └── sandbox_manager.py    # Docker sandbox lifecycle
-│   │
-│   ├── patch/                    # Patch pipeline
-│   │   ├── templates.py          # Deterministic CWE templates
-│   │   └── verifier.py           # Verification gate (syntax, blast radius)
-│   │
-│   ├── rag/                      # Code Intelligence
-│   │   └── code_indexer.py       # Vectorless RAG for patch context
-│   │
-│   └── reasoning/                # Oracle Reasoning Engine
-│       ├── oracle_adapter.py     # 15 cognitive architectures
-│       ├── reasoning_tree.py     # Chain-of-Thought trace trees
-│       └── session_memory.py     # Cross-scan learning
-│
-├── demo/
-│   └── vuln-webapp/              # Bundled vulnerable Express.js app
-│       ├── src/server.js         # 14 intentional vulnerabilities
-│       └── README.md             # Vulnerability catalog
-│
-├── finetune/                     # Custom model fine-tuning
-│   └── Modelfile                 # Ollama Modelfile for cyphex-patch
-│
-└── tests/                        # Test suite
-```
-
----
-
-## 🔮 Future Roadmap
-
-| Status | Feature |
-|--------|---------|
-| ✅ Complete | 14 specialized DAST attack agents |
-| ✅ Complete | AI Verdict Council with multi-model consensus |
-| ✅ Complete | Behavioral Genome with adversarial co-evolution |
-| ✅ Complete | Auto-patching with verification gate |
-| ✅ Complete | Oracle Reasoning Engine (15 cognitive architectures) |
-| ✅ Complete | RAG-powered code indexing for grounded patches |
-| ✅ Complete | RASP daemon with GitHub webhook integration |
-| ✅ Complete | 20+ language SAST support (Semgrep + built-in) |
-| ✅ Complete | Patch memory — learn from verified fixes |
-| ✅ Complete | Deterministic template transforms for common CWEs |
-| 🔄 In Progress | CI/CD GitHub Action for automated PR scanning |
-| 🔄 In Progress | SOC-style terminal dashboard (Rich panels) |
-| 📋 Planned | Proof-carrying regression tests generated per fix |
-| 📋 Planned | IoT device security scanning (Raspberry Pi, ESP32) |
-
----
-
-## 🔐 Security Philosophy
-
-> **Cybersecurity without API keys.**
-
-Cyphex was built on a fundamental belief: **security tools should not be a security risk**.
-
-- **No cloud APIs** — Your source code, vulnerability reports, and patches never leave your machine
-- **No API keys** — Runs entirely on local Ollama models. No OpenAI, no Anthropic, no billing
-- **No data collection** — Zero telemetry, zero analytics, zero phone-home
-- **Offline-first** — Works in air-gapped environments, classified networks, and offline labs
-- **Open source** — Fully auditable. You can read every line of code that scans your code
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how to get started:
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-```bash
-# Development setup
 pip install -e ".[dev]"
-pytest tests/
-cyphex doctor
+pytest                      # 136 tests, ~7s
+pytest -m integration       # slow tests that drive real local models (needs Ollama)
 ```
 
----
+Integration tests are excluded by default (`addopts = "-m 'not integration'"`) — `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
 
-## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+The Verify Gate tests are worth reading to understand the system's guarantees — mutation-checked, meaning each invariant was deliberately broken to confirm the suite catches it.
 
 ---
 
-## 👥 Team
+## Troubleshooting
 
-Built with 💜 for the security community.
-
-<p align="center">
-  <code>#vibecoders</code>
-</p>
+| Symptom | Cause & fix |
+|---|---|
+| `ModuleNotFoundError` on `cyphex` | Editable install didn't take. Re-run `pip install -e .` from the repo root |
+| `cyphex doctor` reports 0 GB VRAM | No detectable GPU. CYPHEX still runs on CPU, just slowly; `--mode` is declared but not yet wired |
+| Scan finds nothing on a real repo | Check `cyphex doctor` for Semgrep. Without it you're on the 16 built-in regex rulesets only |
+| Every patch comes back UNVERIFIABLE | The re-scan or syntax check couldn't run — usually missing `node` for a JS target. Install Node 18+ |
+| Patches are slow | Expected: ~18 min for a full patching run on 7B/8B. Use `--no-patch` to scan only |
+| RASP telemetry never reaches the daemon | `CYPHEX_API_KEY` must match on both sides; use the current `sdks/node/cyphex-rasp.js` (older copies send no `X-API-Key`) |
+| RASP reports no `file:line` | It's mounted globally. Mount per-route to get an app frame on the stack |
+| Sandbox deploy fails | Docker missing or the target needs its own Dockerfile. CYPHEX falls back to a resource-capped subprocess |
+| `pytest` hangs | You ran integration tests. Default `pytest` excludes them |
 
 ---
 
-<p align="center">
-  <b>CYPHEX</b> — Because your code deserves an immune system.
-  <br><br>
-  <i>Autonomous scanning. Multi-agent attacks. AI council debate. Adversarial evolution. Auto-patching.<br>One command. Zero APIs. 100% local.</i>
-</p>
+## What CYPHEX Can't Do (Yet)
+
+- **Not a substitute for human review or a formal pentest.** It's a fast, verified first pass.
+- **A full run takes ~18 minutes** on 7B/8B models — mostly LLM latency.
+- **Nuclei/ZAP and the DeepAgents never run in the same scan** — `--deepagents` replaces them.
+- **The built-in scanner is regex-based** (16 rulesets, broad but shallow); Semgrep does the deep work. Confidence scoring is itself heuristic — a "test file" mark can still be real.
+- **`p/owasp-top-ten` needs one online fetch** before caching. Air-gapped runs need a local `cyphex/semgrep_rules.yml`; none bundled.
+- **Only 4 CWEs have deterministic templates** (89, 78, 798, 942). Everything else goes through the LLM path, with the variance that implies.
+- **Sandbox deployment is strongest on Node/Express** targets; other stacks may need your own Dockerfile. The RASP shield is **Express-only** today.
+- **Benchmark numbers come from a 76-sample corpus.** Directional, not certified.
+- **Hardware detection keys off GPU VRAM** — no GPU reports 0 GB; `--mode` override is declared but unread by the engine.
+- **Applier gaps**: its path-containment guard is inert (CLI doesn't pass `source_dir`; enforced a layer up instead), a legacy non-atomic write path exists as fallback, and atomic writes via `os.replace` drop original permission bits and hard links.
+- **No bracket-balance guard in the applier** — the council prompt asks for balanced braces, nothing enforces it; `node --check` catches the damage and auto-rolls-back.
+- **Older vendored RASP copies predate daemon auth** — no `X-API-Key`, telemetry silently dropped. Use the current `sdks/node/cyphex-rasp.js`.
+
+---
+
+## Tech Stack
+
+| Layer | Tech |
+|---|---|
+| **Local AI** | Ollama — `qwen2.5-coder:7b` (patcher/oracle), `llama3.1:8b` (analyst/reviewer), `deepseek-coder:6.7b` (reviewer), `nomic-embed-text` (optional cognee memory only) |
+| **SAST** | Semgrep + built-in 16-ruleset regex scanner (12 languages + Dockerfile/YAML/SQL/`.env`) with confidence scoring |
+| **DAST** | Crawler + API discovery, then Nuclei & OWASP ZAP **or** 13 DeepAgents |
+| **Sandbox** | Docker (auto-Dockerfile, cap-drop, non-root, loopback-only) / resource-capped native subprocess |
+| **Immune System** | 15-rule heuristic over a 24-pattern injection bank + scikit-learn Isolation Forest (CPU-only, degrades gracefully) |
+| **Memory** | patch-memory cache · Knowledge Tree · cognee cross-project graph · cross-scan session memory |
+| **Core** | Python 3.11+ · httpx · rich · numpy |
+
+---
+
+## Security & Ethics
+
+- **Local-first AI** — every model call hits your own Ollama at `127.0.0.1:11434`. No cloud LLM, no API key, no billing.
+- **Not network-isolated** — deploy runs `npm`/`pip`/`docker build` against public registries; `cyphex setup` downloads Semgrep/Nuclei; cognee fetches a tokenizer from HuggingFace once; `github-hook` pushes a PR via `api.github.com`. Only that PR flow sends code off-box; air-gapped runs should pre-warm caches and skip it.
+- **Offense goes wherever you point it** — `cyphex scan <path>`/`--repo` stay sandboxed, but `scan http://…` and `/net <cidr>` attack the target **directly, no sandbox, no authorization check**. Only use against systems you're permitted to test.
+- **Hardened against the code it scans** — `npm install --ignore-scripts` blocks postinstall RCE; env is an explicit allow-list (never `os.environ.copy()`); archives get path-traversal guards + a 1 GB zip-bomb cap; the target is force-rebound to `127.0.0.1`.
+- **Quiet by default** — Nuclei with `-duc -ni`, Semgrep with `--metrics=off` and never `--config auto`. Local API binds `127.0.0.1`, compares tokens with `hmac.compare_digest`.
+- **Fail-closed patching** — symlinks refused, line ranges validated, atomic writes, auto-rollback on syntax failure, HMAC-signed genome caches. *(See [limitations](#what-cyphex-cant-do-yet) for gaps.)*
+- **Graceful degradation** — missing Docker / scikit-learn / Semgrep / Nuclei → CYPHEX degrades and tells you, rather than crashing.
+
+---
+
+## Full Documentation
+
+Everything below lives in **[CYPHEX_PRD.md](CYPHEX_PRD.md)**:
+
+| Your question | Section |
+|---|---|
+| What files does a scan write? | §13 Data Model & Artifacts |
+| What *can't* it do? | §5 Goals & Non-Goals · §18 Implementation Status & Known Gaps |
+| What hardware / VRAM do I need? | §11.4 Local Models, Hardware Tiers & VRAM |
+| Which CWEs are covered? | Appendix B CWE Coverage |
+| Every command and flag | §11.2 Commands · Appendix C Command Cheat-Sheet |
+| How does patching actually work? | §11.17 AI Remediation Pipeline |
+| How is the posture score computed? | §11.23 Security Posture Score |
+| Architecture & end-to-end walkthrough | §9 System Overview · §12 Pipeline Walkthrough |
+| Where's the code for X? | Appendix D Key File Map |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+<p align="center"><br><b>CYPHEX</b> — find → attack → verify → fix → harden, on your own machine.<br>
+<i>Oracle-guided attacks · AI council debate · Adversarial evolution · Auto-patching that has to prove itself.</i></p>

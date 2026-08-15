@@ -2,11 +2,11 @@
 import base64
 import json as _json
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-from deepagents.payloads.auth import DEFAULT_CREDS, JWT_WEAK_SECRETS, AUTH_SUCCESS_SIGS, JWT_ALG_NONE_HEADER
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+from backend.deepagents.payloads.auth import DEFAULT_CREDS, JWT_WEAK_SECRETS, AUTH_SUCCESS_SIGS, JWT_ALG_NONE_HEADER
 
 class DeepAuthAgent(BaseDeepAgent):
     """
@@ -45,7 +45,7 @@ class DeepAuthAgent(BaseDeepAgent):
         all_creds += [(u, p, "default") for u, p in DEFAULT_CREDS]
 
         login_paths = [
-            path for path in list(self.asi.endpoints)
+            path for path in self.asi.endpoints
             if any(kw in path.lower() for kw in ("login", "signin", "auth", "token", "session"))
         ]
         if not login_paths:
@@ -90,7 +90,7 @@ class DeepAuthAgent(BaseDeepAgent):
                 continue
             self.console.print(f"[cyan]DeepAuthAgent[/cyan] found JWT at {endpoint}, testing attacks...")
 
-            # -- Attack 1: alg:none --
+            # ── Attack 1: alg:none ──
             try:
                 parts = token.split(".")
                 if len(parts) == 3:

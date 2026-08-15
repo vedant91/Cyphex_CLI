@@ -219,12 +219,73 @@ def _setup_tools():
     print(f"{border}\n")
 
 
+def _safe_extract_zip(zf, dest_dir: str):
+    """Extract a ZipFile into dest_dir, rejecting any member whose resolved
+    path would escape dest_dir (zip-slip: `../` traversal or absolute paths)."""
+    dest_root = os.path.realpath(dest_dir)
+    for member in zf.infolist():
+        member_path = os.path.realpath(os.path.join(dest_dir, member.filename))
+        if member_path != dest_root and not member_path.startswith(dest_root + os.sep):
+            print(f"  ✗ Skipping unsafe zip entry (path traversal): {member.filename}")
+            continue
+        zf.extract(member, dest_dir)
+
+
+def _fetch_nuclei_release_metadata(os_name: str, arch_name: str):
+    """Best-effort lookup of the exact asset download URL + expected SHA256
+    for the current platform from the latest Nuclei GitHub release.
+
+    Returns (zip_url, expected_sha256_or_None). Never raises — any failure
+    just means checksum verification will be skipped (with a warning).
+    """
+    import urllib.request
+    import json as _json
+
+    fallback_url = f"https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_{os_name}_{arch_name}.zip"
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/projectdiscovery/nuclei/releases/latest",
+            headers={"User-Agent": "cyphex-setup", "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            release = _json.loads(resp.read().decode("utf-8"))
+
+        version = str(release.get("tag_name", "")).lstrip("v")
+        assets = {a.get("name", ""): a.get("browser_download_url", "") for a in release.get("assets", [])}
+        zip_name = f"nuclei_{version}_{os_name}_{arch_name}.zip"
+        checksums_name = f"nuclei_{version}_checksums.txt"
+
+        zip_url = assets.get(zip_name, fallback_url)
+        checksums_url = assets.get(checksums_name)
+        if not checksums_url:
+            return zip_url, None
+
+        creq = urllib.request.Request(checksums_url, headers={"User-Agent": "cyphex-setup"})
+        with urllib.request.urlopen(creq, timeout=15) as cresp:
+            checksums_text = cresp.read().decode("utf-8", errors="ignore")
+
+        for line in checksums_text.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].strip().lstrip("*") == zip_name:
+                return zip_url, parts[0].strip().lower()
+
+        return zip_url, None
+    except Exception:
+        return fallback_url, None
+
+
 def _install_nuclei_binary(system: str, machine: str, installed: list):
-    """Download Nuclei binary directly from GitHub releases."""
+    """Download Nuclei binary directly from GitHub releases.
+
+    Verifies the downloaded archive's SHA256 against the checksums file
+    ProjectDiscovery publishes alongside each release (when it can be
+    resolved), and safely extracts the zip (rejecting zip-slip entries).
+    """
     try:
         import urllib.request
         import zipfile
         import tempfile
+        import hashlib
 
         # Map platform to release name
         os_map = {"darwin": "macOS", "linux": "linux"}
@@ -232,16 +293,33 @@ def _install_nuclei_binary(system: str, machine: str, installed: list):
         os_name = os_map.get(system, system)
         arch_name = arch_map.get(machine, "amd64")
 
-        url = f"https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_{os_name}_{arch_name}.zip"
+        url, expected_sha256 = _fetch_nuclei_release_metadata(os_name, arch_name)
+        if not expected_sha256:
+            print("  ⚠ TODO/WARNING: could not resolve the Nuclei release checksum — "
+                  "proceeding WITHOUT integrity verification.")
+            print("    Verify manually against: https://github.com/projectdiscovery/nuclei/releases")
 
         with tempfile.TemporaryDirectory() as tmp:
             zip_path = os.path.join(tmp, "nuclei.zip")
             urllib.request.urlretrieve(url, zip_path)
 
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                zf.extractall(tmp)
+            if expected_sha256:
+                hasher = hashlib.sha256()
+                with open(zip_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        hasher.update(chunk)
+                actual_sha256 = hasher.hexdigest().lower()
+                if actual_sha256 != expected_sha256:
+                    print(f"  ✗ Nuclei checksum MISMATCH (expected {expected_sha256}, got {actual_sha256}) — aborting install.")
+                    return
+                print("  ✓ Nuclei archive checksum verified")
 
-            nuclei_bin = os.path.join(tmp, "nuclei")
+            extract_dir = os.path.join(tmp, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                _safe_extract_zip(zf, extract_dir)
+
+            nuclei_bin = os.path.join(extract_dir, "nuclei")
             if os.path.exists(nuclei_bin):
                 # Install to user bin
                 user_bin = os.path.expanduser("~/.local/bin")
@@ -256,16 +334,39 @@ def _install_nuclei_binary(system: str, machine: str, installed: list):
                 print("  ✗ Nuclei binary not found in archive")
 
     except Exception as e:
-        print(f"  {FL}✗{RS} Nuclei download failed: {e}")
+        print(f"  ✗ Nuclei download failed: {e}")
         print("    Install manually: https://github.com/projectdiscovery/nuclei/releases")
+
+
+def _launch_workspace():
+    """Drop into the interactive CYPHEX workspace (the slash-command REPL).
+
+    This is the default when `cyphex` is run with no subcommand — so, like
+    `claude` or `codex`, a single `cyphex` opens the workspace and everything
+    else (/scan, /deep, /net, /doctor, /watch …) happens inside it.
+    """
+    try:
+        import cx  # top-level module at the project root (on sys.path above)
+    except Exception as e:
+        print(f"Could not load the CYPHEX workspace: {e}")
+        print("Run from the project directory, or reinstall with: pip install -e .")
+        sys.exit(1)
+    cx.run_workspace()
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="cyphex",
-        description="CYPHEX — AI Security Scanner with Adversarial Immune System",
+        description="CYPHEX — AI Security Scanner with Adversarial Immune System. "
+                    "Run `cyphex` with no arguments to open the interactive workspace.",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    # ── cyphex  (no subcommand) / cyphex repl ──
+    # Enter the interactive workspace. Registered as explicit subcommands too so
+    # `cyphex repl` / `cyphex workspace` / `cyphex shell` all work.
+    for _alias in ("repl", "workspace", "shell"):
+        subparsers.add_parser(_alias, help="Open the interactive CYPHEX workspace (default)")
 
     # ── cyphex scan ──
     scan_parser = subparsers.add_parser("scan", help="Run a security scan")
@@ -280,6 +381,10 @@ def main():
                              help="Deterministic mode for benchmarking (SARIF output)")
     scan_parser.add_argument("--no-patch", action="store_true",
                              help="Skip patch generation step")
+    scan_parser.add_argument("--deepagents", "--deep", action="store_true", dest="deepagents",
+                             help="Enable the full DeepAgents Oracle-guided attack swarm (adaptive DAST)")
+    scan_parser.add_argument("--network", action="store_true",
+                             help="Also run the network security scan (host discovery + port scan)")
     scan_parser.add_argument("--mode", type=str,
                              choices=["full", "standard", "lite", "cloud"],
                              help="Override auto-detected hardware mode")
@@ -298,7 +403,11 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "setup":
+    if args.command in (None, "repl", "workspace", "shell"):
+        # `cyphex` with no subcommand → open the interactive workspace.
+        _launch_workspace()
+
+    elif args.command == "setup":
         _setup_tools()
 
     elif args.command == "doctor":
@@ -321,14 +430,24 @@ def main():
         is_url = target.startswith("http://") or target.startswith("https://")
         is_repo = target.endswith(".git") or (is_url and "github.com" in target)
 
+        # Forward the declared flags that were previously parsed and dropped:
+        # --no-patch now actually skips patching, and --deepagents/--network
+        # reach the engine so the DeepAgents swarm can be enabled from the CLI.
+        auto_patch = not args.no_patch
+        use_deepagents = getattr(args, "deepagents", False)
+        network_scan = getattr(args, "network", False)
+
         if is_repo or args.repo:
-            asyncio.run(engine.run(repo_url=target, judge=args.judge))
+            asyncio.run(engine.run(repo_url=target, judge=args.judge, auto_patch=auto_patch,
+                                   use_deepagents=use_deepagents, network_scan=network_scan))
         elif is_url:
             # Live URL scan — skip sandbox, go directly to dynamic scan
-            asyncio.run(engine.run(target_url=target, judge=args.judge))
+            asyncio.run(engine.run(target_url=target, judge=args.judge, auto_patch=auto_patch,
+                                   use_deepagents=use_deepagents))
         else:
             # Local source path
-            asyncio.run(engine.run(source_path=target, judge=args.judge))
+            asyncio.run(engine.run(source_path=target, judge=args.judge, auto_patch=auto_patch,
+                                   use_deepagents=use_deepagents, network_scan=network_scan))
 
     elif args.command == "council-doctor":
         sys.path.insert(0, _PROJECT_ROOT)

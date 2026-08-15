@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 import sys
 import os
@@ -13,8 +14,23 @@ class TestDebateProtocol:
 
     @pytest.fixture
     def protocol(self):
-        p = DebateProtocol()
-        return p
+        # Hermetic selector: avoid querying a live Ollama instance so these
+        # tests are deterministic on any machine.
+        fake_models = [
+            SimpleNamespace(name="qwen2.5-coder:7b", param_size=7.0),
+            SimpleNamespace(name="llama3.1:8b", param_size=8.0),
+            SimpleNamespace(name="deepseek-coder:6.7b", param_size=6.7),
+        ]
+        fake_selector = MagicMock()
+        fake_selector.models = fake_models
+        fake_selector.get_validators.return_value = [m.name for m in fake_models]
+        fake_selector.get_vram_costs.return_value = {}
+        with patch(
+            "backend.council.debate_protocol.get_selector",
+            new_callable=AsyncMock,
+            return_value=fake_selector,
+        ):
+            yield DebateProtocol()
 
     @pytest.mark.asyncio
     async def test_unanimous_confirm(self, protocol):
@@ -78,8 +94,9 @@ class TestDebateProtocol:
         assert len(votes) == 3
 
     @pytest.mark.asyncio
-    async def test_majority_reject_with_round2(self, protocol):
-        """1/3 confirm -> dissenters re-prompted -> final 1/3 = DISCARDED"""
+    async def test_split_vote_keeps_finding(self, protocol):
+        """1/3 confirm on a split vote -> KEEP (conservative: never discard a
+        finding any validator still confirms)."""
         call_count = 0
 
         async def mock_call(model, system, prompt, task_name=""):
@@ -87,11 +104,7 @@ class TestDebateProtocol:
             call_count += 1
             if call_count == 1:
                 return {"confirmed": True, "confidence": 0.6, "reason": "Suspicious pattern"}
-            elif call_count <= 3:
-                return {"confirmed": False, "confidence": 0.8, "reason": "No exploit evidence"}
-            else:
-                # Round 2: confirmer re-prompted, changes mind
-                return {"confirmed": False, "confidence": 0.7, "reason": "Reconsidered, no evidence"}
+            return {"confirmed": False, "confidence": 0.8, "reason": "No exploit evidence"}
 
         with patch.object(protocol, '_call', side_effect=mock_call):
             with patch.object(protocol.vram, 'ensure_loaded', new_callable=AsyncMock):

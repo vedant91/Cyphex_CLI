@@ -2,77 +2,84 @@ import json
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
-from backend.council.council_orchestrator import CouncilOrchestrator
+from backend.council.council_orchestrator import CouncilOrchestrator, is_approved_vote
 from backend.council.model_selector import get_selector
+from backend.council.reasoning_strategy import select_strategy
 
 console = Console()
 
-PATCH_GENERATION_SYSTEM = """
-You are CYPHEX Patch Agent, a surgical secure code transformation assistant.
-Return ONLY valid JSON: {"unsafe_reason": string, "fixed_code": string, "patch_safety": "safe"|"review_needed"}
+# ── Oracle Reasoning System ───────────────────────────────────────────────────
+# Called BEFORE patch generation. Same model, same VRAM session — zero extra
+# cost. Forces the small model to decompose the problem before generating code,
+# which measurably improves patch quality on 6-8B parameter models.
+ORACLE_SYSTEM = """
+You are CYPHEX Oracle — a vulnerability reasoning engine.
+Your ONLY job: analyse a vulnerability and produce a structured decomposition that
+a code-generation agent will use to write the fix.
 
-═══ CRITICAL SCOPE RULE — read this CAREFULLY ═══
-The "Vulnerable code" block you receive is the COMPLETE code range that will be replaced in the file.
+Return ONLY valid JSON with these exact keys:
+{
+  "thinking": "1-2 sentences of chain-of-thought",
+  "attack_vector": "how an attacker exploits this specific code",
+  "data_flow": "trace from user-controlled input to the vulnerable sink (e.g. req.query.id → db.query template literal)",
+  "minimal_fix": "the exact minimal change that eliminates the vulnerability — be specific about the code pattern, not general advice",
+  "avoid": ["list of naive/wrong fixes that would be rejected (e.g. 'commenting out the route')"],
+  "confidence": 0.0
+}
 
-TWO MODES — pick the one that matches the snippet:
-
-MODE A — FULL FUNCTION (snippet starts with router.*, app.*, function, async, def, class):
-  ✓ Return the ENTIRE function from its opening line to its closing `});` or `}`.
-  ✓ This is the safest mode — always preferred when you see a full function body.
-  ✓ Include all existing try/catch blocks, return statements, and closing braces.
-  ✗ NEVER return a partial function body — always include opening AND closing.
-
-MODE B — SURGICAL (snippet is 1-5 lines inside an existing function):
-  ✓ Replace ONLY the dangerous line(s) with the safe equivalent.
-  ✓ Do NOT add any extra opening/closing braces beyond what was in the snippet.
-  ✗ NEVER open a new function body (router.post, function) that wasn't in the snippet.
-
-WHAT TO NEVER DO (violations cause SYNTAX ERRORS and will be REJECTED):
-✗ Return a partial function body (opening brace with no closing, or closing with no opening)
-✗ Add closing braces `}` or `});` that don't match the snippet
-✗ Add import/require statements inside a function body
-✗ Add scanner-suppression comments (nosemgrep, eslint-disable, # noqa)
-✗ Remove existing try/catch/finally blocks
-✗ Add placeholder comments ("// add auth logic here")
-✗ Return LESS code than the input — always preserve surrounding structure
-
-WHAT TO DO:
-✓ If you see a full function → return the full function with the vulnerability fixed inside it
-✓ If you see a few lines → fix only those lines
-✓ Keep every surrounding variable, function call, and brace that was in the snippet
-✓ The result must be syntactically complete and valid — testable with `node --check`
-
-VULNERABILITY-SPECIFIC PATTERNS:
-
-CWE-89 SQL Injection — change query construction to parameterized:
-  BEFORE: const sql = `SELECT * FROM users WHERE id = ${id}`;  db.query(sql);
-  AFTER:  const sql = 'SELECT * FROM users WHERE id = ?';       db.query(sql, [id]);
-
-CWE-78 Command Injection — eliminate the shell call entirely:
-  BEFORE: exec(`ls ${userInput}`)
-  AFTER:  execFileSync('ls', [userInput], {encoding: 'utf8'})
-  Note: add `const { execFileSync } = require('child_process');` at the top of the function if not present.
-
-CWE-79 XSS — replace innerHTML with textContent:
-  BEFORE: element.innerHTML = userInput
-  AFTER:  element.textContent = userInput
-
-CWE-798 Hardcoded Secrets — replace literal values:
-  BEFORE: password: 'hardcoded123'
-  AFTER:  password: process.env.DB_PASSWORD
-
-CWE-22 Path Traversal — use path.basename() before file access:
-  BEFORE: fs.readFile(req.query.file, ...)
-  AFTER:  const safeFile = path.basename(req.query.file); fs.readFile(safeFile, ...)
-
-CWE-200 Sensitive Data Exposure — remove password/secret from JSON responses:
-  BEFORE: res.json(users)   // where users contains password field
-  AFTER:  res.json(users.map(u => { const {password, ...safe} = u; return safe; }))
-
-unsafe_reason: one sentence max, explaining the danger.
-patch_safety: "safe" only if unambiguous. "review_needed" if there is any uncertainty.
+Be concrete. Reference the actual variable names, function calls, and line patterns from the code.
+Never invent CVE IDs. Never use CWE numbers not in: CWE-89,79,78,22,798,306,942,287,284,918,250.
 """
 
+PATCH_GENERATION_SYSTEM = """
+You are CYPHEX Patch Agent, a secure code analysis assistant.
+RULES:
+1. Return ONLY valid JSON: {"unsafe_reason": string, "fixed_code": string, "patch_safety": "safe"|"review_needed"}
+2. fixed_code must be a COMPLETE drop-in replacement for the vulnerable snippet provided. It will EXACTLY replace the snippet from start to end.
+3. VERY IMPORTANT: You must preserve ALL opening and closing braces, parentheses, and structural blocks present in the original snippet. Do not truncate the code. If the original snippet includes a `try {` block, make sure the `catch` block is fully preserved. Failure to output syntactically valid code will cause a fatal compiler error.
+4. Do not add imports unless strictly required, do not restructure, do not rename variables.
+5. IMPORTANT: Provide REAL, WORKING code. Never use pseudo-code, comments-as-placeholders, or stubs like "// add auth logic here".
+6. unsafe_reason: one sentence explaining why the original code is dangerous.
+7. patch_safety = "safe" only if the fix is unambiguous.
+
+ANTI-REGRESSION RULES (CRITICAL — violations will be rejected by reviewers):
+8. NEVER remove existing try/catch/finally blocks or error handling.
+9. NEVER add new import/require statements in the middle of a function body — only at the top of the file.
+10. NEVER delete or comment out a route/handler to "fix" it — guard it behind auth/role checks instead.
+11. NEVER add scanner-suppression comments (nosemgrep, eslint-disable, # noqa, @ts-ignore).
+12. Preserve the function signature and surrounding control flow exactly.
+13. Your fix must be MINIMAL — change only what is needed to eliminate the vulnerability.
+
+ANTI-REGRESSION RULES (violating these gets the patch rejected):
+- Never remove existing try/catch blocks or error handling.
+- Never add new import/require statements in the MIDDLE of a function. If an import is
+  strictly required, assume it already exists at the top of the file.
+- Never "fix" a vulnerability by deleting or commenting-out a route, handler, or feature.
+  A commented-out line is NOT a valid fix and will be rejected.
+- Preserve the function signature, return type, and surrounding control flow.
+- SNIPPET INTEGRITY: fixed_code must be a COMPLETE verbatim replacement for ALL lines in
+  the "Vulnerable code" block. Never drop, restructure, or omit the first line of the
+  snippet (e.g. the route declaration `app.get(...)` or function signature `def foo():`
+  or class definition). Preserve unchanged context lines exactly as given — only edit
+  the minimum lines required to eliminate the vulnerability.
+- BRACKET BALANCE: Your fixed_code must have the same net brace depth ({/} balance) as the
+  original snippet. If the snippet opens a `{` without closing it (e.g. a route handler
+  opening like `app.get('/path', (req, res) => {`), your replacement must also leave that
+  brace open — the handler body continues beyond the snippet boundary. Never add a
+  closing `}` or `});` that wasn't in the original snippet.
+
+VULNERABILITY-SPECIFIC FIX PATTERNS (use these):
+- SQL Injection: Replace template literals with parameterized queries using ? placeholders and [value] arrays.
+- XSS: Remove dangerouslySetInnerHTML entirely. Render content as text children: <h3>{a.title}</h3> instead of dangerouslySetInnerHTML={{__html: a.title}}.
+- Hardcoded Secrets: Replace literal values with ${ENV_VAR} references. Example: MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+- Sensitive Data Exposure (debug routes): Guard the route behind an admin role check (e.g., requireAdmin middleware). Do NOT comment it out.
+- SSRF: Add URL validation blocking private IPs (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16) and metadata endpoints.
+- IDOR: Use parameterized queries with ownership check: WHERE id = ? AND user_id = ?
+- Container as Root: Add USER node before CMD.
+- Debug UI routes/nav: Guard with admin role check middleware. Do NOT remove or comment out.
+
+CRITICAL: Your fix must ELIMINATE the vulnerability, not just add a superficial check. The fix will be reviewed by other AI models — incomplete patches will be rejected.
+"""
 
 PATCH_REVIEW_SYSTEM = """
 You are a senior security code reviewer.
@@ -100,9 +107,187 @@ RULES:
 
 
 
+# CWE-specific fix directives — the sharp, deterministic instruction that tells
+# the model EXACTLY what a real fix looks like ("eliminate execSync entirely",
+# "use parameterized queries", ...). Rendered by _build_patch_prompt from the
+# vuln's cwe, so EVERY generation path (batch + single) gets it. Previously this
+# lived inline in generate_and_validate_batch and was silently discarded when the
+# prompt was rebuilt via _build_patch_prompt — so the directive never reached the
+# model and patches were weaker than intended.
+CWE_DIRECTIVES = {
+    "CWE-78": "CRITICAL: You MUST replace execSync/exec with execFileSync or spawn using an arguments array, OR remove the shell call entirely and use safe string operations. Adding input validation alone is NOT sufficient — the shell call itself must be eliminated.",
+    "CWE-89": "Replace template literals/string concatenation with parameterized queries using ? placeholders and [value] arrays. Example: db.query('SELECT * FROM t WHERE id = ?', [userId])",
+    "CWE-79": "Remove dangerouslySetInnerHTML entirely and render as text content, OR apply DOMPurify.sanitize() before rendering.",
+    "CWE-798": "Replace ALL hardcoded secret values with process.env.VAR_NAME references.",
+    "CWE-918": "Add URL validation that blocks private IPs (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16) and cloud metadata endpoints.",
+    "CWE-22": "Use path.basename() to strip directory traversal, or path.resolve() + startsWith() check against allowed base directory.",
+    "CWE-942": "Replace wildcard CORS origin ('*') with a specific allowlist of origins.",
+    "CWE-287": "Add authentication middleware check before the route handler.",
+    "CWE-352": "Add anti-CSRF protection: require and validate a per-session CSRF token (e.g. csurf middleware or a double-submit cookie) on state-changing routes. Do NOT add, remove, or rename unrelated routes or handlers — only harden the existing one.",
+}
+_GENERIC_DIRECTIVE = ("Eliminate the vulnerability completely. The fix must remove the dangerous "
+                      "pattern, not just add a superficial validation.")
+
+
+def _build_patch_prompt(vuln_dict: dict) -> str:
+    """
+    Build the Stage-1 patch generation prompt from a vuln_dict.
+
+    Required keys: vuln_name (or vuln_type), cwe, file_path, vulnerable_code.
+    Optional keys: oracle_analysis, memory_hint, severity.
+
+    Returns the full prompt string to pass to the LLM.
+    """
+    vuln_name = vuln_dict.get("vuln_name") or vuln_dict.get("vuln_type", "Unknown Vulnerability")
+    cwe = vuln_dict.get("cwe", "")
+    file_path = vuln_dict.get("file_path", "")
+    vulnerable_code = vuln_dict.get("vulnerable_code", "")
+    context = vuln_dict.get("context", "")
+    memory_hint = vuln_dict.get("memory_hint", "")
+    oracle = vuln_dict.get("oracle_analysis")
+    directive = CWE_DIRECTIVES.get(cwe, _GENERIC_DIRECTIVE)
+
+    parts = [
+        f"Vulnerability: {vuln_name} ({cwe})",
+        f"File: {file_path}",
+        "",
+    ]
+
+    # Read-only surrounding context (imports, enclosing function, KB recipe,
+    # repo secure pattern). The model must NOT reproduce or return this — it is
+    # only here so the fix is written correctly for the exact window below.
+    if context:
+        parts.append("READ-ONLY CONTEXT (do NOT include this in your output):")
+        parts.append(f"```\n{context}\n```")
+        parts.append("")
+
+    parts.append(
+        "Vulnerable code — REPLACE ONLY THESE LINES. Return a drop-in replacement "
+        "for exactly this block, preserving its net brace/paren balance (if it "
+        "opens a brace and does not close it, your replacement must do the same):"
+    )
+    parts.append(f"```\n{vulnerable_code}\n```")
+    parts.append("")
+
+    parts.append(f"FIX REQUIREMENT: {directive}")
+    parts.append("")
+
+    if oracle:
+        thinking = oracle.get("thinking", "")
+        data_flow = oracle.get("data_flow", "")
+        minimal_fix = oracle.get("minimal_fix", "")
+        avoid = oracle.get("avoid", [])
+        if thinking or data_flow or minimal_fix:
+            parts.append("ORACLE ANALYSIS (use this reasoning to guide your fix):")
+            if thinking:
+                parts.append(f"  Thinking: {thinking}")
+            if data_flow:
+                parts.append(f"  Data flow: {data_flow}")
+            if minimal_fix:
+                parts.append(f"  Minimal fix required: {minimal_fix}")
+            if avoid:
+                parts.append(f"  Do NOT do: {'; '.join(avoid)}")
+            parts.append("")
+
+    if memory_hint:
+        parts.append(memory_hint)
+        parts.append("")
+
+    parts.append(
+        "Generate the fixed version of the 'Vulnerable code' block ONLY. "
+        "Return a drop-in replacement for exactly those lines — do NOT include the "
+        "read-only context, and preserve the snippet's net brace/paren balance. "
+        "The fix must ELIMINATE the vulnerability, not just add a superficial check."
+    )
+
+    return "\n".join(parts)
 
 
 class PatchCouncil(CouncilOrchestrator):
+
+    async def _oracle_reason(self, model: str, vuln: dict) -> dict:
+        """
+        Oracle reasoning step: ask the already-loaded patcher model to decompose
+        the vulnerability BEFORE generating the patch.
+
+        Uses the same loaded model — no extra VRAM cost.
+        Returns a dict with keys: attack_vector, data_flow, minimal_fix, avoid, confidence.
+        Returns {} silently on any failure so patch generation still proceeds.
+        """
+        try:
+            oracle_prompt = _build_oracle_prompt(vuln)
+            raw = await self._call(model, ORACLE_SYSTEM, oracle_prompt, task_name="Oracle Reasoning")
+            # Surface the oracle reasoning for user visibility
+            av  = raw.get("attack_vector", "")
+            df  = raw.get("data_flow", "")
+            mf  = raw.get("minimal_fix", "")
+            conf = raw.get("confidence", 0.0)
+            thinking = raw.get("thinking", "")
+            from rich.table import Table
+            from rich.box import SIMPLE
+            t = Table(box=SIMPLE, show_header=False, padding=(0, 1))
+            t.add_column("k", style="dim cyan", no_wrap=True)
+            t.add_column("v", style="white")
+            if thinking: t.add_row("thinking",      thinking[:120])
+            if av:       t.add_row("attack_vector", av[:120])
+            if df:       t.add_row("data_flow",     df[:120])
+            if mf:       t.add_row("minimal_fix",   mf[:160])
+            avoid = raw.get("avoid") or []
+            if avoid:    t.add_row("avoid",         "; ".join(avoid[:2])[:120])
+            t.add_row("confidence", f"{conf:.2f}")
+            console.print(Panel(t, title=f"[yellow bold]⚙ Oracle Analysis[/yellow bold]  [dim]{vuln.get('vuln_name','')}[/dim]", border_style="yellow"))
+            return raw
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _fingerprint_patch(code: str) -> str:
+        """Normalise a candidate for majority voting (ignore whitespace noise)."""
+        return "\n".join(line.strip() for line in (code or "").splitlines() if line.strip())
+
+    async def _self_consistent_patch(self, model: str, vuln: dict, prompt: str, k: int = 3) -> dict:
+        """
+        Self-Consistency: generate K candidate patches at raised temperature and
+        keep the one the majority agree on (by normalised fingerprint). Ties break
+        toward the candidate flagged patch_safety='safe'. Falls back gracefully to
+        the first non-empty candidate. Reuses the already-loaded model — the only
+        cost is K forward passes, no extra VRAM.
+        """
+        candidates: list[dict] = []
+        for i in range(k):
+            temp = 0.15 + 0.20 * i  # 0.15, 0.35, 0.55 — diversify without going incoherent
+            try:
+                res = await self._call(model, PATCH_GENERATION_SYSTEM, prompt,
+                                       task_name=f"Patch Candidate {i + 1}/{k}", temperature=temp)
+                if res.get("fixed_code", "").strip():
+                    candidates.append(res)
+            except Exception:
+                continue
+
+        if not candidates:
+            return {"fixed_code": "", "unsafe_reason": "All candidates failed"}
+
+        # Majority vote by fingerprint
+        buckets: dict[str, list[dict]] = {}
+        for c in candidates:
+            buckets.setdefault(self._fingerprint_patch(c.get("fixed_code", "")), []).append(c)
+
+        best_fp = max(buckets, key=lambda fp: (
+            len(buckets[fp]),
+            any(c.get("patch_safety") == "safe" for c in buckets[fp]),
+        ))
+        winner = buckets[best_fp][0]
+        agree = len(buckets[best_fp])
+
+        console.print(
+            f"[dim]  🗳️  Self-Consistency: {len(candidates)} candidates → "
+            f"[/dim][cyan]{agree}/{len(candidates)} agreed[/cyan]"
+            + ("" if len(buckets) == 1 else f" [dim]({len(buckets)} distinct)[/dim]")
+        )
+        winner = dict(winner)
+        winner["self_consistency"] = {"candidates": len(candidates), "agreed": agree, "distinct": len(buckets)}
+        return winner
+
     async def generate_and_validate_patch(
         self,
         vuln_name: str,
@@ -153,14 +338,24 @@ class PatchCouncil(CouncilOrchestrator):
                 return {"fixed_code": "", "patch_safety": "rejected",
                         "unsafe_reason": "No models available", "dissent_reasons": ["All models failed to load"]}
 
-        patch_prompt = (
-            f"Vulnerability: {vuln_name} ({cwe})\n"
-            f"File: {file_path}\n\n"
-            f"Vulnerable code:\n```\n{vulnerable_code}\n```\n\n"
-            f"Generate the fixed version of this code."
-        )
+        vuln_dict = {
+            "vuln_name": vuln_name,
+            "cwe": cwe,
+            "file_path": file_path,
+            "vulnerable_code": vulnerable_code,
+        }
+
+        # ── Oracle: decompose before generating ──
+        console.print(f"[dim]Stage 0: Oracle reasoning ({patch_model})...[/dim]")
+        oracle = await self._oracle_reason(patch_model, vuln_dict)
+        if oracle:
+            vuln_dict["oracle_analysis"] = oracle
+
+        patch_prompt = _build_patch_prompt(vuln_dict)
 
         console.print(f"[dim]Stage 1: {patch_model} Generating Patch...[/dim]")
+        strat = select_strategy(cwe, vuln_dict.get("severity", ""))
+        console.print(f"[dim]  Strategy: {strat.icon} {strat.name} ({strat.calls})[/dim]")
         try:
             patch_result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, patch_prompt, task_name="Generating", severity="Critical", cwe=cwe)
         except Exception as e:
@@ -193,10 +388,10 @@ class PatchCouncil(CouncilOrchestrator):
                 console.print(f"[red]Error from {model}: {e}[/red]")
                 approvals.append({"model": model, "approved": False, "reason": "Error during call"})
 
-        approved_count = sum(1 for a in approvals if a.get("approved", False))
+        approved_count = sum(1 for a in approvals if is_approved_vote(a.get("approved")))
         total_reviewers = len(approvals)
         # FIX: Use .get() instead of hard key access to prevent KeyError
-        dissent_reasons = [a.get("reason", "No reason provided") for a in approvals if not a.get("approved", False)]
+        dissent_reasons = [a.get("reason", "No reason provided") for a in approvals if not is_approved_vote(a.get("approved"))]
 
         if approved_count == total_reviewers:
             final_safety = "safe"
@@ -235,6 +430,9 @@ class PatchCouncil(CouncilOrchestrator):
 
         console.print(f"\n[bold magenta]═══ Batch Patch Mode: {len(vuln_list)} vulnerabilities ═══[/bold magenta]")
 
+        from backend.council.reasoning_strategy import render_engine_banner
+        render_engine_banner(console)
+
         # Discover models — uses intelligent resource-aware brain
         selector = await get_selector(quiet=True)
         self.vram.update_costs(selector.get_vram_costs())
@@ -269,53 +467,18 @@ class PatchCouncil(CouncilOrchestrator):
                          "unsafe_reason": "All models failed to load"} for _ in vuln_list]
 
         # ── PATCH CACHE: these results survive even if reviews crash ──
-        # CWE-specific fix directives — tell the model EXACTLY what to do
-        CWE_DIRECTIVES = {
-            "CWE-78": "CRITICAL: You MUST replace execSync/exec with execFileSync or spawn using an arguments array, OR remove the shell call entirely and use safe string operations. Adding input validation alone is NOT sufficient — the shell call itself must be eliminated.",
-            "CWE-89": "Replace template literals/string concatenation with parameterized queries using ? placeholders and [value] arrays. Example: db.query('SELECT * FROM t WHERE id = ?', [userId])",
-            "CWE-79": "Remove dangerouslySetInnerHTML entirely and render as text content, OR apply DOMPurify.sanitize() before rendering.",
-            "CWE-798": "Replace ALL hardcoded secret values with process.env.VAR_NAME references.",
-            "CWE-918": "Add URL validation that blocks private IPs (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16) and cloud metadata endpoints.",
-            "CWE-22": "Use path.basename() to strip directory traversal, or path.resolve() + startsWith() check against allowed base directory.",
-            "CWE-942": "Replace wildcard CORS origin ('*') with a specific allowlist of origins.",
-            "CWE-287": "Add authentication middleware check before the route handler.",
-        }
+        # The full prompt (CWE directive + KB/context + memory hint + oracle
+        # analysis) is assembled by _build_patch_prompt below — the directive is
+        # derived from the vuln's cwe there, so it always reaches the model.
         patch_results = []
         for i, v in enumerate(vuln_list, 1):
             console.print(f"[dim]  [{i}/{len(vuln_list)}] Patching: {v['vuln_name']}[/dim]")
-            directive = CWE_DIRECTIVES.get(v['cwe'], "Eliminate the vulnerability completely. The fix must remove the dangerous pattern, not just add a superficial validation.")
-            vuln_snippet = v['vulnerable_code']
-            snippet_line_count = len(vuln_snippet.strip().splitlines())
-            # Detect if the snippet is a full function (Mode A) or partial (Mode B)
-            first_line = vuln_snippet.strip().splitlines()[0].strip() if vuln_snippet.strip() else ""
-            is_full_fn = any(first_line.startswith(kw) for kw in (
-                "router.", "app.", "function ", "async function", "async (", "module.exports",
-                "def ", "class ", "export default", "export async"
-            ))
-            if is_full_fn:
-                scope_instruction = (
-                    f"MODE A — FULL FUNCTION: This snippet is a complete function ({snippet_line_count} lines). "
-                    f"Return the ENTIRE function with the vulnerability fixed inside it, "
-                    f"from its opening line to its closing `}});` or `}}`. "
-                    f"Do NOT return a partial body. Do NOT truncate."
-                )
-            else:
-                scope_instruction = (
-                    f"MODE B — SURGICAL: This snippet is {snippet_line_count} lines inside an existing function. "
-                    f"Replace ONLY the dangerous lines. Do NOT add opening/closing braces "
-                    f"that weren't already in the snippet."
-                )
-
-            prompt = (
-                f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
-                f"Severity: {v.get('severity', 'High')}\n"
-                f"File: {v['file_path']}\n\n"
-                f"Vulnerable code:\n```\n{vuln_snippet}\n```\n\n"
-                f"FIX REQUIREMENT: {directive}\n\n"
-                f"⚠️  SCOPE: {scope_instruction}\n"
-                f"Output the fixed code now."
-            )
-
+            # ── Oracle: decompose the problem before generating the patch ──
+            oracle = await self._oracle_reason(patch_model, v)
+            if oracle:
+                v = dict(v)  # don't mutate the caller's dict
+                v["oracle_analysis"] = oracle
+            prompt = _build_patch_prompt(v)
             try:
                 result = await self._call(patch_model, PATCH_GENERATION_SYSTEM, prompt, task_name="Generating", severity=v.get('severity', ''), cwe=v.get('cwe', ''))
                 patch_results.append(result)
@@ -356,7 +519,8 @@ class PatchCouncil(CouncilOrchestrator):
 
                     review_prompt = (
                         f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n\n"
-                        f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                        + (f"Surrounding code context (read-only — the patch integrates with this; do NOT flag symbols defined here as missing):\n```\n{v['context']}\n```\n\n" if v.get('context') else "")
+                        + f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
                         f"Proposed patch:\n```\n{fixed_code}\n```"
                     )
 
@@ -403,7 +567,8 @@ class PatchCouncil(CouncilOrchestrator):
 
                         review_prompt = (
                             f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n\n"
-                            f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                            + (f"Surrounding code context (read-only — the patch integrates with this; do NOT flag symbols defined here as missing):\n```\n{v['context']}\n```\n\n" if v.get('context') else "")
+                            + f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
                             f"Proposed patch:\n```\n{fixed_code}\n```"
                         )
                         try:
@@ -426,9 +591,9 @@ class PatchCouncil(CouncilOrchestrator):
             approvals = all_approvals[i] if i < len(all_approvals) else []
 
             # Safe key access — use .get() to prevent KeyError on missing 'reason'
-            approved_count = sum(1 for a in approvals if a.get("approved", False))
+            approved_count = sum(1 for a in approvals if is_approved_vote(a.get("approved")))
             total_reviewers = len(approvals)
-            dissent_reasons = [a.get("reason", "No reason provided") for a in approvals if not a.get("approved", False)]
+            dissent_reasons = [a.get("reason", "No reason provided") for a in approvals if not is_approved_vote(a.get("approved"))]
 
             fixed_code = patch_res.get("fixed_code", "")
 
@@ -436,7 +601,12 @@ class PatchCouncil(CouncilOrchestrator):
                 final_safety = "rejected"
             elif not review_completed and total_reviewers == 0:
                 final_safety = "review_needed"
-            elif approved_count == total_reviewers and total_reviewers > 0:
+            elif (approved_count == total_reviewers and total_reviewers > 0
+                  and set(a.get("model") for a in approvals) != {patch_model}):
+                # Unanimous approval from at least one INDEPENDENT reviewer.
+                # On single-model hardware get_reviewers falls back to [patcher],
+                # so the reviewer set == {patch_model}; that is self-review, not
+                # validation — fall through to "review_needed" instead of "safe".
                 final_safety = "safe"
             elif approved_count >= 1:
                 final_safety = "review_needed"
@@ -522,57 +692,88 @@ class PatchCouncil(CouncilOrchestrator):
                         still_rejected.append(idx)
                         continue
 
-                    # Quick re-review with first available reviewer
-                    reviewer = unique_reviewers[0] if unique_reviewers else None
-                    new_approved = False
+                    # Re-review using the SAME reviewer set/quorum as the original
+                    # council pass (not a single reviewer) — FAIL CLOSED: an error
+                    # or a missing reviewer must never promote the patch to "safe".
                     new_approvals = []
-                    if reviewer:
+                    if unique_reviewers:
                         await self.vram.unload(patch_model)
-                        try:
-                            await self.vram.ensure_loaded(reviewer)
-                            review_prompt = (
-                                f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
-                                f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
-                                f"Proposed patch (attempt {retry_round + 1}):\n```\n{new_code}\n```\n\n"
-                                f"Previous rejection reason: \"{critique}\"\n"
-                                f"Has this new patch addressed the critique?"
-                            )
-                            review_result = await self._call(
-                                reviewer, PATCH_REVIEW_SYSTEM, review_prompt,
-                                task_name="Re-reviewing", severity=v.get('severity', ''), cwe=v.get('cwe', '')
-                            )
-                            is_approved = review_result.get("approved", False)
-                            reason = review_result.get("reason", "No reason")
-                            new_approvals = [{"model": reviewer, "approved": is_approved, "reason": reason}]
-                            new_approved = is_approved
-                            verdict = "[green]APPROVED[/green]" if is_approved else "[red]REJECTED[/red]"
-                            console.print(f"  [dim]   {reviewer} re-review: {verdict} — {reason[:60]}[/dim]")
-                            await self.vram.unload(reviewer)
-                        except Exception:
-                            new_approved = True  # Give benefit of doubt if review fails
+                        review_prompt = (
+                            f"Vulnerability: {v['vuln_name']} ({v['cwe']})\n"
+                            + (f"Surrounding code context (read-only — the patch integrates with this; do NOT flag symbols defined here as missing):\n```\n{v['context']}\n```\n\n" if v.get('context') else "")
+                            + f"Original vulnerable code:\n```\n{v['vulnerable_code']}\n```\n\n"
+                            f"Proposed patch (attempt {retry_round + 1}):\n```\n{new_code}\n```\n\n"
+                            f"Previous rejection reason: \"{critique}\"\n"
+                            f"Has this new patch addressed the critique?"
+                        )
+                        for reviewer in unique_reviewers:
+                            try:
+                                await self.vram.ensure_loaded(reviewer)
+                                review_result = await self._call(
+                                    reviewer, PATCH_REVIEW_SYSTEM, review_prompt,
+                                    task_name="Re-reviewing", severity=v.get('severity', ''), cwe=v.get('cwe', '')
+                                )
+                                is_approved = is_approved_vote(review_result.get("approved"))
+                                reason = review_result.get("reason", "No reason")
+                                new_approvals.append({"model": reviewer, "approved": is_approved, "reason": reason})
+                                verdict = "[green]APPROVED[/green]" if is_approved else "[red]REJECTED[/red]"
+                                console.print(f"  [dim]   {reviewer} re-review: {verdict} — {str(reason)[:60]}[/dim]")
+                                await self.vram.unload(reviewer)
+                            except Exception as e:
+                                # FAIL CLOSED: an errored re-review counts as NOT
+                                # approved — never as an automatic pass.
+                                console.print(f"  [red]   {reviewer} re-review error: {str(e)[:60]} — counted as NOT approved[/red]")
+                                new_approvals.append({"model": reviewer, "approved": False, "reason": f"Error during re-review: {str(e)[:60]}"})
                         # Reload patcher for next retry
                         try:
                             await self.vram.ensure_loaded(patch_model)
                         except Exception:
                             pass
                     else:
-                        new_approved = True  # No reviewer available — accept
+                        # FAIL CLOSED: no reviewer available — do NOT auto-accept.
+                        console.print("  [yellow]   No reviewer available for re-review — cannot promote to safe (fail closed)[/yellow]")
 
-                    if new_approved:
+                    approved_count = sum(1 for a in new_approvals if is_approved_vote(a.get("approved")))
+                    total_reviewers = len(new_approvals)
+
+                    if total_reviewers == 0:
+                        # Nobody actually reviewed this attempt — surface it for
+                        # human review, never mark it "safe" on faith.
+                        new_safety = "review_needed"
+                    elif approved_count == total_reviewers:
+                        new_safety = "safe"
+                    elif approved_count >= 1:
+                        new_safety = "review_needed"
+                    else:
+                        new_safety = "rejected"
+
+                    new_dissent = [a.get("reason", "") for a in new_approvals if not is_approved_vote(a.get("approved"))]
+
+                    if new_safety == "rejected":
+                        # Still fully rejected — keep the previously-reviewed code
+                        # on file, just refresh the critique for the next round.
+                        final_results[idx]["dissent_reasons"] = new_dissent
+                        final_results[idx]["approvals"] = new_approvals
+                        still_rejected.append(idx)
+                    else:
                         final_results[idx] = {
                             "fixed_code": new_code,
                             "unsafe_reason": new_result.get("unsafe_reason", ""),
-                            "patch_safety": "safe" if new_approved else "review_needed",
+                            "patch_safety": new_safety,
                             "approvals": new_approvals,
-                            "dissent_reasons": [],
-                            "vote_summary": f"Approved after reflexion (attempt {retry_round + 1})",
+                            "dissent_reasons": new_dissent,
+                            "vote_summary": (
+                                f"Approved after reflexion (attempt {retry_round + 1})"
+                                if new_safety == "safe" else
+                                f"{approved_count}/{total_reviewers} validators approved after reflexion (attempt {retry_round + 1})"
+                                if total_reviewers else
+                                f"Unreviewed candidate after reflexion (attempt {retry_round + 1}) — no reviewer available"
+                            ),
                         }
-                        console.print(f"  [green]   ✓ Patch improved and APPROVED on attempt {retry_round + 1}[/green]")
-                    else:
-                        # Update with new dissent for next round
-                        new_dissent = [a.get("reason", "") for a in new_approvals if not a.get("approved", False)]
-                        final_results[idx]["dissent_reasons"] = new_dissent
-                        still_rejected.append(idx)
+                        if new_safety == "safe":
+                            console.print(f"  [green]   ✓ Patch improved and APPROVED on attempt {retry_round + 1}[/green]")
+                        else:
+                            console.print(f"  [yellow]   Patch improved to REVIEW_NEEDED on attempt {retry_round + 1}[/yellow]")
 
                 rejected_indices = still_rejected
 

@@ -13,6 +13,7 @@ Kills bug R2: "Blind line-range overwrite destroys error handlers, closing brace
 import os
 import subprocess
 import shutil
+import tempfile
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,11 +28,55 @@ class ApplyResult:
     parse_valid: Optional[bool] = None  # True if syntax check passed
 
 
+def _check_path_containment(file_path: str, source_dir: Optional[str]) -> Optional[str]:
+    """
+    Defense-in-depth path-safety guard for writes, independent of resolver.py's
+    own containment check (an attacker shouldn't be able to escalate to
+    arbitrary-file-write just because some other code path skipped/mis-used
+    the resolver).
+
+    Returns an error message if file_path is unsafe to write to, else None.
+    """
+    if os.path.islink(file_path):
+        return f"Refusing to write through a symlink: {file_path}"
+
+    if source_dir:
+        real_source = os.path.realpath(source_dir)
+        real_target = os.path.realpath(file_path)
+        if real_target != real_source and not real_target.startswith(real_source + os.sep):
+            return f"Refusing to write outside source directory ({source_dir!r}): {file_path}"
+
+    return None
+
+
+def _atomic_write(file_path: str, content: str) -> None:
+    """
+    Write `content` to file_path atomically: write to a temp file in the same
+    directory, then os.replace() it over the target. This is atomic on both
+    POSIX and Windows, so a crash/kill mid-write can never leave the file
+    truncated or partially written (unlike `open(path, "w")`, which truncates
+    immediately).
+    """
+    directory = os.path.dirname(file_path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".cyphex.tmp.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write(content)
+        os.replace(tmp_path, file_path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def apply_patch(
     file_path: str,
     start_line: int,
     end_line: int,
     fixed_code: str,
+    source_dir: Optional[str] = None,
 ) -> ApplyResult:
     """
     Apply a patch to a specific line range in a file.
@@ -41,6 +86,8 @@ def apply_patch(
         start_line: Start of vulnerable range (1-indexed, inclusive)
         end_line: End of vulnerable range (1-indexed, inclusive)
         fixed_code: The replacement code from the LLM/template
+        source_dir: Optional root directory the file must stay contained in
+            (second containment guard, independent of resolver.py)
 
     Returns:
         ApplyResult with backup for rollback
@@ -53,9 +100,20 @@ def apply_patch(
             error=f"File not found: {file_path}",
         )
 
-    # Read original
+    unsafe = _check_path_containment(file_path, source_dir)
+    if unsafe:
+        return ApplyResult(
+            success=False,
+            file_path=file_path,
+            backup_content="",
+            error=unsafe,
+        )
+
+    # Read original. errors="surrogateescape" round-trips ANY byte sequence
+    # (even invalid UTF-8) losslessly, unlike errors="ignore" which silently
+    # drops non-UTF-8 bytes from the entire file on every read/write.
     try:
-        backup_content = open(file_path, "r", encoding="utf-8", errors="ignore").read()
+        backup_content = open(file_path, "r", encoding="utf-8", errors="surrogateescape").read()
     except Exception as e:
         return ApplyResult(
             success=False,
@@ -65,18 +123,32 @@ def apply_patch(
         )
 
     lines = backup_content.split("\n")
+    line_count = len(lines)
 
-    # Validate line range (convert to 0-indexed)
-    start_idx = max(0, start_line - 1)
-    end_idx = min(len(lines), end_line)
-
-    if start_idx >= len(lines):
+    # Strictly validate the line range BEFORE splicing anything. An inverted
+    # or out-of-bounds range must never be allowed to silently corrupt the
+    # file (duplicate/delete large chunks) — fail closed instead.
+    if (
+        not isinstance(start_line, int)
+        or not isinstance(end_line, int)
+        or start_line < 1
+        or end_line < start_line
+        or end_line > line_count + 1
+    ):
         return ApplyResult(
             success=False,
             file_path=file_path,
             backup_content=backup_content,
-            error=f"Start line {start_line} exceeds file length ({len(lines)} lines)",
+            error=(
+                f"Invalid line range [{start_line}, {end_line}] for file with "
+                f"{line_count} lines (require 1 <= start_line <= end_line <= {line_count + 1})"
+            ),
         )
+
+    # Convert to 0-indexed slice bounds (end_line is inclusive 1-indexed, so
+    # it maps directly to the exclusive 0-indexed slice-end).
+    start_idx = start_line - 1
+    end_idx = end_line
 
     # Split fixed code into lines, preserving structure
     fixed_lines = fixed_code.split("\n")
@@ -88,11 +160,24 @@ def apply_patch(
     # Replace the line range with the fixed code
     new_lines = lines[:start_idx] + fixed_lines + lines[end_idx:]
 
-    # Write the patched file
+    # Second containment guard, right before we open the file for writing —
+    # do not rely solely on the check performed above (or on the resolver):
+    # re-validate immediately before the write to close any TOCTOU window
+    # (e.g. file_path being swapped for a symlink between the earlier check
+    # and now).
+    unsafe = _check_path_containment(file_path, source_dir)
+    if unsafe:
+        return ApplyResult(
+            success=False,
+            file_path=file_path,
+            backup_content=backup_content,
+            error=unsafe,
+        )
+
+    # Write the patched file atomically
     try:
         new_content = "\n".join(new_lines)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
+        _atomic_write(file_path, new_content)
     except Exception as e:
         return ApplyResult(
             success=False,
@@ -106,7 +191,7 @@ def apply_patch(
 
     if parse_ok is False:
         # Auto-rollback on syntax error
-        rollback(file_path, backup_content)
+        rollback(file_path, backup_content, source_dir=source_dir)
         return ApplyResult(
             success=False,
             file_path=file_path,
@@ -123,11 +208,13 @@ def apply_patch(
     )
 
 
-def rollback(file_path: str, backup_content: str) -> bool:
-    """Restore a file to its pre-patch state."""
+def rollback(file_path: str, backup_content: str, source_dir: Optional[str] = None) -> bool:
+    """Restore a file to its pre-patch state (atomic write, same guards as apply_patch)."""
+    unsafe = _check_path_containment(file_path, source_dir)
+    if unsafe:
+        return False
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(backup_content)
+        _atomic_write(file_path, backup_content)
         return True
     except Exception:
         return False

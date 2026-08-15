@@ -1,9 +1,9 @@
 """DeepXSSAgent — Oracle-guided XSS with reflected/stored/DOM and CSP bypass."""
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.payloads.xss import XSS_T1, XSS_T2, XSS_DOM
-from deepagents.oracle_attack import HttpRequest
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.payloads.xss import XSS_T1, XSS_T2, XSS_DOM
+from backend.deepagents.oracle_attack import HttpRequest
 
 class DeepXSSAgent(BaseDeepAgent):
     """
@@ -17,7 +17,7 @@ class DeepXSSAgent(BaseDeepAgent):
         if not self.asi.endpoints:
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
 
-        has_string = any(p.has_string_params for p in list(self.asi.endpoints.values()))
+        has_string = any(p.has_string_params for p in self.asi.endpoints.values())
         if not has_string:
             self.console.print("[dim]DeepXSSAgent: no string parameters found, skipping.[/dim]")
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
@@ -29,7 +29,7 @@ class DeepXSSAgent(BaseDeepAgent):
 
     async def _preflight_xss(self, context: ScanContext) -> None:
         """Try T1 payloads on all string-param endpoints and check reflection."""
-        for path, profile in list(self.asi.endpoints.items()):
+        for path, profile in self.asi.endpoints.items():
             if not profile.has_string_params:
                 continue
             for param in list(profile.params)[:3]:

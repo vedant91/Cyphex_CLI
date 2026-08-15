@@ -1,9 +1,9 @@
 """DeepSQLiAgent — Oracle-guided SQL Injection with error/boolean/time-based detection."""
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import Hypothesis, HttpRequest
-from deepagents.payloads.sqli import SQLI_T1, SQLI_T3, SQLI_TIME, SQLI_ERRORS
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import Hypothesis, HttpRequest
+from backend.deepagents.payloads.sqli import SQLI_T1, SQLI_T3, SQLI_TIME, SQLI_ERRORS
 import re
 
 class DeepSQLiAgent(BaseDeepAgent):
@@ -23,7 +23,7 @@ class DeepSQLiAgent(BaseDeepAgent):
 
         has_params = any(
             p.has_numeric_params or p.has_string_params
-            for p in list(self.asi.endpoints.values())
+            for p in self.asi.endpoints.values()
         )
         has_errors = bool(self.asi.error_signatures)
 
@@ -31,17 +31,17 @@ class DeepSQLiAgent(BaseDeepAgent):
             self.console.print("[dim]DeepSQLiAgent: no parameters detected, skipping.[/dim]")
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
 
-        # -- Quick pre-flight: try Tier-1 payloads directly on known endpoints --
+        # ── Quick pre-flight: try Tier-1 payloads directly on known endpoints ──
         # This catches obvious vulns without waiting for Oracle planning
         await self._preflight_sqli(context)
 
-        # -- Then run Oracle adaptive loop for deeper testing --
+        # ── Then run Oracle adaptive loop for deeper testing ──
         return await super().run(context)
 
     async def _preflight_sqli(self, context: ScanContext) -> None:
         """Rapid fire T1 payloads on all string-param endpoints."""
-        from deepagents.oracle_attack import HttpRequest
-        for path, profile in list(self.asi.endpoints.items()):
+        from backend.deepagents.oracle_attack import HttpRequest
+        for path, profile in self.asi.endpoints.items():
             if not (profile.has_string_params or profile.has_numeric_params):
                 continue
             for param in list(profile.params)[:3]:  # Top 3 params per endpoint

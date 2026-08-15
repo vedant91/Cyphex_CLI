@@ -68,8 +68,12 @@ class EvolutionController:
         print(f"  🧬 Payloads per generation: {payloads_per_gen}")
 
         # ─── Build initial genome from scan results ───
+        # Skip if already profiled (the caller may have built or loaded it) so we
+        # don't retrain on normal-only samples and clobber restored/accumulated
+        # adversarial state.
         print("  🔵 BLUE TEAM: Building behavioral genome from scan data...")
-        self.genome.build_from_scan(context)
+        if not self.genome.endpoint_profiles:
+            self.genome.build_from_scan(context)
         print(f"  🔵 Genome profiled {len(self.genome.endpoint_profiles)} endpoints")
 
         # ─── Generate initial attack payloads ───

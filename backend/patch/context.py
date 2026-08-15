@@ -51,6 +51,35 @@ def extract_function(content: str, line: int, lang: str = "js") -> Tuple[str, st
     return _window_fallback(lines, idx), "window"
 
 
+def extract_function_span(content: str, line: int, lang: str = "js"):
+    """
+    Like extract_function(), but ALSO returns the 1-indexed inclusive (start, end)
+    line bounds of the enclosing function. This lets the patcher REPLACE the whole
+    brace-balanced function instead of an arbitrary 5-line window — the window splice
+    is what produced 'Patch produced invalid syntax' rollbacks (the model returns
+    balanced code whose net brace delta differs from an unbalanced window slice).
+
+    Returns (snippet, quality, start_line, end_line). For the window fallback the
+    bounds are (None, None) so the caller keeps its existing window behaviour.
+    """
+    lines = content.split("\n")
+    idx = line - 1
+    if idx < 0 or idx >= len(lines):
+        return _window_fallback(lines, idx), "window", None, None
+
+    bounds = (_py_function_bounds(lines, idx) if lang in ("py", "python")
+              else _js_function_bounds(lines, idx))
+    if bounds:
+        s, e = bounds  # 0-indexed inclusive
+        result = lines[s:e + 1]
+        snippet = "\n".join(result)
+        # Same sanity gates as extract_function(): not too large, brace-balanced (JS).
+        if len(result) <= 200 and (lang in ("py", "python") or _is_brace_balanced(snippet)):
+            return snippet, "function", s + 1, e + 1
+
+    return _window_fallback(lines, idx), "window", None, None
+
+
 def extract_imports(content: str, lang: str = "js") -> str:
     """
     Extract import/require statements from the top of a file.
@@ -185,6 +214,75 @@ def _extract_python_function(lines: list, target_idx: int) -> Optional[list]:
 # ═══════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════
+
+def _js_function_bounds(lines: list, target_idx: int):
+    """
+    Return 0-indexed inclusive (start, end) of the enclosing JS function/handler.
+
+    Unlike the older _extract_js_function walk (which stopped at the FIRST sibling
+    '}' above the target — e.g. the close of a preceding if-block — and so returned
+    a span that didn't even contain the vuln line), this tracks net brace depth:
+    a '{' that opens a scope enclosing the target drives depth negative. If that
+    opener is a function/route-handler start we've found the function; if it's an
+    inner block (if/try/for/{}) we absorb it and keep climbing to the real function.
+    """
+    depth = 0
+    start = None
+    i = target_idx
+    while i >= 0:
+        depth += lines[i].count("}") - lines[i].count("{")
+        if depth < 0:
+            if JS_FUNCTION_START.match(lines[i]):
+                start = i
+                break
+            depth = 0  # inner block opener (if/try/for) — absorb, keep climbing
+        i -= 1
+
+    if start is None:
+        return None
+
+    # Walk forward to the matching close brace of the function.
+    depth = 0
+    end = start
+    for j in range(start, len(lines)):
+        depth += lines[j].count("{") - lines[j].count("}")
+        end = j
+        if depth <= 0 and j > start:
+            break
+
+    if end - start < 2:
+        return None
+    return (start, end)
+
+
+def _py_function_bounds(lines: list, target_idx: int):
+    """Same walk as _extract_python_function, but returns 0-indexed inclusive (start, end)."""
+    start = target_idx
+    while start > 0:
+        if lines[start].lstrip().startswith(("def ", "async def ")):
+            break
+        start -= 1
+
+    if start == 0 and not lines[0].lstrip().startswith(("def ", "async def ")):
+        return None
+
+    def_indent = len(lines[start]) - len(lines[start].lstrip())
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if not line.strip():
+            end += 1
+            continue
+        line_indent = len(line) - len(line.lstrip())
+        if line_indent <= def_indent and line.strip():
+            break
+        end += 1
+
+    if end - start < 2:
+        return None
+    # _extract_python_function returns lines[start:end] (exclusive) → inclusive end-1
+    return (start, end - 1)
+
 
 def _window_fallback(lines: list, target_idx: int) -> str:
     """±15-line window fallback."""

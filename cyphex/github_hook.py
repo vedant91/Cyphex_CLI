@@ -37,6 +37,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "backend"))
@@ -62,10 +63,43 @@ class C:
     M="\033[95m"; CY="\033[96m"; BOLD="\033[1m"; DIM="\033[2m"; RST="\033[0m"
 
 
+# Hosts that are allowed to receive an authenticated (token-bearing) `git push`.
+# Defaults to github.com only; can be widened via CYPHEX_GIT_ALLOWED_HOSTS
+# (comma-separated) for GitHub Enterprise Server setups.
+_ALLOWED_GIT_HOSTS = {
+    h.strip().lower()
+    for h in os.environ.get("CYPHEX_GIT_ALLOWED_HOSTS", "github.com").split(",")
+    if h.strip()
+}
+
+
+def _git_subprocess_env() -> dict:
+    """Environment for `git` subprocess calls, restricted to the https transport
+    so a maliciously-crafted URL (ext::, file://, etc.) can't smuggle a different
+    transport past our own https:// scheme check."""
+    env = os.environ.copy()
+    env["GIT_ALLOW_PROTOCOL"] = "https"
+    return env
+
+
+def _is_safe_clone_target(url: str, branch: str) -> bool:
+    """Reject clone_url/branch values that could be interpreted as CLI options
+    or use a non-https transport (git argument/transport injection defense)."""
+    if not url or not url.startswith("https://"):
+        return False
+    if url.startswith("-") or branch.startswith("-"):
+        return False
+    return True
+
+
 def _verify_signature(payload_body: bytes, signature: str, secret: str) -> bool:
-    """Verify GitHub webhook signature (HMAC SHA-256)."""
-    if not secret:
-        return True  # No secret configured — skip verification
+    """Verify GitHub webhook signature (HMAC SHA-256).
+
+    Fails CLOSED: an empty secret or a missing signature header is always
+    treated as invalid — we never silently skip verification.
+    """
+    if not secret or not signature:
+        return False
     expected = "sha256=" + hmac.new(
         secret.encode(), payload_body, hashlib.sha256
     ).hexdigest()
@@ -92,10 +126,18 @@ async def _process_push(repo_url: str, branch: str, clone_url: str):
 
     try:
         # Step 1: Clone the repo
+        # Defense-in-depth against git argument/transport injection: reject
+        # anything that isn't a plain https:// URL or that could be parsed as
+        # a CLI option, force the https transport, and separate options from
+        # positional args with `--`.
+        if not _is_safe_clone_target(clone_url, branch):
+            console.print(f"[red]  Refusing to clone: unsafe clone_url/branch ({clone_url!r}, {branch!r})[/red]")
+            return {"status": "error", "reason": "Unsafe clone_url or branch"}
+
         console.print(f"[dim]  Cloning {clone_url}...[/dim]")
         result = subprocess.run(
-            ["git", "clone", "--depth", "1", "-b", branch, clone_url, sandbox_dir],
-            capture_output=True, text=True, timeout=120
+            ["git", "clone", "--depth", "1", "-b", branch, "--", clone_url, sandbox_dir],
+            capture_output=True, text=True, timeout=120, env=_git_subprocess_env()
         )
         if result.returncode != 0:
             console.print(f"[red]  Clone failed: {result.stderr[:200]}[/red]")
@@ -143,33 +185,51 @@ async def _process_push(repo_url: str, branch: str, clone_url: str):
         # Step 5: Push the branch (requires GITHUB_TOKEN for auth)
         github_token = os.environ.get("GITHUB_TOKEN", "")
         if github_token:
-            # Rewrite remote URL to include token for auth
-            auth_url = clone_url.replace("https://", f"https://x-access-token:{github_token}@")
-            subprocess.run(
-                ["git", "remote", "set-url", "origin", auth_url],
-                cwd=sandbox_dir, capture_output=True
-            )
-            push_result = subprocess.run(
-                ["git", "push", "origin", fix_branch],
-                cwd=sandbox_dir, capture_output=True, text=True
-            )
-
-            if push_result.returncode == 0:
-                console.print(f"[green]  ✓ Pushed branch: {fix_branch}[/green]")
-
-                # Step 6: Create a PR via GitHub API
-                pr_result = await _create_pull_request(
-                    repo_url, fix_branch, branch, changed_files, github_token
+            # clone_url comes straight from the webhook payload. Before we embed
+            # GITHUB_TOKEN into a remote URL, make sure that URL actually points
+            # at an allowed host — otherwise a malicious payload could redirect
+            # our token to an attacker-controlled server.
+            parsed = urlparse(clone_url)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.hostname.lower() not in _ALLOWED_GIT_HOSTS:
+                console.print(
+                    f"[red]  Refusing to push: clone_url host {parsed.hostname!r} is not in the "
+                    f"allowed host list {sorted(_ALLOWED_GIT_HOSTS)} (set CYPHEX_GIT_ALLOWED_HOSTS to widen)[/red]"
                 )
-                return {
-                    "status": "pr_created",
-                    "branch": fix_branch,
-                    "changed_files": len(changed_files),
-                    "pr_url": pr_result.get("html_url", ""),
-                }
-            else:
-                console.print(f"[red]  Push failed: {push_result.stderr[:200]}[/red]")
-                return {"status": "push_failed", "branch": fix_branch}
+                return {"status": "error", "reason": "clone_url host not allowed for authenticated push"}
+
+            try:
+                # Rewrite remote URL to include token for auth
+                auth_url = clone_url.replace("https://", f"https://x-access-token:{github_token}@", 1)
+                subprocess.run(
+                    ["git", "remote", "set-url", "origin", auth_url],
+                    cwd=sandbox_dir, capture_output=True
+                )
+                push_result = subprocess.run(
+                    ["git", "push", "origin", fix_branch],
+                    cwd=sandbox_dir, capture_output=True, text=True
+                )
+
+                if push_result.returncode == 0:
+                    console.print(f"[green]  ✓ Pushed branch: {fix_branch}[/green]")
+
+                    # Step 6: Create a PR via GitHub API
+                    pr_result = await _create_pull_request(
+                        repo_url, fix_branch, branch, changed_files, github_token
+                    )
+                    return {
+                        "status": "pr_created",
+                        "branch": fix_branch,
+                        "changed_files": len(changed_files),
+                        "pr_url": pr_result.get("html_url", ""),
+                    }
+                else:
+                    console.print(f"[red]  Push failed: {push_result.stderr[:200]}[/red]")
+                    return {"status": "push_failed", "branch": fix_branch}
+            finally:
+                # The token was just written in plaintext into
+                # sandbox_dir/.git/config via `remote set-url` above — remove
+                # the whole sandbox so it doesn't linger on disk.
+                shutil.rmtree(sandbox_dir, ignore_errors=True)
         else:
             console.print(f"[yellow]  ⚠ GITHUB_TOKEN not set — patches saved locally in {sandbox_dir}[/yellow]")
             console.print(f"[dim]    Set GITHUB_TOKEN env var to enable auto-PR creation.[/dim]")
@@ -198,7 +258,7 @@ async def _create_pull_request(
 
     # Extract owner/repo from URL
     # https://github.com/owner/repo.git → owner/repo
-    parts = repo_url.rstrip("/").rstrip(".git").split("/")
+    parts = repo_url.rstrip("/").removesuffix(".git").split("/")
     owner = parts[-2]
     repo = parts[-1]
 
@@ -262,10 +322,18 @@ def create_github_hook_app(secret: str = ""):
         Receives GitHub push events.
         Automatically scans the pushed code and creates a PR with fixes.
         """
-        # Verify signature if secret is configured
+        # Fail CLOSED: reject unless a secret is configured on the server AND
+        # the request carries a valid HMAC signature. We never accept a
+        # webhook unverified, even if no secret was configured at startup.
         body = await request.body()
         sig = request.headers.get("X-Hub-Signature-256", "")
-        if secret and not _verify_signature(body, sig, secret):
+        if not secret:
+            console.print("[red]  ✗ Webhook rejected: no webhook secret configured on the server[/red]")
+            return JSONResponse(
+                {"error": "Webhook secret not configured on server — rejecting all requests"},
+                status_code=401,
+            )
+        if not sig or not _verify_signature(body, sig, secret):
             return JSONResponse({"error": "Invalid signature"}, status_code=401)
 
         event_type = request.headers.get("X-GitHub-Event", "")
@@ -303,6 +371,7 @@ def create_github_hook_app(secret: str = ""):
         return {
             "status": "running",
             "github_token_set": bool(os.environ.get("GITHUB_TOKEN")),
+            "webhook_secret_configured": bool(secret),
         }
 
     return app
@@ -310,11 +379,25 @@ def create_github_hook_app(secret: str = ""):
 
 def run_github_hook(port: int = 3005, secret: str = ""):
     """Start the GitHub webhook server."""
+    # Fall back to the GITHUB_WEBHOOK_SECRET env var if no --secret CLI flag
+    # was given, so operators have a real way to configure this (matches the
+    # module docstring, which documents the env var as the supported path).
+    if not secret:
+        secret = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+
     app = create_github_hook_app(secret)
     if app is None:
         return
 
     has_token = bool(os.environ.get("GITHUB_TOKEN"))
+
+    if not secret:
+        console.print(
+            "\n[bold red]⚠️  WARNING: No webhook secret configured!\n"
+            "   ALL incoming GitHub webhooks will be REJECTED (HTTP 401) until you set one.\n"
+            "   Configure it via the GITHUB_WEBHOOK_SECRET environment variable, or the\n"
+            "   --secret CLI flag, and set the same value in your GitHub webhook config.[/bold red]\n"
+        )
 
     console.print(f"""
 [bold cyan]
@@ -325,6 +408,7 @@ def run_github_hook(port: int = 3005, secret: str = ""):
   ║  Status:      GET /api/github/status                ║
   ║                                                     ║
   ║  GitHub Token: {'✓ Set' if has_token else '✗ Not set (set GITHUB_TOKEN for auto-PR)':43}║
+  ║  Webhook Secret: {'✓ Set' if secret else '✗ NOT SET — webhooks will be rejected':41}║
   ╚══════════════════════════════════════════════════════╝
 [/bold cyan]
 

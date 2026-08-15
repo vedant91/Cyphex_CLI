@@ -33,8 +33,8 @@ class AttackGraph:
         self.edges: List[AttackEdge] = []
         self.confirmed_creds: List[Tuple[str, str, str]] = []   # (user, pwd, source_url)
         self.confirmed_tokens: List[str] = []                   # JWTs / session tokens
-        self.privilege_level: str = "none"                       # none -> user -> admin
-        # Priority queue: agent class name -> list of override targets
+        self.privilege_level: str = "none"                       # none → user → admin
+        # Priority queue: agent class name → list of override targets
         self.priority_targets: Dict[str, List[str]] = {}
 
     def get_node(self, url: str) -> AttackNode:
@@ -50,10 +50,8 @@ class AttackGraph:
 
     def _find_auth_endpoints(self) -> List[str]:
         """Find endpoints that likely require authentication."""
-        AUTH_KEYWORDS = ["login", "signin", "auth", "token", "session", "oauth",
-                         "password", "credential", "jwt", "secure", "admin", "dashboard"]
+        from backend.config.dast_constants import AUTH_KEYWORDS
         return [node for node in self.nodes if any(k in node for k in AUTH_KEYWORDS)]
-
 
     def update_from_finding(self, finding) -> List[AttackEdge]:
         """
@@ -64,7 +62,7 @@ class AttackGraph:
         node = self.get_node(finding.endpoint)
         node.known_vulns.append(finding.name)
 
-        # -- SQLi -> Credential dump -> Auth bypass ------------------------------
+        # ── SQLi → Credential dump → Auth bypass ──────────────────────────────
         if "SQL" in finding.name:
             # If evidence contains credential patterns
             if finding.dumped_data and ":" in finding.dumped_data:
@@ -79,7 +77,7 @@ class AttackGraph:
                     priority="critical",
                 ))
 
-            # SQL error -> also try UNION extraction
+            # SQL error → also try UNION extraction
             if "Error" in finding.name:
                 chains.append(AttackEdge(
                     source=finding.endpoint,
@@ -88,7 +86,7 @@ class AttackGraph:
                     priority="high",
                 ))
 
-        # -- Data Exposure -> Token replay ---------------------------------------
+        # ── Data Exposure → Token replay ───────────────────────────────────────
         if "Data Exposure" in finding.name or "Sensitive" in finding.name:
             if "token" in finding.evidence.lower():
                 token = self._extract_token(finding.evidence)
@@ -104,7 +102,7 @@ class AttackGraph:
                             priority="high",
                         ))
 
-        # -- IDOR -> Mass assignment escalation ----------------------------------
+        # ── IDOR → Mass assignment escalation ──────────────────────────────────
         if "IDOR" in finding.name:
             chains.append(AttackEdge(
                 source=finding.endpoint,
@@ -113,7 +111,7 @@ class AttackGraph:
                 priority="high",
             ))
 
-        # -- Auth bypass -> Privilege escalation ---------------------------------
+        # ── Auth bypass → Privilege escalation ─────────────────────────────────
         if "Default" in finding.name or "Auth" in finding.name:
             self.privilege_level = "user"
             chains.append(AttackEdge(
@@ -123,7 +121,7 @@ class AttackGraph:
                 priority="critical",
             ))
 
-        # -- SSTI/CMDi -> Full RCE -----------------------------------------------
+        # ── SSTI/CMDi → Full RCE ───────────────────────────────────────────────
         if "SSTI" in finding.name or "Command Injection" in finding.name:
             self.privilege_level = "admin"
             chains.append(AttackEdge(

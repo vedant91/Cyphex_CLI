@@ -88,7 +88,6 @@ def main():
     scan_p = sub.add_parser("scan", help="Scan a codebase")
     scan_p.add_argument("--repo", help="GitHub repo URL to clone and scan")
     scan_p.add_argument("--path", help="Local folder path to scan")
-    scan_p.add_argument("--url", help="Live URL target to scan dynamically (DAST only)")
     scan_p.add_argument("--branch", default="main", help="Git branch")
     scan_p.add_argument("--generations", type=int, default=10)
     scan_p.add_argument("--output", help="Save report to file")
@@ -102,6 +101,16 @@ def main():
         "--non-interactive",
         action="store_true",
         help="Do not prompt for patch apply decisions",
+    )
+    scan_p.add_argument(
+        "--network",
+        action="store_true",
+        help="Also run network security scan (host discovery + port scan + vuln report)",
+    )
+    scan_p.add_argument(
+        "--use-deepagents",
+        action="store_true",
+        help="Use the new experimental DeepAgents for adaptive Oracle-guided DAST",
     )
 
     sub.add_parser("doctor", help="Check local runtime/tooling readiness")
@@ -119,6 +128,29 @@ def main():
     onboard_p.add_argument("--repo", help="GitHub repo URL to clone and onboard")
     onboard_p.add_argument("--path", help="Local folder path to onboard")
     onboard_p.add_argument("--scan", action="store_true", help="Also run full Cyphex scan (Semgrep, SAST, DAST, Council, Patcher)")
+
+    # === NETWORK SECURITY COMMANDS ===
+    netmap_p = sub.add_parser("netmap", help="Network discovery, port scan, and vulnerability report")
+    netmap_p.add_argument("--target", default="auto",
+        help="Target CIDR or IP (default: auto-detect local subnet)")
+    netmap_p.add_argument("--no-active", action="store_true",
+        help="Skip active verification probes (FTP anon, Redis auth, etc.)")
+    netmap_p.add_argument("--output", default="",
+        help="Save JSON report to file")
+
+    netwatch_p = sub.add_parser("netwatch",
+        help="Continuous behavioural anomaly monitoring (no signatures)")
+    netwatch_p.add_argument("--interval", type=int, default=60,
+        help="Sampling interval in seconds (default: 60)")
+    netwatch_p.add_argument("--train-first", action="store_true",
+        help="Run netmap to build baselines before watching")
+
+    netaudit_p = sub.add_parser("netaudit",
+        help="Deep security audit of a single host")
+    netaudit_p.add_argument("--host", required=True,
+        help="Target IP address to audit")
+    netaudit_p.add_argument("--oracle", action="store_true",
+        help="Use Ollama Oracle to explain findings")
 
     args = parser.parse_args()
     if not args.command:
@@ -183,12 +215,12 @@ def main():
                 )
                 response = r.json().get("response", "")
                 if "ready" in response.lower():
-                    console.print(f"  [green][OK][/green] {role:12} {tag:30} {vram} GB  ({schedule})")
+                    console.print(f"  [green]✓[/green] {role:12} {tag:30} {vram} GB  ({schedule})")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {role:12} {tag:30} {vram} GB  ({schedule}) — unexpected response")
             except Exception:
-                console.print(f"  [red][ERR][/red] {role:12} {tag:30} NOT FOUND")
-                console.print(f"       -> Run: [bold]ollama pull {tag}[/bold]")
+                console.print(f"  [red]✗[/red] {role:12} {tag:30} NOT FOUND")
+                console.print(f"       → Run: [bold]ollama pull {tag}[/bold]")
                 all_ok = False
 
         print()
@@ -217,25 +249,294 @@ def main():
         run_github_hook(port=args.port, secret=args.secret)
         return
 
-    if args.command == "scan":
-        if not args.repo and not args.path and not args.url:
-            print(f"{C.R}Error: Provide --repo, --path, or --url{C.RST}")
-            return
+    if args.command == "netmap":
         os.system("cls" if os.name == "nt" else "clear")
         print(BANNER)
+        asyncio.run(_cmd_netmap(args))
+        return
+
+    if args.command == "netwatch":
+        os.system("cls" if os.name == "nt" else "clear")
+        print(BANNER)
+        asyncio.run(_cmd_netwatch(args))
+        return
+
+    if args.command == "netaudit":
+        os.system("cls" if os.name == "nt" else "clear")
+        print(BANNER)
+        asyncio.run(_cmd_netaudit(args))
+        return
+
+    if args.command == "scan":
+        if not args.repo and not args.path:
+            print(f"{C.R}Error: Provide --repo or --path{C.RST}")
+            return
+        os.system("cls" if os.name == "nt" else "clear")
+        # Engine prints its own full banner — don't double-print here
         CyphexEngine = _load_engine()
         engine = CyphexEngine()
         asyncio.run(engine.run(
             repo_url=args.repo,
             local_path=args.path,
-            target_url=args.url,
             branch=args.branch,
             generations=args.generations,
             output_file=args.output,
             auto_patch=not args.no_patch,
             judge_mode=args.judge,
             non_interactive=args.non_interactive,
+            network_scan=args.network,
+            use_deepagents=args.use_deepagents,
         ))
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Network command handlers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _cmd_netmap(args):
+    """cyphex netmap — discover network, scan ports, report vulnerabilities."""
+    try:
+        import sys as _sys
+        from backend.network.discovery import NetworkDiscovery
+        from backend.network.vuln_mapper import NetworkVulnMapper
+        from backend.network.network_genome import NetworkBehavioralGenome
+        from backend.network.topology_builder import TopologyBuilder
+    except ImportError as e:
+        print(f"{C.R}[netmap] Missing dependency: {e}{C.RST}")
+        print("  Install: pip install networkx scikit-learn joblib")
+        return
+
+    print(f"  {C.BOLD}◈ CYPHEX NETWORK MAP{C.RST}")
+    print(f"  {C.DIM}Target: {args.target}{C.RST}\n")
+
+    # Phase 1: Discovery
+    disc = NetworkDiscovery()
+    nmap = await disc.discover(args.target)
+    live = nmap.live_hosts()
+
+    if not live:
+        print(f"  {C.Y}No live hosts found on {args.target}{C.RST}")
+        return
+
+    # Phase 2: Vulnerability mapping
+    print(f"\n  {C.BOLD}◈ VULNERABILITY MAPPING{C.RST}")
+    mapper = NetworkVulnMapper()
+    vulns = await mapper.map(nmap, active_checks=not args.no_active)
+
+    # Phase 3: Topology
+    topo = TopologyBuilder()
+    G = topo.build(nmap)
+    topo.annotate_vulns(G, vulns)
+
+    # Phase 4: Train genome baselines (synthetic — real training needs netwatch)
+    genome = NetworkBehavioralGenome()
+    for host in live:
+        genome.train(host.ip, windows=[])   # trains on synthetic normal samples
+    genome.save()
+
+    # ── Print results ──────────────────────────────────────────────────────────
+    _SEV_COLORS = {
+        "Critical": C.R, "High": "\033[91m", "Medium": C.Y, "Low": C.B
+    }
+
+    print(f"\n  {C.BOLD}{'HOST':<18} {'HOSTNAME':<22} {'OS':<16} {'RISK':<8} PORTS{C.RST}")
+    print("  " + "─" * 76)
+    for host in nmap.hosts_by_risk():
+        if not host.is_up:
+            continue
+        ports_str = " ".join(str(p.port) for p in host.open_ports[:6])
+        if len(host.open_ports) > 6:
+            ports_str += f" +{len(host.open_ports) - 6}"
+        risk_pct = int(host.risk_score * 100)
+        risk_col = C.R if risk_pct >= 75 else C.Y if risk_pct >= 40 else C.G
+        print(
+            f"  {host.ip:<18} {host.hostname[:21]:<22} {host.os_guess[:15]:<16}"
+            f" {risk_col}{risk_pct}%{C.RST}     {C.DIM}{ports_str}{C.RST}"
+        )
+
+    if vulns:
+        print(f"\n  {C.BOLD}◈ NETWORK VULNERABILITIES ({len(vulns)} findings){C.RST}")
+        print("  " + "─" * 76)
+        for v in vulns[:20]:
+            col = _SEV_COLORS.get(v.severity, C.W)
+            confirm = " ✓ CONFIRMED" if v.confirmed else ""
+            print(f"  {col}[{v.severity:8}]{C.RST}  {v.host}:{v.port}  {v.service}")
+            print(f"             {v.title}{confirm}")
+            if v.issues:
+                for issue in v.issues[:2]:
+                    print(f"             {C.DIM}• {issue}{C.RST}")
+            if v.mitre_technique:
+                print(f"             {C.DIM}MITRE: {v.mitre_technique}{C.RST}")
+            print()
+
+    if G is not None:
+        print(f"\n  {C.BOLD}◈ NETWORK TOPOLOGY{C.RST}")
+        print(topo.summary_text(G, vulns))
+
+    print(f"\n  {C.G}Scan complete.{C.RST} {len(live)} hosts, {len(vulns)} findings.")
+    print(f"  Genome baselines saved. Run {C.BOLD}cyphex netwatch{C.RST} to monitor deviations.\n")
+
+    # Save JSON report
+    if args.output:
+        import json as _json
+        report = {
+            "target": args.target,
+            "hosts": [
+                {"ip": h.ip, "hostname": h.hostname, "os": h.os_guess,
+                 "ports": [p.port for p in h.open_ports],
+                 "risk_score": h.risk_score, "device_type": h.device_type}
+                for h in live
+            ],
+            "vulnerabilities": [
+                {"host": v.host, "port": v.port, "service": v.service,
+                 "severity": v.severity, "title": v.title,
+                 "confirmed": v.confirmed, "mitre": v.mitre_technique}
+                for v in vulns
+            ],
+            "topology": topo.to_dict(G) if G else {},
+        }
+        with open(args.output, "w") as f:
+            _json.dump(report, f, indent=2)
+        print(f"  {C.G}Report saved → {args.output}{C.RST}\n")
+
+
+async def _cmd_netwatch(args):
+    """cyphex netwatch — continuous behavioural anomaly monitoring."""
+    try:
+        import sys as _sys
+        from backend.network.network_genome import NetworkBehavioralGenome
+        from backend.network.flow_collector import continuous_sample
+        from backend.network.oracle_network import NetworkOracle
+    except ImportError as e:
+        print(f"{C.R}[netwatch] Missing dependency: {e}{C.RST}")
+        return
+
+    interval = args.interval
+    print(f"  {C.BOLD}◈ CYPHEX NETWORK WATCH{C.RST}")
+    print(f"  {C.DIM}Sampling every {interval}s — Ctrl+C to stop{C.RST}\n")
+
+    genome = NetworkBehavioralGenome()
+    loaded = genome.load()
+    if not loaded:
+        print(f"  {C.Y}No genome baselines found.{C.RST} Run {C.BOLD}cyphex netmap{C.RST} first to train baselines.")
+        if args.train_first:
+            print("  Running netmap to build baselines...")
+
+            class _FakeArgs:
+                target = "auto"
+                no_active = False
+                output = ""
+            await _cmd_netmap(_FakeArgs())
+            genome.load()
+        else:
+            print("  Starting with synthetic baselines (less accurate).")
+
+    oracle = NetworkOracle()
+
+    async def on_anomaly(score):
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%H:%M:%S")
+        col = C.R if score.score >= 0.85 else C.Y
+        print(f"\n  {col}⚠  ANOMALY DETECTED [{ts}]{C.RST}")
+        print(f"     Device:  {score.device_ip}")
+        print(f"     Score:   {score.score:.3f} / 1.0  ({score.severity})")
+        if score.top_deviating_features:
+            for feat in score.top_deviating_features[:3]:
+                print(f"     {C.DIM}→ {feat}{C.RST}")
+        # Oracle enrichment
+        enriched = await oracle.enrich(score)
+        if enriched.threat_scenario:
+            print(f"     {C.BOLD}Scenario:{C.RST}  {enriched.threat_scenario}")
+            print(f"     {C.BOLD}MITRE:{C.RST}     {enriched.mitre_technique}")
+            print(f"     {C.BOLD}Confidence:{C.RST} {enriched.confidence:.0%}")
+            if enriched.containment_actions:
+                print(f"     {C.BOLD}Actions:{C.RST}")
+                for act in enriched.containment_actions:
+                    print(f"       • {act}")
+        print()
+
+    print(f"  {C.G}Monitoring active.{C.RST} Watching {len(genome.trained_devices())} device baselines.\n")
+    await continuous_sample(genome, interval_s=interval, alert_callback=on_anomaly)
+
+
+async def _cmd_netaudit(args):
+    """cyphex netaudit --host IP — deep audit of a single host."""
+    try:
+        import sys as _sys
+        from backend.network.discovery import NetworkDiscovery
+        from backend.network.vuln_mapper import NetworkVulnMapper
+        from backend.network.oracle_network import NetworkOracle
+    except ImportError as e:
+        print(f"{C.R}[netaudit] Missing dependency: {e}{C.RST}")
+        return
+
+    host_ip = args.host
+    print(f"  {C.BOLD}◈ CYPHEX HOST AUDIT — {host_ip}{C.RST}\n")
+
+    disc = NetworkDiscovery(timeout=1.5)
+    nmap = await disc.discover(host_ip)
+    live = nmap.live_hosts()
+
+    if not live:
+        print(f"  {C.R}Host {host_ip} appears offline or unreachable.{C.RST}")
+        return
+
+    host = live[0]
+    print(f"  Hostname: {host.hostname or '(unknown)'}")
+    print(f"  OS:       {host.os_guess or '(unknown)'}")
+    print(f"  MAC:      {host.mac or '(unknown)'}")
+    print(f"  Device:   {host.device_type}")
+    print(f"  Ports:    {len(host.open_ports)} open\n")
+
+    mapper = NetworkVulnMapper()
+    vulns = await mapper.map(nmap, active_checks=True)
+
+    _SEV_COLORS = {"Critical": C.R, "High": "\033[91m", "Medium": C.Y, "Low": C.B}
+
+    if vulns:
+        print(f"  {C.BOLD}◈ FINDINGS ({len(vulns)}){C.RST}")
+        print("  " + "─" * 66)
+        oracle = NetworkOracle() if args.oracle else None
+
+        for v in vulns:
+            col = _SEV_COLORS.get(v.severity, C.W)
+            confirm = f" {C.G}✓ CONFIRMED{C.RST}" if v.confirmed else ""
+            print(f"\n  {col}[{v.severity}]{C.RST} {v.title}{confirm}")
+            print(f"  Port: {v.port}/{v.service}")
+            for issue in v.issues:
+                print(f"  {C.DIM}• {issue}{C.RST}")
+            if v.cve_refs:
+                print(f"  CVEs: {', '.join(v.cve_refs[:3])}")
+            if v.mitre_technique:
+                print(f"  MITRE: {C.DIM}{v.mitre_technique}{C.RST}")
+            if v.remediation:
+                print(f"  Fix:  {C.G}{v.remediation}{C.RST}")
+
+        if oracle:
+            from backend.network.models import AnomalyScore
+            print(f"\n  {C.BOLD}◈ ORACLE THREAT ASSESSMENT{C.RST}")
+            # Build a pseudo anomaly score for Oracle reasoning
+            pseudo = AnomalyScore(
+                device_ip=host_ip,
+                score=host.risk_score,
+                is_anomaly=host.risk_score > 0.5,
+                reason=f"{len(vulns)} vulnerabilities found",
+                top_deviating_features=[v.title for v in vulns[:3]],
+            )
+            enriched = await oracle.enrich(pseudo)
+            print(f"  Scenario:   {enriched.threat_scenario}")
+            print(f"  MITRE:      {enriched.mitre_technique}")
+            print(f"  Confidence: {enriched.confidence:.0%}")
+            if enriched.containment_actions:
+                print("  Containment:")
+                for act in enriched.containment_actions:
+                    print(f"    • {act}")
+    else:
+        print(f"  {C.G}No known vulnerabilities detected on {host_ip}.{C.RST}")
+
+    print(f"\n  {C.BOLD}Risk Score: {int(host.risk_score * 100)}/100{C.RST}\n")
+
 
 if __name__ == "__main__":
     main()

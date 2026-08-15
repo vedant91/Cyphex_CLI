@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const db = {
-  query: (sql, params) => Promise.resolve([])
-};
+const db = require('../db');
 
 // ═══════════════════════════════════════════════════════════════
 // CWE-89: SQL Injection via template literal in search
@@ -11,11 +9,15 @@ const db = {
 router.get('/search', async (req, res) => {
   const { category, minPrice, maxPrice } = req.query;
   try {
-    const sql = `SELECT * FROM products WHERE category = '${category}' AND price BETWEEN ${minPrice} AND ${maxPrice}`;
-    const results = await db.query(sql);
+    // CWE-89: SQL Injection via template literal — params not sanitized
+    const min = minPrice || 0;
+    const max = maxPrice || 99999;
+    const cat = category || '%';
+    const sql = `SELECT * FROM products WHERE category LIKE '${cat}' AND price BETWEEN ${min} AND ${max}`;
+    const results = await db.queryUnsafe(sql);
     res.json({ products: results });
   } catch (err) {
-    res.status(500).json({ error: 'Search failed' });
+    res.status(500).json({ error: 'Search failed', detail: err.message });
   }
 });
 

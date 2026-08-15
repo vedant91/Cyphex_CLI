@@ -32,12 +32,18 @@ dependencies = [
 [project.optional-dependencies]
 cloud = ["openai>=1.0.0"]
 reasoning = ["agent-reasoning>=1.0.8"]
-memory = ["cognee>=0.1.0"]
+memory = ["cognee[ollama]>=1.2.0,<2.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 
 [project.scripts]
 cyphex = "cyphex.cli:main"
+
+[tool.setuptools]
+# Top-level engine modules that live at the repo root (outside the cyphex/
+# package) but are imported by cyphex.cli. Declared so an editable install
+# (`pip install -e .`) exposes them and `cyphex` can open the workspace.
+py-modules = ["cli_engine", "cx", "terminal_ui", "cyphex_cli", "cyphex_benchmark"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -46,3 +52,10 @@ include = ["cyphex*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Integration tests drive real local models (cognee cognify via Ollama) and take
+# minutes, so `pytest` runs the fast suite by default. Opt in with:
+#   pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+    "integration: hits real local models/stores — slow, needs Ollama running",
+]

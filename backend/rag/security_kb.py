@@ -125,3 +125,39 @@ def detect_framework(deps: dict) -> str:
                 return name
 
     return ""
+
+
+class SecurityKB:
+    """
+    Thin wrapper around the raw KB dict providing method-call access.
+    Used by cli_engine.py's RAG context enrichment block so the rest of
+    the codebase doesn't need to know the internal dict shape.
+    """
+
+    def primary_strategy(self, cwe: str):
+        """
+        Return the first fix strategy for a CWE, or None.
+        The returned object has a .pattern attribute.
+        """
+        strategies = get_fix_strategies(cwe)
+        if not strategies:
+            return None
+        from types import SimpleNamespace
+        s = strategies[0]
+        return SimpleNamespace(
+            pattern=s.get("pattern", s.get("description", "")),
+            name=s.get("name", ""),
+            description=s.get("description", ""),
+        )
+
+    def anti_patterns(self, cwe: str) -> list:
+        """Return list of anti-pattern strings for a CWE."""
+        return get_anti_patterns(cwe)
+
+
+def load_security_kb() -> SecurityKB:
+    """
+    Return a SecurityKB instance backed by the loaded JSON file.
+    Safe to call multiple times — the underlying KB dict is cached.
+    """
+    return SecurityKB()

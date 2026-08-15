@@ -9,8 +9,32 @@ Converts scan results into different output formats:
 """
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
+
+# Matches ANSI/VT escape sequences (e.g. "\x1b[31m") so scanned-repo content
+# can't inject terminal control codes into rendered reports.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+# Any other C0 control character except newline (\n) and tab (\t).
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Markdown characters that could break out of the surrounding structure
+# (emphasis, code spans, links) if left unescaped.
+_MD_SPECIAL_RE = re.compile(r"([`*_\[\]])")
+
+
+def _sanitize_for_markdown(value: Any) -> str:
+    """Neutralize attacker-controlled scan content (evidence, descriptions,
+    fix hints, code snippets) before embedding it in a generated Markdown
+    report: strip ANSI/control characters, then escape Markdown metacharacters.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    text = _ANSI_RE.sub("", text)
+    text = _CONTROL_RE.sub("", text)
+    text = _MD_SPECIAL_RE.sub(r"\\\1", text)
+    return text
 
 
 def to_json(scan_result: dict) -> str:
@@ -110,15 +134,24 @@ def to_markdown(scan_result: dict) -> str:
         for i, v in enumerate(vulns, 1):
             sev = v.get("severity", "Unknown")
             icon = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🔵"}.get(sev, "⚪")
-            lines.append(f"### {i}. {icon} {v.get('name', 'Unknown')} ({v.get('cwe', '')})\n")
+            # These fields (name, cwe, endpoint, description, evidence,
+            # fix_hint, code snippets) can contain attacker-influenced content
+            # pulled straight from the scanned repo — sanitize before
+            # embedding them in the generated Markdown report.
+            name = _sanitize_for_markdown(v.get("name", "Unknown"))
+            cwe = _sanitize_for_markdown(v.get("cwe", ""))
+            endpoint = _sanitize_for_markdown(v.get("endpoint", "N/A"))
+            lines.append(f"### {i}. {icon} {name} ({cwe})\n")
             lines.append(f"- **Severity:** {sev}")
-            lines.append(f"- **Endpoint:** `{v.get('endpoint', 'N/A')}`")
+            lines.append(f"- **Endpoint:** `{endpoint}`")
             if v.get("description"):
-                lines.append(f"- **Description:** {v['description']}")
+                lines.append(f"- **Description:** {_sanitize_for_markdown(v['description'])}")
             if v.get("evidence"):
-                lines.append(f"- **Evidence:** `{v['evidence']}`")
+                lines.append(f"- **Evidence:** `{_sanitize_for_markdown(v['evidence'])}`")
             if v.get("fix_hint"):
-                lines.append(f"- **Fix:** {v['fix_hint']}")
+                lines.append(f"- **Fix:** {_sanitize_for_markdown(v['fix_hint'])}")
+            if v.get("code_snippet"):
+                lines.append(f"- **Code:**\n\n```\n{_sanitize_for_markdown(v['code_snippet'])}\n```")
             lines.append("")
     else:
         lines.append("## ✅ No Vulnerabilities Found\n")

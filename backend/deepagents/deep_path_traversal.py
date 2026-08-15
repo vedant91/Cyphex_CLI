@@ -1,15 +1,11 @@
 """DeepPathTraversalAgent — Oracle-guided LFI/RFI with encoding bypass variants."""
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-from deepagents.payloads.path_traversal import LFI_T1, LFI_T2, LFI_WINDOWS, LFI_SUCCESS_SIGS
-
-# Inlined from dast_constants to avoid cross-package import errors
-FILE_PARAM_KEYWORDS = ["file", "path", "dir", "document", "img", "image", "template",
-                       "include", "require", "page", "view", "load", "read", "fetch"]
-
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+from backend.deepagents.payloads.path_traversal import LFI_T1, LFI_T2, LFI_WINDOWS, LFI_SUCCESS_SIGS
+from backend.config.dast_constants import FILE_PARAM_KEYWORDS
 
 class DeepPathTraversalAgent(BaseDeepAgent):
     """
@@ -22,7 +18,7 @@ class DeepPathTraversalAgent(BaseDeepAgent):
         if not self.asi.endpoints:
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
 
-        has_file = any(p.has_file_param for p in list(self.asi.endpoints.values()))
+        has_file = any(p.has_file_param for p in self.asi.endpoints.values())
         if not has_file:
             self.console.print("[dim]DeepPathTraversalAgent: no file parameters found, skipping.[/dim]")
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
@@ -34,7 +30,7 @@ class DeepPathTraversalAgent(BaseDeepAgent):
         """Try LFI payloads on all file-type parameters."""
         all_payloads = LFI_T1 + LFI_T2 + LFI_WINDOWS
 
-        for path, profile in list(self.asi.endpoints.items()):
+        for path, profile in self.asi.endpoints.items():
             if not profile.has_file_param:
                 continue
             for param in profile.params:

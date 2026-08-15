@@ -44,6 +44,8 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "backend"))
 
+from auth import get_or_create_api_key, install_api_key_middleware
+
 try:
     from rich.console import Console
     console = Console()
@@ -215,9 +217,12 @@ async def _auto_heal(event: TelemetryEvent) -> dict:
     if not source_file or source_file.endswith("index.js") or source_file.endswith("app.js"):
         console.print("  [dim]Stack trace lacked app frame; falling back to RouteTracer for URL matching...[/dim]")
         try:
-            # We must import inside the function to avoid circular imports if any
-            import sys
-            import os
+            # `os`/`sys` are already imported at module level — re-importing
+            # them here (even inside this nested `try`) makes Python treat
+            # both names as local to the whole `_auto_heal` function, which
+            # crashes every module-level `os.`/`sys.` use elsewhere in this
+            # function with UnboundLocalError whenever this branch isn't
+            # taken. Just use the module-level imports.
             backend_path = os.path.join(os.path.dirname(__file__), "..", "backend", "backend")
             if backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
@@ -240,10 +245,25 @@ async def _auto_heal(event: TelemetryEvent) -> dict:
     result["file"] = source_file
     result["line"] = source_line
 
-    # Step 2: Resolve the full file path
+    # Step 2: Resolve the full file path, staying inside repo_root.
+    # (repo_root itself is still attacker-supplied in the request body —
+    # this only stops a source_file value like "../../etc/passwd" or a
+    # symlink from escaping *that* root, not a malicious root value.)
     full_path = source_file
     if event.repo_root and not os.path.isabs(source_file):
         full_path = os.path.join(event.repo_root, source_file)
+
+    if event.repo_root:
+        repo_root_real = os.path.realpath(event.repo_root)
+        full_path_real = os.path.realpath(full_path)
+        if os.path.islink(full_path) or (
+            full_path_real != repo_root_real
+            and not full_path_real.startswith(repo_root_real + os.sep)
+        ):
+            result["reason"] = f"Refusing to read outside repo_root: {source_file}"
+            console.print(f"  [red]⚠ {result['reason']}[/red]")
+            return result
+        full_path = full_path_real
 
     if not os.path.exists(full_path):
         result["reason"] = f"Source file not found on disk: {full_path}"
@@ -352,9 +372,22 @@ def create_daemon_app():
         version="1.0.0",
     )
 
+    # API-key auth — registered BEFORE CORSMiddleware below so CORS ends up
+    # outermost (Starlette wraps middleware so the LAST one added sees the
+    # request first) and can answer OPTIONS preflight requests directly,
+    # before they ever reach this check. See backend/backend/auth.py.
+    install_api_key_middleware(app)
+
+    _cors_origins = [
+        o.strip()
+        for o in os.environ.get(
+            "CYPHEX_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        ).split(",")
+        if o.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -447,6 +480,9 @@ def run_daemon(host: str = "127.0.0.1", port: int = 3004):
 [/bold cyan]
 [dim]  Waiting for RASP telemetry from your application...[/dim]
 """)
+    console.print(f"  [bold]API key:[/bold] {get_or_create_api_key()}")
+    console.print("  [dim](persisted at ~/.cyphex/api_key — set CYPHEX_API_KEY to override;"
+                  " same key used by the RASP SDK's CYPHEX_API_KEY env var)[/dim]\n")
 
     try:
         import uvicorn

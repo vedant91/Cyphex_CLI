@@ -1,15 +1,11 @@
 """DeepSSRFAgent — Oracle-guided SSRF with cloud metadata and internal service probing."""
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-from deepagents.payloads.ssrf import SSRF_CLOUD, SSRF_INTERNAL, SSRF_INTERNAL_SIGS
-
-# URL-type parameter keywords (inlined from dast_constants to avoid cross-package import errors)
-URL_PARAM_KEYWORDS = ["url", "callback", "callbackurl", "webhook", "target", "redirect",
-                       "uri", "link", "src", "source", "dest", "destination", "next", "return",
-                       "returnurl", "returnto", "goto", "continue", "path", "file", "doc"]
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+from backend.deepagents.payloads.ssrf import SSRF_CLOUD, SSRF_INTERNAL, SSRF_INTERNAL_SIGS
+from backend.config.dast_constants import URL_PARAM_KEYWORDS
 
 class DeepSSRFAgent(BaseDeepAgent):
     """
@@ -26,10 +22,10 @@ class DeepSSRFAgent(BaseDeepAgent):
         if not self.asi.endpoints:
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
 
-        has_url_params = any(p.has_file_param or p.has_format_param for p in list(self.asi.endpoints.values()))
+        has_url_params = any(p.has_file_param or p.has_format_param for p in self.asi.endpoints.values())
         url_param_endpoints = [
             (path, param)
-            for path, profile in list(self.asi.endpoints.items())
+            for path, profile in self.asi.endpoints.items()
             for param in profile.params
             if any(kw in param.lower() for kw in URL_PARAM_KEYWORDS)
         ]

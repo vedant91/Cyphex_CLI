@@ -1,0 +1,60 @@
+services:
+  # ─── Deliberately Vulnerable Express.js Web App ─────────────────────────────
+  app:
+    build: .
+    container_name: cyphex-vuln-webapp
+    ports:
+      - "3001:3000"
+    environment:
+      - PORT=3000
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASS=rootpass
+      - DB_NAME=vulndb
+      - JWT_SECRET=supersecret_for_testing
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vulnnet
+    restart: unless-stopped
+    labels:
+      - "cyphex.role=target-app"
+      - "cyphex.scan=vuln-webapp"
+
+  # ─── MySQL Database (intentionally wide-open config for demo) ───────────────
+  db:
+    image: mysql:8.0
+    container_name: cyphex-vuln-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpass
+      - MYSQL_DATABASE=vulndb
+      - MYSQL_USER=vulnuser
+      - MYSQL_PASSWORD=vulnpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - vuln_db_data:/var/lib/mysql
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - vulnnet
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    labels:
+      - "cyphex.role=target-db"
+
+networks:
+  vulnnet:
+    driver: bridge
+    labels:
+      - "cyphex.network=vuln-webapp"
+
+volumes:
+  vuln_db_data:
+    labels:
+      - "cyphex.volume=vuln-db-data"

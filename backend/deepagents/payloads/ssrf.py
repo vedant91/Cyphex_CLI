@@ -1,6 +1,6 @@
 """SSRF payloads and cloud metadata endpoints."""
 
-# -- Cloud metadata service endpoints ------------------------------------------
+# ── Cloud metadata service endpoints ──────────────────────────────────────────
 SSRF_CLOUD = [
     # AWS IMDS v1
     "http://169.254.169.254/latest/meta-data/",
@@ -21,7 +21,7 @@ SSRF_CLOUD = [
     "http://100.100.100.200/latest/meta-data/",
 ]
 
-# -- Internal network probes ----------------------------------------------------
+# ── Internal network probes ────────────────────────────────────────────────────
 SSRF_INTERNAL = [
     "http://127.0.0.1/",
     "http://localhost/",
@@ -43,7 +43,7 @@ SSRF_INTERNAL = [
     "http://[0:0:0:0:0:ffff:127.0.0.1]/",
 ]
 
-# -- Signature strings indicating SSRF success ---------------------------------
+# ── Signature strings indicating SSRF success ─────────────────────────────────
 SSRF_INTERNAL_SIGS = [
     r"ami-id",
     r"instance-id",

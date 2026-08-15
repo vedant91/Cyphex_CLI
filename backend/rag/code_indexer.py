@@ -20,8 +20,20 @@ SKIP_DIRS = {
     "node_modules", ".git", "dist", "build", "__pycache__",
     ".venv", "venv", ".next", ".nuxt", "coverage", ".cache",
     "vendor", "bower_components", ".svn",
-    # Cyphex internal directories — NEVER parse these as source code
-    ".cyphex", "sandboxes", "workdir", "sessions",
+    # CYPHEX's OWN scan artifacts. A prior scan writes .cyphex/ (knowledge_tree.json,
+    # patches.json, patch_memory.json, sessions/*.json) INTO the target tree. If we
+    # re-index it, that JSON gets parsed as "source" and emits garbage routes
+    # (e.g. /knowledge_tree/...), which the DeepAgents then attack — every one 404s.
+    ".cyphex",
+}
+
+# Only these extensions can define real HTTP routes. Route extraction must never
+# run over .json/.yaml/.html/.sql — those don't contain route definitions and
+# only produce noise (a serialized knowledge_tree.json full of path strings would
+# otherwise masquerade as an Express router file).
+ROUTE_SOURCE_EXTENSIONS = {
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".py", ".php", ".rb", ".go", ".java", ".rs",
 }
 
 SKIP_EXTENSIONS = {
@@ -36,9 +48,38 @@ SOURCE_EXTENSIONS = {
     ".py", ".php", ".rb", ".go", ".java", ".rs",
     ".html", ".ejs", ".hbs", ".pug",
     ".json", ".yaml", ".yml", ".toml",
-    ".env", ".env.example",
     ".sql",
 }
+
+# Filenames that commonly hold secrets — NEVER index their content, even though
+# the "unknown extension" dotfile fallback below would otherwise let them
+# through. Indexed content is fed into LLM prompts and logs, so a `.env` file
+# ending up here would leak real credentials to the model/API/logs.
+_SECRET_FILENAME_RE = re.compile(
+    r"""^(
+        \.env(\..*)?              # .env, .env.local, .env.production, ...
+        |id_rsa(\.pub)?           # SSH keys
+        |id_dsa(\.pub)?
+        |id_ecdsa(\.pub)?
+        |id_ed25519(\.pub)?
+        |credentials\.json
+        |\.npmrc
+        |\.netrc
+        |\.htpasswd
+        |\.pgpass
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+_SECRET_SUFFIXES = {".pem", ".key"}
+
+
+def _is_secret_file(fname: str) -> bool:
+    """True if this filename is a well-known secret-bearing file that must
+    never be read into the index/prompt/log pipeline."""
+    if Path(fname).suffix.lower() in _SECRET_SUFFIXES:
+        return True
+    return bool(_SECRET_FILENAME_RE.match(fname))
+
 
 MAX_FILE_SIZE = 512 * 1024  # 512 KB
 
@@ -59,6 +100,11 @@ class CodeIndexer:
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
 
             for fname in filenames:
+                # Secret-bearing files are excluded outright — never read their
+                # content into the index (see _is_secret_file docstring).
+                if _is_secret_file(fname):
+                    continue
+
                 ext = Path(fname).suffix.lower()
                 if ext in SKIP_EXTENSIONS:
                     continue
@@ -133,8 +179,9 @@ class CodeIndexer:
         
         entry_files = [
             rel for rel in self.files
-            if os.path.basename(rel).replace(".js", "").replace(".ts", "")
+            if os.path.splitext(os.path.basename(rel))[0]
             in ("index", "app", "server", "main")
+            and os.path.splitext(rel)[1].lower() in ROUTE_SOURCE_EXTENSIONS
         ]
         
         for entry_rel in entry_files:
@@ -152,10 +199,16 @@ class CodeIndexer:
         # PASS 2: Extract routes from all files using discovered mounts
         # ══════════════════════════════════════════════════════════════
         for rel_path, meta in self.files.items():
+            # Only parse route definitions out of real code files. Skipping
+            # .json/.yaml/.html/.sql here is what prevents a serialized
+            # knowledge_tree.json (or any data file) from being mined for routes.
+            if os.path.splitext(rel_path)[1].lower() not in ROUTE_SOURCE_EXTENSIONS:
+                continue
+
             content = meta["content"]
 
             # Determine the mount prefix for this file
-            basename = os.path.basename(rel_path).replace(".js", "").replace(".ts", "")
+            basename = os.path.splitext(os.path.basename(rel_path))[0]
             
             # Priority: use mount_map from Pass 1, fallback to filename
             if basename.lower() in mount_map:
@@ -291,6 +344,14 @@ class CodeIndexer:
             ],
             "CWE-78": [
                 r'execFile\s*\(|spawn\s*\(',                   # Safe subprocess
+            ],
+            "CWE-200": [
+                # How this repo already avoids leaking sensitive data: auth/role
+                # guards, field redaction/selection, and env-var indirection.
+                r'req\.(user|isAuthenticated|session)',        # auth/role guard present
+                r'requireAuth|ensureAuth|authorize|isAdmin',
+                r'\bselect\s*\([^)]*\)|\.omit\s*\(|delete\s+\w+\.(password|token|secret)',
+                r'process\.env\.[A-Z_]+',                       # secrets via env, not literals
             ],
         }
 

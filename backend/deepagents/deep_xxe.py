@@ -1,11 +1,11 @@
 """DeepXXEAgent — Oracle-guided XML External Entity injection."""
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-from deepagents.payloads.xxe import XXE_T1
-from deepagents.payloads.path_traversal import LFI_SUCCESS_SIGS
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+from backend.deepagents.payloads.xxe import XXE_T1
+from backend.deepagents.payloads.path_traversal import LFI_SUCCESS_SIGS
 
 class DeepXXEAgent(BaseDeepAgent):
     """

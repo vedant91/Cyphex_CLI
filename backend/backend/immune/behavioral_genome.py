@@ -11,26 +11,88 @@ it just knows what YOUR app looks like and blocks everything else.
 Dependencies: scikit-learn, numpy (both CPU-only, work on Pi 5)
 """
 
+import hashlib
+import hmac
 import math
 import json
 import os
 import re
+import secrets
 from collections import Counter
 from datetime import datetime
 from typing import Optional
 
-import numpy as np
-
 try:
+    import numpy as np
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
     import joblib
     HAS_SKLEARN = True
-except ImportError:
+except (ImportError, Exception):
+    # numpy/scipy/sklearn may not have Python 3.14 wheels yet.
+    # CLI degrades gracefully: immune system is disabled.
+    import types
+    np = types.ModuleType("numpy_stub")
+    np.ndarray = list  # type: ignore
+    np.array = list    # type: ignore
+    np.zeros = lambda *a, **kw: []  # type: ignore
     HAS_SKLEARN = False
 
 from models.genome import EndpointProfile, GenomeState
 from models.scan import ScanContext
+
+
+# ── Genome cache integrity (HMAC) ──
+#
+# `BehavioralGenome.save()` persists trained scikit-learn objects
+# (IsolationForest / StandardScaler instances, not plain numeric/dict data)
+# via joblib, which deserializes with pickle under the hood. A `.pkl` file
+# placed at a predictable path (md5(target_url)-derived, see cli_engine.py)
+# could otherwise be swapped for a crafted payload that executes arbitrary
+# code the moment `load()` calls `joblib.load()`. Since the object graph
+# here is genuine sklearn estimators (not simple data that could be moved
+# to JSON/npz without a large refactor of the ML training code), we instead
+# sign the cache with a per-installation HMAC secret and refuse to
+# deserialize it if the signature is missing or doesn't match.
+_HMAC_KEY_FILENAME = ".genome_hmac.key"
+
+
+def _get_or_create_hmac_key(storage_dir: str) -> bytes:
+    """
+    Load the per-installation genome-signing secret, creating it on first
+    use. Stored under the same storage dir as the genome caches, with
+    permissions restricted to the owner.
+    """
+    storage_dir = storage_dir or "."
+    os.makedirs(storage_dir, exist_ok=True)
+    key_path = os.path.join(storage_dir, _HMAC_KEY_FILENAME)
+
+    if os.path.exists(key_path):
+        with open(key_path, "rb") as f:
+            key = f.read()
+        if key:
+            return key
+
+    # First run (or an empty/corrupt key file): generate a fresh secret and
+    # write it with restrictive (owner-only) permissions.
+    key = secrets.token_bytes(32)
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(key)
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass
+    return key
+
+
+def _sign_file(path: str, key: bytes) -> str:
+    """Compute a hex HMAC-SHA256 digest over a file's contents."""
+    digest = hmac.new(key, digestmod=hashlib.sha256)
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class BehavioralGenome:
@@ -156,20 +218,43 @@ class BehavioralGenome:
         keyword_hits = sum(1 for kw in keywords if kw in text_lower)
         keyword_score = min(keyword_hits / 2.0, 1.0)
 
-        # SQLi/XSS pattern matching
+        # Injection pattern matching. Originally SQLi/XSS only; extended to the
+        # modern classes the `cx benchmark` harness surfaced as blind spots
+        # (SSTI, NoSQLi, SSRF, LDAP, CRLF) so per-class detection generalises
+        # past keyword-based attacks. Length stays 15-D — this only feeds the
+        # existing sqli_pattern_score dimension, so trained genomes still load.
         sqli_patterns = [
+            # ── SQLi ──
             r"'\s*(or|and)\s+.*[=<>]",
             r"'\s*;\s*(drop|delete|insert|update)",
             r"\d+\s*=\s*\d+",
             r"'\s*=\s*'",
             r"union\s+(all\s+)?select",
             r"order\s+by\s+\d+",
+            # ── Command injection ──
             r"(;|\|\||&&)\s*(ls|cat|dir|whoami|id|ping|curl|wget)",
+            r"[;|&]\s*(nc|bash|sh|python|perl|powershell)\b",
+            r"\$\(|`[^`]+`",
+            # ── XSS ──
             r"<\s*script[^>]*>",
             r"<\s*\w+[^>]+on\w+\s*=",
             r"<\s*(img|svg|body|iframe|input|details|marquee|object)",
             r"javascript\s*:",
-            r"\$\(|`[^`]+`",
+            # ── SSTI (template expression / sandbox escape) ──
+            r"\{\{.+?\}\}",
+            r"\$\{.+?\}",
+            r"<%[=\s].*?%>",
+            r"#\{.+?\}",
+            # ── NoSQL injection ──
+            r"\$(ne|gt|lt|gte|lte|regex|where|exists|in|nin)\b",
+            r"'\s*\|\|\s*'",
+            # ── SSRF: dangerous schemes + internal / cloud-metadata targets ──
+            r"\b(file|gopher|dict|ldap|ftp)://",
+            r"169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200",
+            r"://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?|169\.254\.)",
+            # ── LDAP injection / CRLF header injection ──
+            r"\)\s*\(\s*[\w|&]*=?",
+            r"%0d%0a|%0a|\r\n",
         ]
         pattern_hits = sum(1 for p in sqli_patterns if re.search(p, text_lower))
         sqli_pattern_score = min(pattern_hits / 2.0, 1.0)
@@ -230,6 +315,12 @@ class BehavioralGenome:
         - Final = weighted combination for maximum detection
         """
         key = self._endpoint_key(endpoint)
+
+        # Graceful degradation when numpy/sklearn is unavailable: extract_features
+        # then returns a plain Python list (stub np.array=list) with no .reshape,
+        # so score heuristically on the flat vector instead of touching the ML path.
+        if not HAS_SKLEARN:
+            return self._heuristic_score(self.extract_features(payload))
 
         # Extract features
         features = self.extract_features(payload).reshape(1, -1)
@@ -390,6 +481,11 @@ class BehavioralGenome:
         Uses REALISTIC input patterns based on field names to produce
         training data that resembles actual user traffic.
         """
+        # np.random is absent on the stub (numpy/sklearn missing) — with no ML to
+        # train, there is nothing to generate; build_from_scan then just registers
+        # the endpoint profile and scoring falls back to the heuristic path.
+        if not HAS_SKLEARN:
+            return []
         samples = []
         rng = np.random.default_rng(seed)
 
@@ -548,19 +644,64 @@ class BehavioralGenome:
         # Save metadata as JSON
         with open(filepath + ".json", "w") as f:
             json.dump(data, f, indent=2)
-        # Save sklearn models
+        # Save sklearn models + the rest of the genome state so a reload actually
+        # CONTINUES evolution instead of silently resetting it. Previously only
+        # models/scalers were persisted, and load() dropped the profiles, state,
+        # and accumulated _attack_history that retrain() builds on — so adversarial
+        # adaptation was lost every run. joblib pickles the dataclasses/arrays
+        # directly and the HMAC below covers the whole pkl.
         models_data = {
             "models": self.endpoint_models,
             "scalers": self.scalers,
+            "profiles": self.endpoint_profiles,
+            "state": self.state,
+            "attack_history": self._attack_history,
         }
-        joblib.dump(models_data, filepath + ".pkl")
+        pkl_path = filepath + ".pkl"
+        joblib.dump(models_data, pkl_path)
+
+        # Sign the cache so a future `load()` can detect a swapped/tampered
+        # .pkl before handing it to joblib (== pickle) for deserialization.
+        key = _get_or_create_hmac_key(os.path.dirname(filepath))
+        digest = _sign_file(pkl_path, key)
+        hmac_path = pkl_path + ".hmac"
+        with open(hmac_path, "w") as f:
+            f.write(digest)
+        try:
+            os.chmod(hmac_path, 0o600)
+        except OSError:
+            pass
 
     @classmethod
     def load(cls, filepath: str) -> "BehavioralGenome":
         """Load genome from disk."""
         genome = cls()
-        if os.path.exists(filepath + ".pkl"):
-            models_data = joblib.load(filepath + ".pkl")
+        pkl_path = filepath + ".pkl"
+        if os.path.exists(pkl_path):
+            # Refuse to deserialize (joblib.load == pickle.load) unless the
+            # cache carries a valid HMAC signed with our per-installation
+            # secret. An attacker who can drop/replace a .pkl at this
+            # predictable path (md5(target_url)-derived) but not read our
+            # local secret cannot forge a matching signature.
+            hmac_path = pkl_path + ".hmac"
+            if not os.path.exists(hmac_path):
+                raise ValueError(
+                    f"Refusing to load genome cache without a signature: {pkl_path}"
+                )
+            with open(hmac_path, "r") as f:
+                expected_digest = f.read().strip()
+            key = _get_or_create_hmac_key(os.path.dirname(filepath))
+            actual_digest = _sign_file(pkl_path, key)
+            if not hmac.compare_digest(expected_digest, actual_digest):
+                raise ValueError(
+                    f"Genome cache HMAC mismatch (possible tampering) — refusing to load: {pkl_path}"
+                )
+            models_data = joblib.load(pkl_path)
             genome.endpoint_models = models_data.get("models", {})
             genome.scalers = models_data.get("scalers", {})
+            # Restore the rest of the genome so evolution continues (older caches
+            # lacking these keys fall back to empty via .get()).
+            genome.endpoint_profiles = models_data.get("profiles", {})
+            genome.state = models_data.get("state", None)
+            genome._attack_history = models_data.get("attack_history", {})
         return genome

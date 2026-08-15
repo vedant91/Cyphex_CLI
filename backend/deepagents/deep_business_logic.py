@@ -2,10 +2,10 @@
 import asyncio
 import json
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
 
 class DeepBusinessLogicAgent(BaseDeepAgent):
     """
@@ -38,7 +38,7 @@ class DeepBusinessLogicAgent(BaseDeepAgent):
     async def _test_race_condition(self, context: ScanContext) -> None:
         """Send 10 concurrent identical requests to detect TOCTOU race conditions."""
         race_targets = []
-        for path in list(self.asi.endpoints):
+        for path in self.asi.endpoints:
             if any(p in path.lower() for p in ("coupon", "promo", "discount", "voucher", "redeem")):
                 race_targets.append(path)
         race_targets.extend(self.COUPON_PATHS)
@@ -88,7 +88,7 @@ class DeepBusinessLogicAgent(BaseDeepAgent):
             {"quantity": 99999999, "price": 0},
         ]
         cart_paths = [
-            p for p in list(self.asi.endpoints)
+            p for p in self.asi.endpoints
             if any(kw in p.lower() for kw in ("cart", "basket", "order", "buy"))
         ] + self.CART_PATHS
 
@@ -124,7 +124,7 @@ class DeepBusinessLogicAgent(BaseDeepAgent):
     async def _test_workflow_bypass(self, context: ScanContext) -> None:
         """Try accessing later workflow steps without completing earlier ones."""
         checkout_paths = [
-            p for p in list(self.asi.endpoints)
+            p for p in self.asi.endpoints
             if any(kw in p.lower() for kw in ("checkout", "payment", "confirm", "complete"))
         ] + self.CHECKOUT_PATHS
 

@@ -3,9 +3,7 @@ const { execSync } = require('child_process');
 const fetch = require('node-fetch');
 const router = express.Router();
 
-const db = {
-  query: (sql, params) => Promise.resolve([])
-};
+const db = require('../db');
 
 // ═══════════════════════════════════════════════════════════════
 // CWE-78: Command Injection via execSync template literal
@@ -39,11 +37,14 @@ router.post('/webhook', async (req, res) => {
 router.get('/history', async (req, res) => {
   const { userId, status } = req.query;
   try {
-    const sql = `SELECT * FROM orders WHERE user_id = '${userId}' AND status = '${status}'`;
-    const results = await db.query(sql);
+    // CWE-89: SQL Injection via template literal — no parameterization
+    const uid = userId || '0';
+    const st  = status  || 'pending';
+    const sql = `SELECT * FROM orders WHERE user_id = '${uid}' AND status = '${st}'`;
+    const results = await db.queryUnsafe(sql);
     res.json({ orders: results });
   } catch (err) {
-    res.status(500).json({ error: 'Query failed' });
+    res.status(500).json({ error: 'Query failed', detail: err.message });
   }
 });
 

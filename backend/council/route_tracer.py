@@ -3,10 +3,21 @@ import re
 from urllib.parse import urlparse
 from typing import List, Dict, Any, Optional
 
+# backend/backend has no __init__.py and is added directly to sys.path by the
+# CLI entrypoint (cli_engine.py inserts "backend/backend" before importing the
+# council package), so the rest of the codebase imports this module as a
+# top-level "models" package (e.g. `from models.scan import Vuln`) rather than
+# via the repo-root-qualified "backend.backend.models.scan". Try that
+# canonical form first so we bind the SAME Vuln class the rest of the app
+# uses; fall back to the fully-qualified path for contexts where only the
+# repo root is on sys.path; only give up to Any if neither resolves.
 try:
-    from backend.backend.models.scan import Vuln
+    from models.scan import Vuln
 except ImportError:
-    Vuln = Any
+    try:
+        from backend.backend.models.scan import Vuln
+    except ImportError:
+        Vuln = Any
 
 class RouteTracer:
     """
@@ -21,8 +32,27 @@ class RouteTracer:
         Takes a mixed list of static and dynamic Vulns.
         Attempts to resolve the endpoint of dynamic findings to a 'filepath:line_number' format.
         """
-        static_vulns = [v for v in vulns if ":" in v.endpoint and not v.endpoint.startswith("http")]
-        dynamic_vulns = [v for v in vulns if v.endpoint.startswith("http://") or v.endpoint.startswith("https://")]
+        import re as _re
+
+        def _is_file_line(ep: str) -> bool:
+            # A static SAST finding endpoint is a 'file:line' locator that ends with
+            # ':<digits>' — e.g. 'src/routes/orders.js:34' OR an absolute path like
+            # '/Users/.../index.js:16' (Semgrep emits absolute paths, so we must NOT
+            # exclude leading-'/' here — only the trailing ':<line>' distinguishes it).
+            ep = (ep or "").strip()
+            return (not ep.startswith(("http://", "https://"))) and bool(_re.search(r":\d+$", ep))
+
+        static_vulns = [v for v in vulns if _is_file_line(v.endpoint)]
+        # DAST/DeepAgent findings store a RELATIVE path (parsed.path, e.g.
+        # '/api/products?id=1') OR a full URL in .endpoint — both are dynamic
+        # findings that must be mapped back to source. Previously only http(s)://
+        # endpoints qualified, so every relative-path DeepAgent finding (the common
+        # case) was dropped as "unpatchable dynamic-only".
+        dynamic_vulns = [
+            v for v in vulns
+            if (not _is_file_line(v.endpoint))
+            and (v.endpoint or "").startswith(("http://", "https://", "/"))
+        ]
 
         for dv in dynamic_vulns:
             # Clean the path

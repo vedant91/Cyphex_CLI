@@ -1,10 +1,10 @@
 """DeepCMDiAgent — Oracle-guided Command Injection with sync/time-based/blind detection."""
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.payloads.cmdi import CMDI_T1, CMDI_TIME, CMDI_OUTPUT_SIGS
-from deepagents.oracle_attack import HttpRequest
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.payloads.cmdi import CMDI_T1, CMDI_TIME, CMDI_OUTPUT_SIGS
+from backend.deepagents.oracle_attack import HttpRequest
 
 class DeepCMDiAgent(BaseDeepAgent):
     """
@@ -26,7 +26,7 @@ class DeepCMDiAgent(BaseDeepAgent):
 
     async def _preflight_cmdi(self, context: ScanContext) -> None:
         """Try Tier-1 OS command payloads on all parameterised endpoints."""
-        for path, profile in list(self.asi.endpoints.items()):
+        for path, profile in self.asi.endpoints.items():
             if not (profile.has_string_params or profile.has_numeric_params):
                 continue
             for param in list(profile.params)[:2]:

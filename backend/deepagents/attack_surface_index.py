@@ -2,44 +2,9 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, parse_qs
 
-# Constants inlined from backend/backend/dast_constants.py to avoid cross-package import errors
-# (deepagents/ lives in backend/, but dast_constants is in backend/backend/)
-TECH_SIGNATURES = {
-    "Express.js":  [r"X-Powered-By.*Express", r"express"],
-    "Flask":       [r"Werkzeug", r"flask"],
-    "Django":      [r"django", r"csrfmiddlewaretoken"],
-    "Laravel":     [r"laravel", r"X-Powered-By.*PHP"],
-    "Spring":      [r"spring", r"X-Application-Context"],
-    "Rails":       [r"X-Powered-By.*Phusion", r"rails"],
-    "FastAPI":     [r"fastapi", r"openapi.json"],
-    "Next.js":     [r"__NEXT_DATA__", r"_next/static"],
-    "React":       [r"__react", r"react-root"],
-    "Vue.js":      [r"__vue", r"vue-router"],
-    "WordPress":   [r"wp-content", r"wp-login.php"],
-    "Node.js":     [r"X-Powered-By.*Node"],
-    "ASP.NET":     [r"X-Powered-By.*ASP.NET", r"__VIEWSTATE"],
-    "PHP":         [r"X-Powered-By.*PHP", r"\.php"],
-    "MySQL":       [r"mysql", r"You have an error in your SQL syntax"],
-    "PostgreSQL":  [r"PostgreSQL", r"pg_"],
-    "MongoDB":     [r"mongodb", r"MongoError"],
-    "SQLite":      [r"sqlite", r"SQLite error"],
-}
-SQL_ERROR_SIGS = [
-    r"You have an error in your SQL syntax",
-    r"Warning.*mysql_",
-    r"Unclosed quotation mark after the character string",
-    r"quoted string not properly terminated",
-    r"ORA-[0-9]+",
-    r"PG::SyntaxError",
-    r"SQLite.*Error",
-    r"SQLSTATE\[42",
-    r"syntax error at or near",
-    r"invalid input syntax for type",
-]
-FILE_PARAM_KEYWORDS = ["file", "path", "dir", "document", "img", "image", "template",
-                        "include", "require", "page", "view", "load", "read", "fetch"]
-FORMAT_PARAM_KEYWORDS = ["format", "type", "ext", "content_type", "mime", "output",
-                           "export", "render", "style", "theme", "layout"]
+from backend.config.dast_constants import (
+    TECH_SIGNATURES, SQL_ERROR_SIGS, FILE_PARAM_KEYWORDS, FORMAT_PARAM_KEYWORDS
+)
 
 @dataclass
 class EndpointProfile:
@@ -72,7 +37,7 @@ class AttackSurfaceIndex:
     
     def __init__(self):
         self.endpoints: dict[str, EndpointProfile] = {}
-        self.tokens_seen: dict[str, str] = {}   # token -> endpoint that leaked it
+        self.tokens_seen: dict[str, str] = {}   # token → endpoint that leaked it
         self.error_signatures: list[str] = []   # SQL errors, stack traces, etc.
         self.confirmed_creds: list[tuple] = []  # (user, pwd, endpoint)
         self.detected_technologies: set[str] = set()
@@ -169,8 +134,15 @@ class AttackSurfaceIndex:
             "",
             "High-value endpoints:",
         ]
+        # Never present dead routes to the Oracle. An endpoint whose ONLY observed
+        # status is 404 does not exist — listing it as "high-value" makes the Oracle
+        # plan hypotheses against non-existent routes (the 404-storm waste).
+        _live_endpoints = {
+            u: p for u, p in self.endpoints.items()
+            if p.status_codes and p.status_codes != {404}
+        }
         for url, profile in sorted(
-            self.endpoints.items(),
+            _live_endpoints.items(),
             key=lambda x: x[1].interest_score(),
             reverse=True,
         )[:10]:

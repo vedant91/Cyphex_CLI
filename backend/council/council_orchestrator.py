@@ -18,6 +18,52 @@ except ImportError:
 OLLAMA_BASE = "http://localhost:11434"
 console = Console()
 
+# Tier → context window size. Cached after first detection to avoid repeated
+# GPU probing. Small/low-end hardware stays at 4096 (also the cyphex-patch
+# Modelfile pin); mid gets 6144; high/ultra get 8192 for the non-pinned
+# reasoning/review models.
+_TIER_CTX = {
+    "minimal": 4096,
+    "low":     4096,
+    "cloud":   4096,
+    "mid":     6144,
+    "high":    8192,
+    "ultra":   8192,
+}
+_CTX_CACHE: Optional[int] = None
+
+
+def ctx_for_tier() -> int:
+    """Return the num_ctx to use, based on detected hardware tier (cached)."""
+    global _CTX_CACHE
+    if _CTX_CACHE is None:
+        try:
+            from cyphex.hardware import detect_mode
+            _CTX_CACHE = _TIER_CTX.get(detect_mode(), 4096)
+        except Exception:
+            _CTX_CACHE = 4096
+    return _CTX_CACHE
+
+
+def is_approved_vote(value) -> bool:
+    """
+    Strictly interpret a council vote's "approved"/"confirmed" field.
+
+    Only Python's real `True`, or unambiguous string spellings of true
+    ("true"/"yes", case-insensitive), count as approved. Everything else —
+    `False`, `None`, a missing key, or ANY other string (including the
+    literal string "false", which some small local models emit despite
+    JSON-mode prompting) — counts as NOT approved.
+
+    This guards against `bool("false") == True` style bugs when tallying
+    votes returned by LLMs that don't reliably emit JSON booleans.
+    """
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes")
+    return False
+
 
 def ctx_for_tier() -> dict:
     """
@@ -188,7 +234,11 @@ class VRAMManager:
         self.loaded.pop(model, None)
 
     async def _raw_call(self, model: str, prompt: str, stream: bool = False) -> str:
-        async with httpx.AsyncClient(timeout=None) as client:
+        # Bounded timeout (consistent with the main call path's ~90s budget) —
+        # an unbounded timeout here let a hung Ollama warm-up call block the
+        # entire pipeline indefinitely.
+        warmup_timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=warmup_timeout) as client:
             r = await client.post(
                 f"{OLLAMA_BASE}/api/generate",
                 json={
@@ -227,12 +277,15 @@ ANTI-HALLUCINATION RULES — apply on every response:
         self._reasoning_calls = 0
 
     async def _call(self, model: str, system: str, prompt: str, task_name: str = "Reasoning",
-                    severity: str = "", cwe: str = "") -> dict:
+                    severity: str = "", cwe: str = "", temperature: float = 0.1) -> dict:
         """
         Call a model and return parsed JSON.
         Routes through Oracle agent-reasoning when available (adds CoT/reflection).
         Handles: model loading, JSON extraction from markdown fences, retries.
         Raises CouncilCallError if model returns non-JSON after 2 retries.
+
+        temperature: sampling temperature (default 0.1 for deterministic reasoning).
+        Self-consistency uses a higher value to diversify candidate patches.
         """
         console.print(f"[dim]VRAM Manager: Loading {model}...[/dim]")
         await self.vram.ensure_loaded(model)
@@ -293,7 +346,7 @@ ANTI-HALLUCINATION RULES — apply on every response:
                                 "format": "json",
                                 "keep_alive": "10m",
                                 "options": {
-                                    "temperature": 0.1,
+                                    "temperature": temperature,
                                     "top_p": 0.9,
                                     **ctx_for_tier(),     # Tier-aware: 4096 (low) → 8192 (ultra)
                                 }
@@ -332,10 +385,12 @@ ANTI-HALLUCINATION RULES — apply on every response:
                 # Display the decision if applicable
                 if isinstance(parsed, dict):
                     if "confirmed" in parsed:
-                        c = "green" if parsed["confirmed"] else "red"
+                        vote_ok = is_approved_vote(parsed["confirmed"])
+                        c = "green" if vote_ok else "red"
                         console.print(f"  └─ [{c}]{model} vote: {parsed['confirmed']}[/{c}] - {parsed.get('reason', '')}")
                     elif "approved" in parsed:
-                        c = "green" if parsed["approved"] else "red"
+                        vote_ok = is_approved_vote(parsed["approved"])
+                        c = "green" if vote_ok else "red"
                         console.print(f"  └─ [{c}]{model} review: {parsed['approved']}[/{c}] - {parsed.get('reason', '')}")
                 
                 return parsed
@@ -345,7 +400,10 @@ ANTI-HALLUCINATION RULES — apply on every response:
                 console.print(f"[yellow]⚠ {model} returned invalid JSON, retrying...[/yellow]")
                 continue
             except Exception as e:
-                raise CouncilCallError(f"{model} API error: {str(e)}")
+                # str() is empty for httpx.ReadTimeout and many KeyErrors — fall back
+                # to the type name so the message is never a bare "model API error:".
+                detail = str(e) or type(e).__name__
+                raise CouncilCallError(f"{model} API error: {detail}")
 
         raise CouncilCallError(f"{model} failed after 2 attempts")
 

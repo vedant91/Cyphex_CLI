@@ -18,6 +18,7 @@ Tests for software supply chain security weaknesses:
 
 import re
 import json
+import shlex
 from urllib.parse import urlparse, quote
 
 from agents.base_agent import BaseAgent
@@ -212,14 +213,14 @@ class SupplyChainAgent(BaseAgent):
 
             url = f"{target.rstrip('/')}{path}"
             out = await self.terminal.run(
-                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 "{url}"'
+                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(url)}'
             )
             status = out.stdout.strip().replace("'", "")
 
             if status == "200":
                 # Fetch the actual content
                 content_out = await self.terminal.run(
-                    f'curl -sL --max-time 10 "{url}"'
+                    f'curl -sL --max-time 10 {shlex.quote(url)}'
                 )
                 content = content_out.stdout
 
@@ -325,14 +326,14 @@ class SupplyChainAgent(BaseAgent):
         for path in self.BUILD_ARTIFACT_PATHS:
             url = f"{target.rstrip('/')}{path}"
             out = await self.terminal.run(
-                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 "{url}"'
+                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(url)}'
             )
             status = out.stdout.strip().replace("'", "")
 
             if status == "200":
                 # Fetch content to verify
                 content_out = await self.terminal.run(
-                    f'curl -sL --max-time 10 "{url}"'
+                    f'curl -sL --max-time 10 {shlex.quote(url)}'
                 )
                 content = content_out.stdout
 
@@ -401,7 +402,7 @@ class SupplyChainAgent(BaseAgent):
         for path in self.SOURCE_MAP_EXTENSIONS:
             url = f"{target.rstrip('/')}{path}"
             out = await self.terminal.run(
-                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 "{url}"'
+                f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(url)}'
             )
             status = out.stdout.strip().replace("'", "")
 
@@ -412,7 +413,7 @@ class SupplyChainAgent(BaseAgent):
         # Check if JS files reference source maps
         for js_url in js_links[:5]:
             out = await self.terminal.run(
-                f'curl -s --max-time 5 "{js_url}" | tail -5'
+                f'curl -s --max-time 5 {shlex.quote(js_url)} | tail -5'
             )
             if "sourceMappingURL=" in (out.stdout or ""):
                 map_ref = re.search(
@@ -681,9 +682,9 @@ class SupplyChainAgent(BaseAgent):
             })
 
             out = await self.terminal.run(
-                f"curl -s -X POST 'https://api.osv.dev/v1/query' "
+                f"curl -s -X POST https://api.osv.dev/v1/query "
                 f"-H 'Content-Type: application/json' "
-                f"-d '{query_payload}' "
+                f"-d {shlex.quote(query_payload)} "
                 f"--max-time 8"
             )
 
@@ -754,7 +755,7 @@ class SupplyChainAgent(BaseAgent):
     async def _check_sri(self, target: str, context: ScanContext):
         """Check if external CDN scripts have integrity attributes."""
         out = await self.terminal.run(
-            f'curl -sL --max-time 10 "{target}"'
+            f'curl -sL --max-time 10 {shlex.quote(target)}'
         )
 
         if not out.stdout:
@@ -953,7 +954,7 @@ class SupplyChainAgent(BaseAgent):
         for path, secret_patterns in cred_paths:
             url = f"{target.rstrip('/')}{path}"
             out = await self.terminal.run(
-                f'curl -sL --max-time 5 "{url}"'
+                f'curl -sL --max-time 5 {shlex.quote(url)}'
             )
 
             if not out.stdout or len(out.stdout) < 10:

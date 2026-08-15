@@ -15,6 +15,7 @@ context it wouldn't otherwise have.
 """
 
 import os
+import re
 import json
 import uuid
 import hashlib
@@ -28,6 +29,29 @@ from dataclasses import dataclass, field, asdict
 # Path: backend/reasoning/session_memory.py → go up 3 levels to reach project root
 _CYPHEX_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SESSION_DIR = os.path.join(_CYPHEX_ROOT, ".cyphex", "sessions")
+
+# thread_id is attacker-influenceable on the load path (unlike the writer,
+# which always generates it internally via uuid.uuid4()). Restrict to a safe
+# charset before it's ever joined into a filesystem path.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_session_path(thread_id: str) -> Optional[str]:
+    """
+    Validate thread_id and resolve it to a path guaranteed to stay inside
+    SESSION_DIR. Returns None if thread_id is missing, malformed, or would
+    resolve outside the sessions directory (path traversal attempt).
+    """
+    if not thread_id or not _SAFE_ID_RE.match(thread_id):
+        return None
+    filepath = os.path.join(SESSION_DIR, f"{thread_id}.json")
+    real_base = os.path.realpath(SESSION_DIR)
+    real_path = os.path.realpath(filepath)
+    if real_path != os.path.join(real_base, os.path.basename(real_path)):
+        return None
+    if os.path.dirname(real_path) != real_base:
+        return None
+    return real_path
 
 
 @dataclass
@@ -213,8 +237,8 @@ def save_session(session: SessionMemory, base_dir: str = "."):
 
 def load_session(thread_id: str, base_dir: str = ".") -> Optional[SessionMemory]:
     """Load a specific session by thread_id from the global sessions dir."""
-    filepath = os.path.join(SESSION_DIR, f"{thread_id}.json")
-    if not os.path.exists(filepath):
+    filepath = _safe_session_path(thread_id)
+    if not filepath or not os.path.exists(filepath):
         return None
     try:
         with open(filepath, "r", encoding="utf-8") as f:

@@ -64,13 +64,22 @@ def _detect_app_type(source_dir: str) -> dict:
 
 
 def _generate_dockerfile(source_dir: str, app_info: dict) -> str:
-    """Generate a Dockerfile for the target app if one doesn't exist."""
+    """Generate a Dockerfile for the target app if one doesn't exist.
+
+    Each variant creates/uses an unprivileged user and switches to it with
+    USER before the app's CMD, so the uploaded (untrusted) app never runs
+    as root inside the container even if the container's other isolation
+    (cap-drop, no-new-privileges, etc.) were somehow bypassed.
+    """
     if app_info["type"] == "node":
+        # The official node images already ship a non-root "node" user.
         return f"""FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --no-audit --no-fund
 COPY . .
+RUN chown -R node:node /app
+USER node
 ENV PORT={app_info['port']}
 EXPOSE {app_info['port']}
 CMD {json.dumps(app_info['entry'].split())}
@@ -81,6 +90,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || pip install flask
 COPY . .
+RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 sandboxuser \\
+    && chown -R sandboxuser:sandboxuser /app
+USER sandboxuser
 ENV PORT={app_info['port']}
 EXPOSE {app_info['port']}
 CMD {json.dumps(app_info['entry'].split())}
@@ -89,6 +101,9 @@ CMD {json.dumps(app_info['entry'].split())}
         return f"""FROM python:3.12-slim
 WORKDIR /app
 COPY . .
+RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 sandboxuser \\
+    && chown -R sandboxuser:sandboxuser /app
+USER sandboxuser
 ENV PORT={app_info['port']}
 EXPOSE {app_info['port']}
 CMD ["python", "-m", "http.server", "{app_info['port']}"]
@@ -138,13 +153,24 @@ async def deploy_docker_sandbox(
                 "sandbox_id": sandbox_id,
             }
 
-        # Run with resource limits
+        # Run with resource limits + a hardened security profile:
+        #   --pids-limit   caps forkbombs / runaway process spawning
+        #   --cap-drop ALL drops all Linux capabilities (no raw sockets, no
+        #                  chown/setuid tricks, etc.)
+        #   --security-opt no-new-privileges
+        #                  blocks setuid/setgid binaries from escalating
+        #                  privileges inside the container
+        # The port is published on 127.0.0.1 only, so the container is not
+        # reachable from other hosts on the network — only from this host.
         run_cmd = [
             "docker", "run", "-d",
             "--name", container_name,
             "--memory", "512m",
             "--cpus", "1",
-            "-p", f"{port}:{app_info['port']}",
+            "--pids-limit", "200",
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "-p", f"127.0.0.1:{port}:{app_info['port']}",
             "-e", f"PORT={app_info['port']}",
             container_name,
         ]
@@ -168,6 +194,17 @@ async def deploy_docker_sandbox(
         )
         is_running = "Up" in ps.stdout
 
+        # Capture container stdout+stderr so the scan can surface real logs
+        # (the container runs detached, so nothing else drains them).
+        try:
+            logs_res = subprocess.run(
+                ["docker", "logs", "--tail", "200", container_name],
+                capture_output=True, text=True, timeout=10
+            )
+            container_logs = ((logs_res.stdout or "") + (logs_res.stderr or ""))[-4000:]
+        except Exception:
+            container_logs = ""
+
         return {
             "sandbox_id": sandbox_id,
             "port": port,
@@ -175,6 +212,9 @@ async def deploy_docker_sandbox(
             "container_name": container_name,
             "status": "running" if is_running else "failed",
             "app_type": app_info["type"],
+            "generated_dockerfile": generated,
+            "logs": container_logs,
+            "log_cmd": f"docker logs -f {container_name}",
         }
 
     finally:

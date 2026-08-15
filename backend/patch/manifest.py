@@ -11,6 +11,7 @@ Kills R5: "File-level resolution marks all vulns in a file as fixed"
 import os
 import json
 import hashlib
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -33,9 +34,24 @@ class PatchManifest:
                 self.entries = {}
 
     def save(self):
+        """
+        Write the manifest atomically: serialize to a temp file in the same
+        directory, then os.replace() it over patches.json. A crash mid-write
+        (or a concurrent reader) can therefore never observe a truncated or
+        partially-written manifest.
+        """
         os.makedirs(self.dir, exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.entries, f, indent=2, ensure_ascii=False)
+        fd, tmp_path = tempfile.mkstemp(dir=self.dir, prefix=".patches.json.tmp.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.entries, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self.path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def record(
         self,

@@ -10,6 +10,7 @@ Each agent gets:
 """
 
 import json
+import shlex
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -26,6 +27,13 @@ from live_log_queue import log_queue
 
 class BaseAgent(ABC):
     """Base class all CYPHEX agents inherit from."""
+
+    # Binaries the autonomous exploit loop is allowed to execute. This must
+    # match what the system prompt in `autonomous_exploit_loop` tells the
+    # model it can use — the model's output is untrusted (it can be steered
+    # by attacker-controlled content reflected back from the scanned
+    # target, i.e. indirect prompt injection) so it is enforced here too.
+    ALLOWED_EXPLOIT_COMMANDS = {"curl", "grep"}
 
     def __init__(
         self,
@@ -85,7 +93,7 @@ class BaseAgent(ABC):
         sc = severity_colors.get(vuln.severity, Colors.WHITE)
         print(
             f"\n  {sc}{Colors.BOLD}"
-            f"  [ALERT] VULN FOUND: [{vuln.severity}] {vuln.name} "
+            f"  🚨 VULN FOUND: [{vuln.severity}] {vuln.name} "
             f"(CVSS: {vuln.cvss_score}) "
             f"{Colors.RESET}"
         )
@@ -106,7 +114,7 @@ class BaseAgent(ABC):
         Call AI backend for analysis and decision-making.
         Supports modes: 'local' (Ollama) | 'groq' (cloud) | 'cerebras' (legacy)
 
-        Fallback chain: groq -> ollama -> empty string
+        Fallback chain: groq → ollama → empty string
         """
         mode = config.AI_BACKEND_MODE
 
@@ -115,7 +123,7 @@ class BaseAgent(ABC):
             if result:
                 return result
             # Auto-fallback to Ollama if Groq fails
-            await self.log("Groq failed -> falling back to local Ollama", "warning")
+            await self.log("Groq failed → falling back to local Ollama", "warning")
             return await self._call_ollama(system_prompt, user_prompt, max_retries=2)
 
         elif mode == "local":
@@ -124,7 +132,7 @@ class BaseAgent(ABC):
                 return result
             # Auto-fallback to Groq if Ollama fails and key is available
             if config.GROQ_API_KEY:
-                await self.log("Ollama failed -> falling back to Groq cloud", "warning")
+                await self.log("Ollama failed → falling back to Groq cloud", "warning")
                 return await self._call_groq(system_prompt, user_prompt, max_retries=2)
             return ""
 
@@ -168,7 +176,7 @@ class BaseAgent(ABC):
                         content = data.get("choices", [{}])[0].get(
                             "message", {}
                         ).get("content", "")
-                        await self.log("Groq AI response received [OK]", "success")
+                        await self.log("Groq AI response received ✓", "success")
                         return content
                     elif response.status_code == 429:
                         wait_time = 5 * (attempt + 1)
@@ -218,7 +226,7 @@ class BaseAgent(ABC):
                     if response.status_code == 200:
                         data = response.json()
                         content = data.get("message", {}).get("content", "")
-                        await self.log("Local AI response received [OK]", "success")
+                        await self.log("Local AI response received ✓", "success")
                         return content
                     else:
                         await self.log(
@@ -314,21 +322,87 @@ class BaseAgent(ABC):
                     pass
         return None
 
+    def _validate_exploit_command(self, cmd: str) -> tuple[bool, str]:
+        """
+        Enforce the curl/grep-only allowlist promised to the model in the
+        autonomous exploit loop's system prompt.
+
+        The command string is LLM-generated and the conversation feeding it
+        includes raw content reflected back from the scanned target, so a
+        malicious/compromised target can attempt indirect prompt injection
+        to get arbitrary shell commands executed on the CYPHEX host. Never
+        trust `cmd` — parse it and check every pipeline/command stage's
+        binary against ALLOWED_EXPLOIT_COMMANDS before it is ever handed to
+        the real shell.
+
+        Note: plain `shlex.split` is a POSIX-ish *word* tokenizer, not a
+        full shell grammar — it does NOT treat `;`, `&&`, `||`, `&`, `|` as
+        operators when they aren't surrounded by whitespace (e.g.
+        `"curl x;rm -rf /"` would come back as a single token `"x;rm"`,
+        silently hiding the second command from a naive argv[0] check).
+        We instead use `shlex.shlex(..., punctuation_chars=True)`, which
+        always splits those shell control-operator characters into their
+        own tokens — matching real bash's tokenization — while still
+        respecting quoting. Every resulting command stage's binary is then
+        checked against ALLOWED_EXPLOIT_COMMANDS. We also reject any token
+        containing `$(` or a backtick (command/process substitution),
+        since real bash — which `terminal.run()` ultimately shells out to
+        — evaluates those regardless of quoting, and they are never needed
+        for the curl/grep usage the system prompt describes. Together this
+        closes the two main ways a single allowlisted `argv[0]` check
+        could otherwise be bypassed to run a second, non-allowlisted
+        command.
+
+        Returns (is_valid, reason). If not valid, `reason` explains why so
+        the caller can log it and skip the step instead of crashing.
+        """
+        try:
+            lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError as e:
+            return False, f"could not parse command ({e})"
+
+        if not tokens:
+            return False, "empty command"
+
+        for tok in tokens:
+            if "$(" in tok or "`" in tok:
+                return False, (
+                    f"token {tok!r} contains command/process substitution, "
+                    f"which is never required for curl/grep"
+                )
+
+        # Split on shell control-operator tokens so `curl ... | grep ...`,
+        # `curl ...; rm -rf /`, `curl ... && evil`, etc. are all validated
+        # stage-by-stage rather than only checking the first command.
+        CONTROL_OPERATORS = {"|", ";", "&&", "||", "&"}
+        stages: list[list[str]] = [[]]
+        for tok in tokens:
+            if tok in CONTROL_OPERATORS:
+                stages.append([])
+            else:
+                stages[-1].append(tok)
+
+        for stage in stages:
+            if not stage:
+                return False, "empty command stage (e.g. trailing/leading operator)"
+            binary = stage[0]
+            if binary not in self.ALLOWED_EXPLOIT_COMMANDS:
+                return False, (
+                    f"'{binary}' is not in the allowlist "
+                    f"{sorted(self.ALLOWED_EXPLOIT_COMMANDS)}"
+                )
+
+        return True, ""
+
     async def autonomous_exploit_loop(self, context: ScanContext, task_description: str, max_steps: int = 5) -> None:
         """
         AI-driven ReAct loop for advanced exploitation using the Cyphex Virtual Subsystem (CVS).
         The agent iteratively generates `curl` commands, executes them, and reads the output.
-
-        FULL VISIBILITY: Every step shows THINK -> ACT -> OBSERVE -> DECISION to the user.
         """
-        # -- Banner --
-        print(f"\n  {Colors.CYAN}{Colors.BOLD}+{'-' * 60}+{Colors.RESET}")
-        print(f"  {Colors.CYAN}{Colors.BOLD}|  [LOOP] AUTONOMOUS EXPLOIT LOOP (ReAct){'':>22}|{Colors.RESET}")
-        print(f"  {Colors.CYAN}{Colors.BOLD}|  Target: {self.target[:48]:<49}|{Colors.RESET}")
-        print(f"  {Colors.CYAN}{Colors.BOLD}|  Goal: {task_description[:50]:<51}|{Colors.RESET}")
-        print(f"  {Colors.CYAN}{Colors.BOLD}|  Max Steps: {max_steps:<46}|{Colors.RESET}")
-        print(f"  {Colors.CYAN}{Colors.BOLD}+{'-' * 60}+{Colors.RESET}\n")
-
+        await self.log(f"Starting Autonomous Exploit Loop: {task_description}", "warning")
+        
         system_prompt = f"""You are an elite offensive security engineer.
 You are tasked with the following exploitation goal: {task_description}
 
@@ -353,60 +427,24 @@ RESPOND EXACTLY IN THIS JSON FORMAT:
 If you have achieved the goal or found a vulnerability, set found_vuln to true and provide details. The loop will then terminate.
 If you need more information, generate the next command to gather it.
 """
-
+        
         conversation_history = "--- Terminal Output History ---\n"
-
+        
         for step in range(max_steps):
-            step_num = step + 1
-
-            # -- Step header --
-            print(f"  {Colors.CYAN}{Colors.BOLD}---- STEP {step_num}/{max_steps} ----{Colors.RESET}")
-
+            await self.log(f"Autonomous Loop Step {step+1}/{max_steps}...", "info")
             user_prompt = f"History so far:\n{conversation_history}\n\nWhat is your next command?"
-
+            
             response_text = await self.call_cerebras(system_prompt, user_prompt)
             data = self._parse_json(response_text)
-
+            
             if not data or "command" not in data:
-                print(f"  {Colors.RED}  [ERR] Failed to parse AI response. Aborting loop.{Colors.RESET}")
+                await self.log("Failed to parse AI response. Aborting loop.", "danger")
                 break
-
-            reasoning = data.get('reasoning', 'No reasoning provided')
-            command = data['command']
-
-            # -- THINK: Show reasoning --
-            print(f"  {Colors.YELLOW}{Colors.BOLD}  [THINK] THINK:{Colors.RESET}")
-            for line in reasoning.split('. '):
-                if line.strip():
-                    print(f"  {Colors.YELLOW}     {line.strip()}.{Colors.RESET}")
-
-            # -- ACT: Show exact command --
-            print(f"  {Colors.GREEN}{Colors.BOLD}  [ACT] ACT:{Colors.RESET}")
-            print(f"  {Colors.GREEN}     $ {command}{Colors.RESET}")
-
-            # Extract and display payload separately if it's a curl with data
-            if '-d ' in command or '--data' in command:
-                import re
-                data_match = re.search(r'-d\s+["\']([^"\']+)["\']', command)
-                if data_match:
-                    payload_str = data_match.group(1)
-                    print(f"  {Colors.RED}{Colors.BOLD}     [PAYLOAD] PAYLOAD: {payload_str}{Colors.RESET}")
-
-            if '-H ' in command:
-                import re
-                headers = re.findall(r'-H\s+["\']([^"\']+)["\']', command)
-                for h in headers:
-                    print(f"  {Colors.DIM}     [HEADER] HEADER: {h}{Colors.RESET}")
-
+                
+            await self.log(f"Reasoning: {data.get('reasoning', '')}", "info")
+            
             if data.get("found_vuln"):
                 vuln_info = data.get("vuln_details", {})
-                # -- DECISION: Vuln found --
-                print(f"\n  {Colors.BG_RED}{Colors.WHITE}{Colors.BOLD}  [ALERT] DECISION: VULNERABILITY CONFIRMED  {Colors.RESET}")
-                print(f"  {Colors.RED}     Name:     {vuln_info.get('name', 'Unknown')}{Colors.RESET}")
-                print(f"  {Colors.RED}     Severity: {vuln_info.get('severity', 'High')}{Colors.RESET}")
-                print(f"  {Colors.RED}     Payload:  {vuln_info.get('payload', 'N/A')}{Colors.RESET}")
-                print(f"  {Colors.RED}     Detail:   {vuln_info.get('description', '')[:200]}{Colors.RESET}")
-
                 if vuln_info:
                     await self.add_vuln(Vuln(
                         name=vuln_info.get("name", f"Autonomous Vuln - {self.__class__.__name__}"),
@@ -419,42 +457,36 @@ If you need more information, generate the next command to gather it.
                         fix="Review and remediate based on autonomous findings.",
                     ))
                 break
-
-            if not command.strip():
-                print(f"  {Colors.DIM}  [ERR] Empty command. Stopping.{Colors.RESET}")
+                
+            cmd = data["command"]
+            if not cmd.strip():
                 break
 
-            # Execute command (terminal.run already prints the output)
-            result = await self.terminal.run(command)
+            # Enforce the curl/grep-only allowlist before touching the real
+            # shell — refuse and skip rather than crash the whole scan.
+            is_valid, reason = self._validate_exploit_command(cmd)
+            if not is_valid:
+                await self.log(
+                    f"Refusing to execute disallowed command ({reason}): {cmd!r}",
+                    "danger",
+                )
+                conversation_history += (
+                    f"\n$ {cmd}\n[CYPHEX] Command rejected by allowlist — {reason}. "
+                    f"Only {sorted(self.ALLOWED_EXPLOIT_COMMANDS)} are permitted.\n"
+                )
+                await asyncio.sleep(1)
+                continue
 
-            # -- OBSERVE: Show response summary --
-            stdout_preview = result.stdout[:600] if result.stdout else "(empty)"
-            print(f"  {Colors.CYAN}{Colors.BOLD}  [OBSERVE] OBSERVE:{Colors.RESET}")
-            print(f"  {Colors.DIM}     Status:  exit_code={result.exit_code} ({len(result.stdout)} bytes){Colors.RESET}")
-            # Show first few meaningful lines
-            lines = [l for l in stdout_preview.splitlines() if l.strip()][:5]
-            for line in lines:
-                # Highlight sensitive data in response
-                display = line[:120]
-                if any(kw in display.lower() for kw in ['password', 'token', 'secret', 'key', 'admin', 'root']):
-                    print(f"  {Colors.RED}{Colors.BOLD}     -> {display}{Colors.RESET}")
-                else:
-                    print(f"  {Colors.DIM}     -> {display}{Colors.RESET}")
-            if len(result.stdout) > 600:
-                print(f"  {Colors.DIM}     ... ({len(result.stdout) - 600} more bytes){Colors.RESET}")
-
-            # -- DECISION: Continue --
-            print(f"  {Colors.BLUE}  [*] DECISION: Need more data -> continuing to step {step_num + 1}{Colors.RESET}")
-            print()
-
+            # Execute command
+            result = await self.terminal.run(cmd)
+            
             # Append to history
-            stdout_hist = result.stdout[:1000] + ("...\n[TRUNCATED]" if len(result.stdout) > 1000 else "")
-            stderr_hist = result.stderr[:500]
-            conversation_history += f"\n$ {command}\nExit Code: {result.exit_code}\nSTDOUT:\n{stdout_hist}\nSTDERR:\n{stderr_hist}\n"
-
+            stdout_preview = result.stdout[:1000] + ("...\n[TRUNCATED]" if len(result.stdout) > 1000 else "")
+            stderr_preview = result.stderr[:500]
+            
+            conversation_history += f"\n$ {cmd}\nExit Code: {result.exit_code}\nSTDOUT:\n{stdout_preview}\nSTDERR:\n{stderr_preview}\n"
+            
             # Small delay to avoid API limits
             await asyncio.sleep(2)
-
-        # -- Loop complete --
-        print(f"  {Colors.CYAN}{Colors.BOLD}---- EXPLOIT LOOP COMPLETE ({len(self.vulns)} vulns found) ----{Colors.RESET}\n")
-
+            
+        await self.log("Autonomous Exploit Loop Finished.", "info")

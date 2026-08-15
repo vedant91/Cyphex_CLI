@@ -8,6 +8,7 @@ Takes blocked payloads and generates mutated variants using:
 Simulates how FraudGPT/WormGPT generates polymorphic attacks.
 """
 
+import json
 import re
 import random
 import asyncio

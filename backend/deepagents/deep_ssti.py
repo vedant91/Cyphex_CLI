@@ -1,11 +1,11 @@
 """DeepSSTIAgent — Oracle-guided Server-Side Template Injection with engine identification and RCE chains."""
 import re
-from deepagents.base_deep_agent import BaseDeepAgent
-from models.scan import ScanContext, Vuln
-from models.agent_result import AgentResult
-from deepagents.oracle_attack import HttpRequest
-from deepagents.payloads.ssti import SSTI_PROBES, SSTI_ENGINES
-from deepagents.payloads.cmdi import CMDI_OUTPUT_SIGS
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+from backend.deepagents.payloads.ssti import SSTI_PROBES, SSTI_ENGINES
+from backend.deepagents.payloads.cmdi import CMDI_OUTPUT_SIGS
 
 class DeepSSTIAgent(BaseDeepAgent):
     """
@@ -20,7 +20,7 @@ class DeepSSTIAgent(BaseDeepAgent):
         if not self.asi.endpoints:
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
 
-        has_string = any(p.has_string_params for p in list(self.asi.endpoints.values()))
+        has_string = any(p.has_string_params for p in self.asi.endpoints.values())
         if not has_string:
             self.console.print("[dim]DeepSSTIAgent: no string parameters found, skipping.[/dim]")
             return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
@@ -33,7 +33,7 @@ class DeepSSTIAgent(BaseDeepAgent):
 
     async def _detect_ssti(self, context: ScanContext) -> str | None:
         """Phase 1: Try math probes to detect template evaluation."""
-        for path, profile in list(self.asi.endpoints.items()):
+        for path, profile in self.asi.endpoints.items():
             if not profile.has_string_params:
                 continue
             for param in list(profile.params)[:3]:
@@ -46,7 +46,7 @@ class DeepSSTIAgent(BaseDeepAgent):
                     if expected in body:
                         self.console.print(
                             f"[red][DeepSSTI] Template evaluation detected at {full_path}! "
-                            f"payload={payload!r} -> response contains {expected!r}[/red]"
+                            f"payload={payload!r} → response contains {expected!r}[/red]"
                         )
                         # Identify engine from payload pattern
                         engine = self._identify_engine(payload)
@@ -57,7 +57,7 @@ class DeepSSTIAgent(BaseDeepAgent):
                             endpoint=full_path,
                             payload=payload,
                             confirmed=True,
-                            evidence=f"Server evaluated {payload!r} -> returned {expected!r}",
+                            evidence=f"Server evaluated {payload!r} → returned {expected!r}",
                             fix="Never pass user input to template render() calls; use static templates with safe context variables.",
                         ))
                         return engine
@@ -69,7 +69,7 @@ class DeepSSTIAgent(BaseDeepAgent):
         if not rce_payloads:
             return
 
-        for path, profile in list(self.asi.endpoints.items()):
+        for path, profile in self.asi.endpoints.items():
             if not profile.has_string_params:
                 continue
             for param in list(profile.params)[:2]:

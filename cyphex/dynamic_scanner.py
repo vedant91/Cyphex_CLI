@@ -15,10 +15,8 @@ Usage:
 import asyncio
 import json
 import os
-import platform
 import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -50,28 +48,31 @@ def nuclei_available() -> bool:
 
 async def run_nuclei(
     target_url: str,
-    severity: str = "critical,high,medium",
+    severity: str = "critical,high,medium,low,info",
     templates: Optional[list[str]] = None,
     rate_limit: int = 50,
     timeout: int = 300,
 ) -> list[DynamicFinding]:
     """
     Run Nuclei scan against a target URL.
-    Handles Windows by writing to a temp file instead of /dev/stdout.
+
+    Args:
+        target_url: The target to scan (e.g., http://localhost:3000)
+        severity: Comma-separated severity filter
+        templates: Specific template paths/tags (None = auto with web tags)
+        rate_limit: Max requests per second
+        timeout: Scan timeout in seconds
     """
-    is_windows = platform.system() == "Windows"
-    out_path = None
-
-    print(f"  → [DAST] Nuclei scanning {target_url}")
-    print(f"  → [DAST] Severity: {severity} | Rate: {rate_limit} req/s")
-    print(f"  → [DAST] Templates: cve,sqli,xss,rce,lfi,ssrf,redirect,exposure")
-
     cmd = [
         "nuclei",
         "-u", target_url,
         "-severity", severity,
-        "-silent",
-        "-duc",                          # Disable update check
+        "-jsonl",                        # stream JSONL results to stdout — reliable,
+                                         # unlike -json-export /dev/stdout which buffers
+                                         # to a file handle and often emits 0 bytes.
+        "-silent",                       # No banner on stdout
+        "-duc",                          # Disable update check (prevents hanging prompt)
+        "-ni",                           # Disable interactsh OOB (avoids startup stalls offline)
         "-rate-limit", str(rate_limit),
         "-timeout", "10",               # Per-request timeout
         "-retries", "1",
@@ -83,72 +84,52 @@ async def run_nuclei(
         for t in templates:
             cmd.extend(["-t", t])
     else:
-        cmd.extend(["-tags", "cve,sqli,xss,rce,lfi,ssrf,redirect,exposure"])
-
-    # Windows: /dev/stdout doesn't exist — write to temp file
-    if is_windows:
-        out_path = tempfile.mktemp(suffix=".jsonl")
-        cmd.extend(["-o", out_path, "-json"])
-    else:
-        cmd.extend(["-json-export", "/dev/stdout"])
+        # Bespoke app deployed in the sandbox: generic detection tags only. The `cve`
+        # tag pulls in thousands of product-fingerprint templates that never match a
+        # custom app AND routinely blow past the scan timeout (→ silent empty result).
+        cmd.extend(["-tags", "exposure,misconfig,default-login,sqli,xss,lfi,ssrf,rce,redirect"])
 
     try:
         proc = await asyncio.to_thread(
             subprocess.run, cmd,
             capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL
+            stdin=subprocess.DEVNULL  # Prevent interactive prompts
         )
 
-        # Read output from temp file (Windows) or stdout (Linux/Mac)
-        raw = ""
-        if is_windows and out_path and os.path.exists(out_path):
-            try:
-                with open(out_path, "r", encoding="utf-8", errors="replace") as f:
-                    raw = f.read().strip()
-            finally:
-                os.remove(out_path)
-        else:
-            raw = proc.stdout.strip()
-
-        if not raw:
-            print(f"  → [DAST] Nuclei: No findings (target may be missing templates)")
-            return []
-
         findings = []
-        # Parse JSONL (one JSON object per line)
-        for line in raw.splitlines():
-            if not line.strip():
-                continue
-            try:
-                r = json.loads(line)
-                if isinstance(r, dict):
-                    findings.append(_nuclei_to_finding(r))
-            except json.JSONDecodeError:
-                continue
+        stdout = proc.stdout.strip()
+        if not stdout:
+            return findings
 
-        # Also try to parse as a single JSON array (fallback)
-        if not findings:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, list):
-                    for r in data:
-                        if isinstance(r, dict):
-                            findings.append(_nuclei_to_finding(r))
-                elif isinstance(data, dict):
-                    findings.append(_nuclei_to_finding(data))
-            except json.JSONDecodeError:
-                pass
+        # Nuclei can output either a JSON array or JSONL (one object per line)
+        try:
+            data = json.loads(stdout)
+            if isinstance(data, list):
+                # JSON array format (from -json-export)
+                for r in data:
+                    if isinstance(r, dict):
+                        findings.append(_nuclei_to_finding(r))
+            elif isinstance(data, dict):
+                findings.append(_nuclei_to_finding(data))
+        except json.JSONDecodeError:
+            # JSONL format: one JSON object per line
+            for line in stdout.split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                    if isinstance(r, dict):
+                        findings.append(_nuclei_to_finding(r))
+                except json.JSONDecodeError:
+                    continue
 
-        print(f"  → [DAST] Nuclei: {len(findings)} finding(s) confirmed")
         return findings
 
     except subprocess.TimeoutExpired:
-        print(f"  → [DAST] Nuclei: Timed out after {timeout}s")
-        if out_path and os.path.exists(out_path):
-            os.remove(out_path)
+        # Distinguish a broken/timed-out run from a genuinely clean target.
+        print(f"  [DAST] Nuclei timed out after {timeout}s — no findings returned")
         return []
     except FileNotFoundError:
-        print(f"  → [DAST] Nuclei: Binary not found (run: cyphex setup)")
         return []
 
 

@@ -23,8 +23,7 @@ from backend.patch.verifier import verify_static, VerifyResult
 from backend.patch.manifest import PatchManifest
 from backend.patch.templates import apply_template
 from backend.patch.regression import generate_regression_test
-from backend.rag.knowledge_tree import KnowledgeTreeBuilder
-from backend.rag.tree_navigator import get_navigator, TreeNavigator
+from backend.rag.code_indexer import CodeIndexer
 from backend.rag.security_kb import get_fix_recipe, format_for_prompt, detect_framework
 from backend.rag.patch_memory import PatchMemory
 
@@ -141,38 +140,40 @@ def test_resolver():
 
 
 def test_code_indexer():
-    """Test 2: Vectorless Knowledge Tree"""
-    separator("TEST 2: Vectorless Knowledge Tree")
+    """Test 2: Vectorless Code Indexer"""
+    separator("TEST 2: Vectorless Code Indexer")
     
-    builder = KnowledgeTreeBuilder(VIBEMART_SRC, docs_dir=os.path.join(os.path.dirname(os.path.dirname(VIBEMART_DIR)), "docs"))
-    tree = builder.build(force=True)
-    code_tree = next((c for c in tree.get("children", []) if c.get("type") == "code_tree"), {})
+    indexer = CodeIndexer(VIBEMART_SRC)
+    count = indexer.build_index()
+    print(f"  Indexed {count} files in {VIBEMART_SRC}")
     
-    print(f"  Indexed {code_tree.get('files_indexed', 0)} files in {VIBEMART_SRC}")
+    for path, meta in indexer.files.items():
+        flags = []
+        if meta["has_db"]: flags.append("DB")
+        if meta["has_auth"]: flags.append("AUTH")
+        if meta["has_input"]: flags.append("INPUT")
+        funcs = meta["functions"][:5]
+        routes = meta["routes"][:5]
+        print(f"  📄 {path:35s} [{', '.join(flags):15s}] funcs={funcs} routes={routes[:3]}")
     
-    routes = [n for n in code_tree.get("children", []) if n.get("type") == "route"]
-    sinks = [n for n in code_tree.get("children", []) if n.get("type") == "sink"]
-    
-    for node in routes[:5]:
-        flags = [f"[{s}]" for s in node.get("sinks", [])]
-        print(f"  🛣️  {node.get('title'):35s} {', '.join(flags):15s} ({node.get('file')})")
-        
-    for node in sinks[:3]:
-        print(f"  ⚠️  {node.get('title'):35s} [{node.get('cwe')}]")
-    
-    navigator = get_navigator(tree, builder.cwe_index)
-    
-    print("\n  --- Finding perfect context for each vuln ---")
+    print("\n  --- Finding relevant files for each vuln ---")
     for v in TEST_VULNS[:3]:
         loc = resolve(v, VIBEMART_SRC)
-        if loc and loc.kind == "file":
-            ctx = navigator.get_patch_context(v.cwe, loc.rel, loc.line)
-            print(f"\n  Vuln: {v.name[:40]}")
-            print(f"    Function Code: {bool(ctx['function_code'])}")
-            print(f"    Fix Recipe:    {bool(ctx['fix_recipe'])}")
-            print(f"    Repo Example:  {bool(ctx['repo_example'])}")
+        relevant = indexer.find_for_vuln(v, loc)
+        print(f"\n  Vuln: {v.name[:40]}")
+        for r in relevant:
+            print(f"    → {r['path']} (score: {r['score']})")
     
-    return navigator
+    # Test secure pattern search
+    print("\n  --- Searching for repo's own secure patterns ---")
+    for cwe in ["CWE-89", "CWE-79", "CWE-78"]:
+        pattern = indexer.find_secure_pattern(cwe)
+        if pattern:
+            print(f"  {cwe}: Found! {pattern[:80]}...")
+        else:
+            print(f"  {cwe}: No existing secure pattern found")
+    
+    return indexer
 
 
 def test_context_extraction():
@@ -500,14 +501,13 @@ def test_full_pipeline():
     """Test 10: Full Pipeline Simulation"""
     separator("TEST 10: Full Pipeline — End-to-End")
     
-    builder = KnowledgeTreeBuilder(VIBEMART_SRC, docs_dir=os.path.join(os.path.dirname(os.path.dirname(VIBEMART_DIR)), "docs"))
-    tree = builder.build()
-    navigator = get_navigator(tree, builder.cwe_index)
+    indexer = CodeIndexer(VIBEMART_SRC)
+    indexer.build_index()
     
-    code_tree = next((c for c in tree.get("children", []) if c.get("type") == "code_tree"), {})
-    framework = code_tree.get("framework", "")
+    deps = indexer.get_dependency_info()
+    framework = detect_framework(deps)
     print(f"  Detected framework: {framework or 'unknown'}")
-    print(f"  Dependencies: {code_tree.get('dependencies', [])[:5]}")
+    print(f"  Dependencies: {deps.get('node_deps', [])[:5]}")
     
     print("\n  Processing each finding through the full pipeline:")
     
@@ -517,24 +517,42 @@ def test_full_pipeline():
         if not loc or not is_patchable(loc):
             print(f"\n  ⊘ {v.name[:40]:40s} → SKIPPED (dynamic-only or unresolvable)")
             continue
-            
-        # Step 2: Try template
+        
+        # Step 2: Get context
         content = open(loc.file, encoding="utf-8").read()
+        snippet, quality = extract_function(content, loc.line, detect_language(loc.file))
+        imports = extract_imports(content, detect_language(loc.file))
+        
+        # Step 3: Get KB recipe
+        kb_prompt = format_for_prompt(v.cwe, framework)
+        
+        # Step 4: Find repo examples
+        repo_example = indexer.find_secure_pattern(v.cwe)
+        
+        # Step 5: Try template
         vuln_lines = content.split('\n')
         vuln_line = vuln_lines[loc.line - 1] if loc.line <= len(vuln_lines) else ""
         template_fix = apply_template(v.cwe, vuln_line, framework)
         
-        # Step 3: Get RAG context
-        ctx = navigator.get_patch_context(v.cwe, loc.rel, loc.line, v.name)
-        
         print(f"\n  ► {v.name[:40]:40s} @ {loc.rel}:{loc.line}")
-        print(f"    Function Code: {'YES' if ctx['function_code'] else 'NO'}")
-        print(f"    KB Recipe:     {'YES' if ctx['fix_recipe'] else 'NO'}")
-        print(f"    Repo Example:  {'YES' if ctx['repo_example'] else 'NO'}")
-        print(f"    Template fix:  {'YES → ' + template_fix.strip()[:50] if template_fix else 'NO → needs model'}")
+        print(f"    Context: {quality} ({snippet.count(chr(10))+1} lines)")
+        print(f"    KB recipe: {'YES' if kb_prompt else 'NO'}")
+        print(f"    Repo example: {'YES' if repo_example else 'NO'}")
+        print(f"    Template fix: {'YES → ' + template_fix.strip()[:50] if template_fix else 'NO → needs model'}")
         
         if not template_fix:
-            full_prompt = navigator.assemble_prompt_context(v.cwe, loc.rel, loc.line, v.name)
+            # Assemble the prompt that would go to the model
+            prompt_parts = []
+            if kb_prompt:
+                prompt_parts.append(kb_prompt)
+            if imports:
+                prompt_parts.append(f"\nFILE IMPORTS:\n{imports}")
+            prompt_parts.append(f"\nVULNERABLE CODE ({quality} extraction):\n{snippet}")
+            if repo_example:
+                prompt_parts.append(f"\nREPO'S OWN SECURE PATTERN:\n{repo_example}")
+            prompt_parts.append(f"\nEXPLOIT: {v.payload}")
+            
+            full_prompt = "\n".join(prompt_parts)
             print(f"    Model prompt: {len(full_prompt)} chars ({full_prompt.count(chr(10))+1} lines)")
 
 

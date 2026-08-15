@@ -18,8 +18,10 @@ If verifier can't run → UNVERIFIABLE (never counted as "fixed").
 import os
 import re
 import hashlib
+import difflib
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
 try:
     import httpx
@@ -36,8 +38,8 @@ except ImportError:
 class VerifyResult:
     """Shared contract — every patch speaks this."""
     kind: str               # "static" | "dynamic" | "none"
-    finding_gone: bool      # Scanner no longer reports it / exploit no longer works
-    builds: bool            # Parse/typecheck ok (True if not checkable)
+    finding_gone: Optional[bool]  # True=confirmed gone, False=still present, None=couldn't verify
+    builds: Optional[bool]  # True=parses, False=syntax error, None=couldn't check this file type
     endpoint_alive: bool    # Benign request still works (True if n/a)
     no_suppression: bool    # No scanner suppression comments added
     blast_ok: bool          # Diff within size cap
@@ -46,9 +48,30 @@ class VerifyResult:
 
     @staticmethod
     def compute_verdict(finding_gone, builds, endpoint_alive, no_suppression, blast_ok) -> str:
-        if finding_gone and builds and endpoint_alive and no_suppression and blast_ok:
-            return "PASS"
-        return "FAIL"
+        """
+        finding_gone and builds are tri-state (True / False / None). None means
+        "this check could not be run" and must NEVER be silently treated as a
+        pass — that's exactly how a scanner error or an unsupported language
+        used to produce a false PASS.
+
+        endpoint_alive / no_suppression / blast_ok are plain booleans (already
+        True when not applicable) — an observed False there is a real,
+        measured failure, not an "couldn't check" state.
+        """
+        tri_state_checks = (finding_gone, builds)
+
+        # Any check that actually ran and failed → FAIL, no ambiguity.
+        if any(c is False for c in tri_state_checks):
+            return "FAIL"
+        if not (endpoint_alive and no_suppression and blast_ok):
+            return "FAIL"
+
+        # Nothing failed, but at least one check couldn't be run at all →
+        # UNVERIFIABLE. Never claim PASS for something that wasn't measured.
+        if any(c is None for c in tri_state_checks):
+            return "UNVERIFIABLE"
+
+        return "PASS"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -78,10 +101,14 @@ def verify_static(
     """
     evidence = {}
 
-    # Build check
-    builds = parse_valid if parse_valid is not None else True
-    if not builds:
+    # Build check — parse_valid is tri-state (True/False/None). None means the
+    # applier couldn't check syntax for this file type (e.g. not Python/JS/TS)
+    # — that must contribute to UNVERIFIABLE, not silently pass as "builds=True".
+    builds = parse_valid
+    if builds is False:
         evidence["build_error"] = "Patch failed syntax validation"
+    elif builds is None:
+        evidence["build_unverifiable"] = "Could not validate syntax for this file type"
 
     # Anti-suppression check
     no_suppression = _check_no_suppression(original_content, patched_content)
@@ -93,10 +120,14 @@ def verify_static(
     if not blast_ok:
         evidence["blast_radius"] = f"Diff exceeds {blast_radius_cap} lines"
 
-    # Re-scan the patched file
+    # Re-scan the patched file. finding_gone is tri-state: True (confirmed
+    # gone), False (still present), or None (scanner unavailable/errored —
+    # never treated as "fixed").
     finding_gone = _rescan_file(location, vuln, source_dir)
-    if not finding_gone:
+    if finding_gone is False:
         evidence["rescan"] = f"Finding {vuln.cwe or vuln.name} still present after patch"
+    elif finding_gone is None:
+        evidence["rescan_unverifiable"] = "Static scanner unavailable — could not confirm the finding is gone"
 
     verdict = VerifyResult.compute_verdict(
         finding_gone, builds, True, no_suppression, blast_ok
@@ -137,7 +168,7 @@ async def verify_dynamic(
     """
     if not HAS_HTTPX:
         return VerifyResult(
-            kind="none", finding_gone=False, builds=True,
+            kind="none", finding_gone=None, builds=True,
             endpoint_alive=False, no_suppression=True, blast_ok=True,
             verdict="UNVERIFIABLE",
             evidence={"error": "httpx not available for replay"},
@@ -148,7 +179,9 @@ async def verify_dynamic(
     method = location.method or "GET"
     payload = getattr(vuln, "payload", "") or ""
 
-    # 1. Replay the exploit
+    # 1. Replay the exploit. finding_gone is tri-state: True (exploit
+    # confirmed blocked), False (still exploitable), or None (replay was
+    # inconclusive — e.g. timeout/connection error — never treated as fixed).
     finding_gone = await _replay_exploit(url, method, payload, vuln, evidence)
 
     # 2. Liveness check — benign request must still work
@@ -212,21 +245,29 @@ def _check_no_suppression(original: str, patched: str) -> bool:
 
 
 def _check_blast_radius(original: str, patched: str, cap: int) -> bool:
-    """Check if the diff is within the blast radius cap."""
+    """
+    Check if the diff is within the blast radius cap.
+
+    Uses difflib.SequenceMatcher to compute a REAL line diff rather than a
+    positional (index-by-index) comparison. A positional comparison massively
+    over-counts: inserting or deleting a single line shifts every subsequent
+    line, so the naive approach would count the entire rest of the file as
+    "changed" even though only one line actually changed.
+    """
     if not original or not patched:
         return True
 
     orig_lines = original.split("\n")
     patch_lines = patched.split("\n")
 
-    # Count changed lines
+    matcher = difflib.SequenceMatcher(a=orig_lines, b=patch_lines, autojunk=False)
     changed = 0
-    max_len = max(len(orig_lines), len(patch_lines))
-    for i in range(max_len):
-        orig_l = orig_lines[i] if i < len(orig_lines) else ""
-        patch_l = patch_lines[i] if i < len(patch_lines) else ""
-        if orig_l != patch_l:
-            changed += 1
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        # For a replace/insert/delete hunk, count the larger side (lines
+        # removed vs. lines added) as the number of "changed lines".
+        changed += max(i2 - i1, j2 - j1)
 
     return changed <= cap
 
@@ -235,20 +276,29 @@ def _check_blast_radius(original: str, patched: str, cap: int) -> bool:
 # Scanner Re-run (Static)
 # ═══════════════════════════════════════════════════════════════
 
-def _rescan_file(location, vuln, source_dir: str) -> bool:
+def _rescan_file(location, vuln, source_dir: str) -> Optional[bool]:
     """
     Re-run the static scanner on the patched file.
-    Returns True if the original finding is gone.
+
+    Returns True if the original finding is confirmed gone, False if it's
+    confirmed still present, or None if the scanner could not be run at all
+    (missing dependency / scanner crash). None must be treated by the caller
+    as UNVERIFIABLE — it is NOT evidence the fix worked, so it must never be
+    coerced into a "PASS".
     """
     try:
         from cyphex.scanner import run_static_analysis
     except ImportError:
-        return True  # Can't verify → optimistic (will be marked UNVERIFIABLE upstream)
+        return None  # Can't verify — caller must mark UNVERIFIABLE, never PASS
 
     try:
-        findings = run_static_analysis(source_dir)
+        # flag_comments=False: the scanner normally treats a match inside a
+        # comment as a false positive, but here that would let a patch which
+        # merely comments the vulnerable line out register as "finding gone".
+        # Verification sees commented matches; ordinary scans do not.
+        findings = run_static_analysis(source_dir, flag_comments=False)
     except Exception:
-        return True  # Scanner error → can't determine
+        return None  # Scanner error — can't determine, never PASS
 
     vuln_cwe = getattr(vuln, "cwe", "") or ""
     vuln_name = (getattr(vuln, "name", "") or "").lower()
@@ -284,7 +334,18 @@ def _rescan_file(location, vuln, source_dir: str) -> bool:
 
 
 def _paths_match(finding_path: str, target_path: str, source_dir: str) -> bool:
-    """Check if two file paths refer to the same file."""
+    """
+    Check if two file paths refer to the same file, via exact or
+    relative-path comparison only.
+
+    Deliberately does NOT fall back to a basename-only match (e.g.
+    "orders.js" == "orders.js" regardless of directory): two files can share
+    a basename in different directories, and matching on basename alone
+    could make _rescan_file compare the wrong file's scanner findings
+    against this location — silently reporting a finding as "gone" (or
+    "still present") based on an unrelated file. Mirrors the same
+    basename-collision fix applied to resolver.py's file resolution.
+    """
     if not finding_path or not target_path:
         return False
 
@@ -303,20 +364,38 @@ def _paths_match(finding_path: str, target_path: str, source_dir: str) -> bool:
     except ValueError:
         pass
 
-    # Basename match as last resort (risky but catches semgrep paths)
-    return os.path.basename(fp) == os.path.basename(tp)
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════
 # Exploit Replay (Dynamic)
 # ═══════════════════════════════════════════════════════════════
 
-async def _replay_exploit(url: str, method: str, payload: str, vuln, evidence: dict) -> bool:
+def _tls_verify_for(url: str) -> bool:
     """
-    Replay the original exploit. Returns True if the vuln is GONE (exploit fails).
+    Only disable TLS certificate verification when the target is a loopback
+    address (i.e. the local sandbox CYPHEX itself spun up) — never for an
+    arbitrary remote host, where skipping verification would allow a
+    man-in-the-middle to fake a "vuln fixed" response.
     """
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return True
+    return host not in ("localhost", "127.0.0.1", "::1")
+
+
+async def _replay_exploit(url: str, method: str, payload: str, vuln, evidence: dict) -> Optional[bool]:
+    """
+    Replay the original exploit.
+
+    Returns True if the vuln is confirmed GONE (exploit blocked), False if
+    it's confirmed still exploitable, or None if the replay was inconclusive
+    (e.g. connection error/timeout) — an inconclusive result must NEVER be
+    treated as "fixed"; the caller marks it UNVERIFIABLE instead.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=_tls_verify_for(url)) as client:
             kwargs = {}
             if method.upper() == "POST":
                 kwargs["data"] = payload
@@ -342,13 +421,17 @@ async def _replay_exploit(url: str, method: str, payload: str, vuln, evidence: d
 
     except Exception as e:
         evidence["replay_error"] = str(e)
-        return True  # Connection error might mean the endpoint is properly blocked
+        evidence["replay_unverifiable"] = (
+            "Exploit replay could not be completed (network/timeout error) — "
+            "treated as inconclusive, NOT as fixed"
+        )
+        return None  # Inconclusive — never report "fixed" on an exception
 
 
 async def _check_liveness(url: str, evidence: dict) -> bool:
     """Check that the endpoint still responds to benign requests."""
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=_tls_verify_for(url)) as client:
             response = await client.get(url)
             alive = response.status_code < 500
             if not alive:

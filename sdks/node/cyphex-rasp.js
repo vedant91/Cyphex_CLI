@@ -47,6 +47,12 @@ const DEFAULTS = {
   blockMode: true,       // true = block attacks (403), false = detect-only (log + pass through)
   logToConsole: true,
   confidenceThreshold: 0.7,
+  // The daemon requires this shared key on every request (see
+  // backend/backend/auth.py). Defaults to the same CYPHEX_API_KEY env var
+  // the daemon itself reads; if neither is set, the daemon auto-generates
+  // and persists one at ~/.cyphex/api_key — copy that value here via the
+  // env var, or pass { apiKey: '...' } explicitly.
+  apiKey: process.env.CYPHEX_API_KEY || '',
 };
 
 // ── Attack detection patterns ───────────────────────────────────────
@@ -304,7 +310,7 @@ function captureStackTrace(repoRoot) {
  * Send telemetry to the Cyphex Daemon for auto-healing.
  * Non-blocking — uses fire-and-forget HTTP POST.
  */
-function sendTelemetry(daemonUrl, eventData) {
+function sendTelemetry(daemonUrl, eventData, apiKey) {
   const url = new URL('/api/telemetry/attack', daemonUrl);
 
   const postData = JSON.stringify(eventData);
@@ -316,6 +322,7 @@ function sendTelemetry(daemonUrl, eventData) {
     headers: {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(postData),
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
     },
     timeout: 3000,
   };
@@ -411,7 +418,7 @@ function cyphexRasp(options = {}) {
           confidence: result.confidence,
           blocked: config.blockMode,
           timestamp: new Date().toISOString(),
-        });
+        }, config.apiKey);
 
         // Block if in block mode
         if (config.blockMode) {

@@ -1,13 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-// Simulated DB connection
-const db = {
-  query: (sql, params) => {
-    // Simulated mysql2 query
-    return Promise.resolve([]);
-  }
-};
+const db = require('../db');
 
 // ═══════════════════════════════════════════════════════════════
 // CWE-89: SQL Injection via template literal
@@ -15,11 +9,13 @@ const db = {
 router.get('/search', async (req, res) => {
   const { q } = req.query;
   try {
-    const sql = `SELECT * FROM users WHERE name LIKE '%${q}%' OR email LIKE '%${q}%'`;
-    const results = await db.query(sql);
+    // CWE-89: SQL Injection via template literal
+    const term = q || '';
+    const sql = `SELECT * FROM users WHERE name LIKE '%${term}%' OR email LIKE '%${term}%'`;
+    const results = await db.queryUnsafe(sql);
     res.json({ results });
   } catch (err) {
-    res.status(500).json({ error: 'Database error' });
+    res.status(500).json({ error: 'Database error', detail: err.message });
   }
 });
 
@@ -41,11 +37,12 @@ router.get('/profile/:id', async (req, res) => {
 router.post('/update', async (req, res) => {
   const { email, name } = req.body;
   try {
-    const sql = "UPDATE users SET name = '" + name + "' WHERE email = '" + email + "'";
-    await db.query(sql);
+    // CWE-89: SQL Injection via string concatenation
+    const sql = "UPDATE users SET name = '" + (name||'') + "' WHERE email = '" + (email||'') + "'";
+    await db.queryUnsafe(sql);
     res.json({ message: 'Updated' });
   } catch (err) {
-    res.status(500).json({ error: 'Update failed' });
+    res.status(500).json({ error: 'Update failed', detail: err.message });
   }
 });
 

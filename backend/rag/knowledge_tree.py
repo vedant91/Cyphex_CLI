@@ -39,6 +39,10 @@ from typing import Optional
 
 logger = logging.getLogger("cyphex.knowledge_tree")
 
+# Security reference shipped with Cyphex (OWASP Top 10, CWE fix patterns,
+# Express secure-coding rules). Used when the scanned target has no docs/.
+BUNDLED_DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "security_docs")
+
 OLLAMA_BASE = "http://localhost:11434"
 
 # ═══════════════════════════════════════════════════════════════
@@ -448,13 +452,19 @@ def build_cwe_index(code_tree: dict, knowledge_tree: dict, security_kb: dict = N
 
     _walk_knowledge(knowledge_tree)
 
-    # Add security KB strategies
+    # Add security KB strategies.
+    # Seed the entry when the CWE is absent: a vuln class the static code walk
+    # never spotted (e.g. reflected XSS) is exactly the case where the patcher
+    # most needs the KB fix strategy, so gating on `cwe in index` would drop it.
     if security_kb:
         entries = security_kb.get("entries", security_kb)
         if isinstance(entries, dict):
             for cwe, data in entries.items():
-                if cwe.startswith("CWE-") and cwe in index:
-                    index[cwe]["fix_strategies"] = data.get("fix_strategies", []) if isinstance(data, dict) else []
+                if not cwe.startswith("CWE-") or not isinstance(data, dict):
+                    continue
+                if cwe not in index:
+                    index[cwe] = {"code_nodes": [], "knowledge_nodes": [], "fix_strategies": []}
+                index[cwe]["fix_strategies"] = data.get("fix_strategies", [])
 
     return index
 
@@ -562,7 +572,12 @@ class KnowledgeTreeBuilder:
 
     def __init__(self, source_dir: str, docs_dir: str = "", model: str = "llama3.1"):
         self.source_dir = source_dir
+        # Prefer the target repo's own docs/ (project-specific guidance beats
+        # generic advice). Most targets ship none, so fall back to the security
+        # reference bundled with Cyphex instead of building an empty tree.
         self.docs_dir = docs_dir or os.path.join(source_dir, "docs")
+        if not os.path.isdir(self.docs_dir):
+            self.docs_dir = BUNDLED_DOCS_DIR
         self.model = model
 
         # Cache path

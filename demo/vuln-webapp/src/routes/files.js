@@ -9,7 +9,10 @@ const router = express.Router();
 // ═══════════════════════════════════════════════════════════════
 router.get('/download', (req, res) => {
   const { filename } = req.query;
-  // No path validation — attacker can read any file on system
+  // CWE-22: No path traversal check — attacker can read any file on system
+  if (!filename) {
+    return res.status(400).json({ error: 'filename parameter required' });
+  }
   const filePath = path.join(__dirname, '../../uploads', filename);
   
   if (fs.existsSync(filePath)) {

@@ -2,8 +2,6 @@
 CYPHEX DeepAgents — BaseDeepAgent
 
 Upgraded with:
-- Multi-model Oracle integration for deeper reasoning
-- Enhanced with agent-reasoning cognitive strategies (CoT, ToT, etc.)
 - Parallel hypothesis testing (asyncio.gather, 3 concurrent probes)
 - Baseline latency measurement for time-based blind detection
 - Payload mutation on failure (Oracle mutate() call)
@@ -14,13 +12,12 @@ import time
 import asyncio
 import httpx
 from rich.console import Console
-from rich.panel import Panel
 
-from models.scan import ScanContext, Vuln, Evidence
-from models.agent_result import AgentResult
-from deepagents.attack_graph import AttackGraph
-from deepagents.attack_surface_index import AttackSurfaceIndex
-from deepagents.oracle_attack import AttackOracle, Hypothesis, HttpRequest
+from backend.backend.models.scan import ScanContext, Vuln, Evidence
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.attack_graph import AttackGraph
+from backend.deepagents.attack_surface_index import AttackSurfaceIndex
+from backend.deepagents.oracle_attack import AttackOracle, Hypothesis, HttpRequest
 
 console = Console()
 
@@ -40,7 +37,7 @@ class HypothesisResult:
 
 class BaseDeepAgent:
     """
-    Standalone DeepAgent base — full Observe->Think->Act adaptive loop.
+    Standalone DeepAgent base — full Observe→Think→Act adaptive loop.
     Uses only local Ollama models — zero external API dependency.
     """
 
@@ -62,7 +59,7 @@ class BaseDeepAgent:
         # Cached baseline latency (measured once per agent run)
         self._baseline_ms: float = 0.0
 
-    # -- Public entry point ----------------------------------------------------
+    # ── Public entry point ────────────────────────────────────────────────────
 
     async def run(self, context: ScanContext) -> AgentResult:
         console.print(
@@ -70,42 +67,22 @@ class BaseDeepAgent:
             f"initialising against {self.target}..."
         )
 
-        # -- Pre-flight: verify target is reachable before burning LLM tokens --
-        # If the sandbox is down, abort immediately instead of timing out on
-        # each hypothesis probe (which can take 10+ minutes for 10 agents).
-        try:
-            async with httpx.AsyncClient(timeout=5.0, verify=False) as _check:
-                _r = await _check.get(self.target.rstrip("/") + "/")
-                _reachable = True
-        except Exception as _e:
-            _reachable = False
-        if not _reachable:
-            console.print(
-                f"[yellow]{self.__class__.__name__}[/yellow] "
-                f"[red]Target unreachable ({self.target}) — skipping this agent.[/red]"
-            )
-            return AgentResult(agent=self.__class__.__name__, vulns=[], context=context)
-
-        # Measure baseline response time once (target is confirmed reachable)
+        # Measure baseline response time once
         self._baseline_ms = await self._measure_baseline()
 
         # Oracle generates attack plan
         surface_summary = self.asi.summarise_for_prompt()
+        console.print(f"[dim]DeepAgent {self.__class__.__name__} consulting Oracle...[/dim]")
         try:
             plan = await self.oracle.plan(
                 target=self.target,
                 surface_summary=surface_summary,
                 vuln_class=self.PRIMARY_VULN_CLASS,
             )
-            
-            plan_text = (
-                f"Consulting local Ollama models for [bold]{self.PRIMARY_VULN_CLASS}[/bold] attack plan...\n"
-                f"Generated [bold yellow]{len(plan.hypotheses)}[/bold yellow] falsifiable hypotheses based on attack surface."
+            console.print(
+                f"[cyan]Oracle[/cyan] generated {len(plan.hypotheses)} hypotheses "
+                f"for {self.__class__.__name__}."
             )
-            console.print(Panel(plan_text, title=f"🤖 {self.__class__.__name__} Initialization", border_style="blue", expand=False))
-
-            if not plan.hypotheses:
-                return AgentResult(agent=self.__class__.__name__, vulns=self.vulns, context=context)
         except Exception as e:
             console.print(f"[red]Oracle plan failed for {self.__class__.__name__}: {e}[/red]")
             return AgentResult(agent=self.__class__.__name__, vulns=self.vulns, context=context)
@@ -128,7 +105,7 @@ class BaseDeepAgent:
                     for edge in new_edges:
                         console.print(
                             f"[green]Attack chain discovered:[/green] "
-                            f"{edge.action} {edge.source} -> {edge.target}"
+                            f"{edge.action} {edge.source} → {edge.target}"
                         )
 
         return AgentResult(
@@ -137,7 +114,7 @@ class BaseDeepAgent:
             context=context,
         )
 
-    # -- Internal helpers ------------------------------------------------------
+    # ── Internal helpers ──────────────────────────────────────────────────────
 
     async def _measure_baseline(self) -> float:
         """GET the root URL once to establish a response-time baseline."""
@@ -216,6 +193,18 @@ class BaseDeepAgent:
         for attempt in range(self.MAX_ATTEMPTS_PER_HYPOTHESIS):
             status, body, elapsed, headers = await self._http_probe(current_request)
 
+            # Dead-route guard: a 404 means the route does not exist; a 0 means the
+            # request failed to connect. No amount of payload mutation makes a
+            # non-existent endpoint vulnerable, so abandon immediately instead of
+            # burning MAX_ATTEMPTS × (Oracle decide + mutate) slow local-LLM calls
+            # on it. This is what turned a handful of dead routes into ~39 minutes.
+            if status in (404, 0):
+                console.print(
+                    f"[dim]  [{hyp.id}] {current_request.path} → HTTP {status}: "
+                    f"dead route, abandoning (no Oracle call)[/dim]"
+                )
+                return HypothesisResult(False)
+
             # Update ASI with observation
             self.asi.ingest_response(
                 url=current_request.path,
@@ -243,18 +232,10 @@ class BaseDeepAgent:
                 console.print(f"[red]Oracle decide failed: {e}[/red]")
                 break
 
-            action_color = "green" if decision.action == "confirmed" else "red" if decision.action == "abandoned" else "yellow"
-            thought_text = (
-                f"[bold cyan]Target:[/bold cyan] {current_request.method} {current_request.path}\n"
-                f"[bold yellow]Payload:[/bold yellow] {current_request.payload or current_request.body}\n"
-                f"[bold blue]Hypothesis:[/bold blue] {hyp.vuln_type} (Attempt {attempt+1})\n"
-                f"---\n"
-                f"[bold white]Oracle Reasoning:[/bold white]\n"
-                f"{decision.thinking}\n"
-                f"---\n"
-                f"[bold {action_color}]Decision: {decision.action.upper()} (Confidence: {decision.confidence}%)[/]"
+            console.print(
+                f"[dim]  [{hyp.id}] attempt {attempt+1} → {decision.action} "
+                f"(conf={decision.confidence}%) {decision.thinking}[/dim]"
             )
-            console.print(Panel(thought_text, title=f"[Cognee] {self.__class__.__name__} Thinking Box", border_style="cyan", expand=False))
 
             if decision.action == "confirmed" and decision.vuln:
                 if decision.confidence >= _CONFIDENCE_THRESHOLD:

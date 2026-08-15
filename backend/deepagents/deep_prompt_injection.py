@@ -5,10 +5,17 @@ Tests AI-powered endpoints (chatbots, AI assistants, RAG systems) for
 prompt injection vulnerabilities where attacker-controlled input manipulates
 the LLM's behavior, bypassing safety controls or leaking system prompts.
 """
+<<<<<<< HEAD
 from deepagents.base_deep_agent import BaseDeepAgent
 from models.scan import ScanContext, Vuln
 from models.agent_result import AgentResult
 from deepagents.oracle_attack import HttpRequest
+=======
+from backend.deepagents.base_deep_agent import BaseDeepAgent
+from backend.backend.models.scan import ScanContext, Vuln
+from backend.backend.models.agent_result import AgentResult
+from backend.deepagents.oracle_attack import HttpRequest
+>>>>>>> origin/main
 
 # Classic prompt injection payloads ordered by effectiveness
 PROMPT_INJECTION_PAYLOADS = [
