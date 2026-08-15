@@ -17,7 +17,7 @@
 
 > **Two subsystems carry the weight of that claim; everything else exists to feed or verify them.**
 > **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** — 13 attack agents that run no fixed script. Each asks a local LLM what to try next, tests it live, and mutates on failure, chaining confirmed exploits into multi-step attack paths.
-> **[Behavioural Genome](#the-behavioural-immune-system)** — a per-endpoint anomaly detector that trains itself by fighting its own AI-generated attacks across generations until it can't be broken, then proves the result on a held-out benchmark: 91.3% recall, 97.7% precision, 3.3% false-positive rate.
+> **[Behavioural Genome](#the-behavioural-immune-system)** — a per-endpoint anomaly detector that trains itself by fighting its own AI-generated attacks across generations, then proves the result: 91.3% recall, 97.7% precision, 3.3% false-positive rate.
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
@@ -48,16 +48,16 @@
 
 ## Why CYPHEX Exists
 
-Most security tooling stops one step short of being useful.
+Most security tooling stops short.
 
-- **SAST** tells you a line looks dangerous. It cannot tell you whether the endpoint is reachable, whether the input is actually attacker-controlled, or whether the finding is one of the many false positives a regex produces.
-- **DAST** proves an endpoint is exploitable but has no idea which line of source caused it. You get a URL, not a fix.
-- **Neither writes the patch.** You get a report, and the actual work is still yours.
-- **Cloud AI tools** will write a patch — after uploading your proprietary source to somebody else's servers, on somebody else's billing.
+- **SAST** flags a line but can't tell if it's reachable, attacker-controlled, or a false positive.
+- **DAST** proves exploitability but not which line caused it — a URL, not a fix.
+- **Neither writes the patch.**
+- **Cloud AI tools** will patch it — after uploading your source to their servers, on their billing.
 
-CYPHEX closes that loop locally: **find → attack → verify → fix → prove**. Static findings and live exploits are correlated back to `file:line`, a local model writes the patch with real code context, and — the part that matters — **the patch only counts if a re-scan confirms the finding is gone.** Everything runs against your own Ollama on `127.0.0.1`.
+CYPHEX closes the loop locally: **find → attack → verify → fix → prove**. Findings correlate to `file:line`, a local model patches with real code context, and the patch only counts if a re-scan confirms the finding is gone — all against your own Ollama on `127.0.0.1`.
 
-The design bias throughout is *refusing to overclaim*. A patch that cannot be verified is reported as UNVERIFIABLE, not as success. A benchmark on 76 samples is labelled directional, not certified. Where a guard is not yet airtight, [it says so](#what-cyphex-cant-do-yet).
+It refuses to overclaim: an unverifiable patch reports UNVERIFIABLE, not success; the 76-sample benchmark is directional, not certified; unresolved gaps [say so](#what-cyphex-cant-do-yet).
 
 ---
 
@@ -80,9 +80,9 @@ cyphex doctor
 cyphex scan ./vuln-webapp
 ```
 
-`cyphex doctor` is worth running first — it reports which binaries are present, whether Ollama is up, which models are pulled, and what hardware tier you land in, so you find out about a missing dependency before an 18-minute scan does.
+Run `cyphex doctor` first — it checks binaries, Ollama, pulled models, and hardware tier before you sink 18 minutes into a scan.
 
-> **Does it edit my code?** **No — not during a scan.** `cyphex scan <path|--repo>` copies your tree into a per-scan sandbox under `backend/sandboxes/<scan_id>/` and patches *that copy*; your working tree is never touched. The **only** component that writes to your real source is the opt-in `/watch` auto-heal daemon, which patches in place by design.
+> **Does it edit my code?** No — not during a scan. `cyphex scan <path|--repo>` copies your tree into a sandbox and patches *that copy*; your working tree is untouched. Only the opt-in `/watch` auto-heal daemon writes to real source.
 
 ### Prerequisites
 
@@ -90,15 +90,15 @@ cyphex scan ./vuln-webapp
 |---|---|---|
 | **Python 3.11+** | Required | Runtime |
 | **Ollama** | Required | Local models — all inference hits `127.0.0.1:11434` |
-| **Docker** | Recommended | Hardened sandbox (auto-generated Dockerfile). Without it, a resource-capped local subprocess is used instead |
-| **Node.js 18+** | Recommended | Deploying and syntax-checking JS/TS targets. Without it, JS patches return `parse_valid=None` → UNVERIFIABLE rather than PASS |
-| **Semgrep / Nuclei** | Optional | Extra SAST rules / DAST templates — `cyphex setup` installs both (Nuclei's binary is SHA256-verified against the release checksums) |
-| **numpy / scikit-learn** | Optional | Isolation-Forest layer of the immune system. Missing → CYPHEX falls back to the heuristic detector instead of crashing |
+| **Docker** | Recommended | Hardened sandbox; falls back to a capped subprocess without it |
+| **Node.js 18+** | Recommended | Deploy + syntax-check JS/TS; without it, JS patches verify as UNVERIFIABLE |
+| **Semgrep / Nuclei** | Optional | Extra SAST/DAST rules; `cyphex setup` installs both, SHA256-verified |
+| **numpy / scikit-learn** | Optional | Isolation-Forest layer of the immune system; falls back to heuristics if missing |
 | **tsc** | Optional | TypeScript syntax validation for `.ts`/`.tsx` patches |
 
 ### Hardware tiers
 
-CYPHEX detects usable VRAM / unified memory and picks the largest models that will actually fit. Small models produce poor patches, so the selector always reaches for the biggest one your machine can hold.
+CYPHEX detects usable VRAM and picks the largest models that fit — small models produce poor patches.
 
 | Tier | VRAM | Code model | General model |
 |---|---|---|---|
@@ -109,13 +109,13 @@ CYPHEX detects usable VRAM / unified memory and picks the largest models that wi
 | `minimal` | 2+ GB | `deepseek-coder:1.3b` | — |
 | `cloud` | < 2 GB | cloud API | cloud API |
 
-The tier also gates which reasoning strategies are allowed, so a low-VRAM machine never tries to run a 5-call Tree-of-Thoughts pass. See [The Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays).
+Tier also gates reasoning strategies — a low-VRAM machine skips expensive ones. See [The Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays).
 
 ---
 
 ## What a Scan Actually Does
 
-Measured end-to-end run, 2026-08-11 — a deliberately-vulnerable Express storefront (8 source files), standard scan with auto-patch, Apple Silicon laptop, 7B + 8B local models, exit code 0.
+Measured run, 2026-08-11 — deliberately-vulnerable Express app (8 files), standard scan + auto-patch, Apple Silicon, 7B/8B models, exit 0.
 
 | Stage | Measured result |
 |---|---|
@@ -130,7 +130,7 @@ Measured end-to-end run, 2026-08-11 — a deliberately-vulnerable Express storef
 | **Security Posture Score** | **51/100 → 67/100** (computed from verified fixes only) |
 | **Wall clock** | **~1093 s (~18 min)** |
 
-Eighteen minutes is the honest number for a full run with patching on 7B/8B local models — most of it is LLM time. Static-only and `--no-patch` runs are far quicker.
+18 minutes is honest for a full patching run on 7B/8B — mostly LLM time. `--no-patch` runs are much quicker.
 
 ### How the Security Posture Score is computed
 
@@ -146,7 +146,7 @@ if low/info: penalty +=  1 +  2 · log₂(1 + n_low)
 score = clamp(100 − penalty, 0, 100)
 ```
 
-The log scaling means the *first* Critical costs 30 points and the tenth costs a few — the intent is to distinguish "has Criticals" from "has none", not to rank two badly-broken apps against each other. The **after** score reuses the identical coefficients over the vulns that remain, and there is a hard guard: **zero applied patches ⇒ `score_after = score_before`**, so a run that fixed nothing can never show improvement.
+Log scaling means the first Critical costs 30 points, the tenth costs a few — it distinguishes "has Criticals" from "has none", not a full ranking. The **after** score uses the same coefficients, with a hard guard: **zero applied patches ⇒ `score_after = score_before`**, so a no-op run never shows improvement.
 
 ### Artifacts it leaves behind
 
@@ -175,7 +175,7 @@ The log scaling means the *first* Critical costs 30 points and the tenth costs a
 
 ## The Verify Gate
 
-*A patch counts as "fixed" only if a re-scan proves it.* This is the single most important thing in the codebase — everything else produces candidates, and this decides which of them are real.
+*A patch counts as "fixed" only if a re-scan proves it.* This is the single most important thing in the codebase — everything else produces candidates, and this decides which are real.
 
 Every candidate must clear all of:
 
@@ -193,13 +193,13 @@ Every candidate must clear all of:
 | **FAIL** | A check ran and failed | **Rolled back** to the original bytes; writes a "try a different remediation approach" lesson into session memory |
 | **UNVERIFIABLE** | A check could not be run at all | Patch stays applied but **never counts toward the score** |
 
-The tri-state matters more than it looks. `finding_gone` and `builds` are `True`/`False`/`None`, and `None` means *this was not measured* — a missing scanner, an unsupported file type. The verdict logic refuses to coerce `None` into a PASS, which is exactly how an unsupported language or a crashed scanner used to produce false success. A check that ran and failed always outranks one that never ran.
+`finding_gone` and `builds` are tri-state (`True`/`False`/`None`) — `None` means *unmeasured*, and is never coerced into a PASS. A check that ran and failed always outranks one that never ran.
 
 ### Why comment-matching flips during verification
 
-Ordinary scans treat a regex match inside a code comment as a false positive — a commented-out example query is not a vulnerability. If the re-scan did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
+Ordinary scans ignore a regex match inside a code comment — a commented-out query isn't a vulnerability. If verification did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
 
-So the verifier re-scans with comment-matching switched back on. Commenting-out is scored as still-vulnerable and rolled back. Meanwhile the *parameterised-SQL* suppression stays active in both directions, because a patch that adds placeholders genuinely is a fix and must verify as one. That asymmetry is deliberate and is covered by tests.
+So the re-scan flips comment-matching back on: commenting-out still fails and rolls back. Meanwhile *parameterised-SQL* suppression stays active both ways, because adding placeholders genuinely is a fix and must verify as one. Deliberate asymmetry, covered by tests.
 
 ---
 
@@ -210,21 +210,21 @@ So the verifier re-scans with comment-matching switched back on. Commenting-out 
 | # | Waypoint | What happens |
 |---|---|---|
 | 1 | **Get Source** | Copy/clone the target into a per-scan sandbox copy; detect framework. Clone URLs are restricted to `https://` / `git@` / `ssh://`. |
-| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) **+** a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — **merged and de-duplicated**, then [confidence-scored](#false-positive-scoring) to drop the obvious false positives. |
-| 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port published on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
+| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) + a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — merged and de-duplicated, then [confidence-scored](#false-positive-scoring). |
+| 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
 | 3b | **Network Scan** *(opt)* | Host/port sweep + per-device network genome. |
-| 4 | **Dynamic Scan** | Crawler + API discovery, then **either** the built-in agent suite with Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — the two paths are mutually exclusive. A multi-model council then debates the findings and drops the false positives. |
-| 5 | **Build Genome** | Learn "normal" per endpoint, then run adversarial co-evolution to convergence. Genomes are loaded from disk for the same target, so evolution *continues* across scans. |
+| 4 | **Dynamic Scan** | Crawler + API discovery, then Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — mutually exclusive. A multi-model council debates findings and drops false positives. |
+| 5 | **Build Genome** | Learn "normal" per endpoint, run adversarial co-evolution to convergence. Genomes load from disk for the same target, so evolution *continues* across scans. |
 | 6 | **Attack Arena** | BEFORE/AFTER defence demo — defence rate plus false positives on benign traffic. |
 | 7 | **Security Report** | The AI council writes it; a **second model fact-checks** it for invented findings. |
-| 8 | **Patch + Verify + Score** | Per vuln: **patch-memory cache** → deterministic **template** → **council** (LLM generates, multiple models vote, prompted with Vectorless-RAG + Knowledge-Tree context) → **[Verify Gate](#the-verify-gate)** → before/after posture score from PASS-verified fixes only. |
+| 8 | **Patch + Verify + Score** | Per vuln: **memory cache** → deterministic **template** → **council** (RAG + Knowledge-Tree context, multi-model vote) → **[Verify Gate](#the-verify-gate)** → score from PASS-verified fixes only. |
 
 ### The patch ladder (step 8, in order)
 
-Each rung is tried before the one below it, so the expensive path runs only when the cheap ones can't answer:
+Cheapest rung tried first:
 
-1. **Patch-memory cache** — a semantic hash of the enclosing function (whitespace- and comment-insensitive) keyed by CWE. A hit reuses a previously *verified* fix with **zero model calls**.
-2. **Deterministic template** — a pure regex transform for the four CWEs that have one. No model involved, no variance:
+1. **Patch-memory cache** — semantic hash of the enclosing function, keyed by CWE. A hit reuses a previously *verified* fix with **zero model calls**.
+2. **Deterministic template** — regex transform for the four CWEs that have one, no model, no variance:
 
    | CWE | Transform |
    |---|---|
@@ -233,12 +233,12 @@ Each rung is tried before the one below it, so the expensive path runs only when
    | CWE-798 | `const password = "hunter2"` → `const password = process.env.PASSWORD` |
    | CWE-942 | `cors({ origin: "*" })` → `cors({ origin: [process.env.ALLOWED_ORIGIN ...] })` |
 
-3. **Council generation** — the LLM path, prompted with Vectorless-RAG + Knowledge-Tree context, with multiple models voting on the result.
-4. **Verify Gate** — and on FAIL, a **reflexion** retry that feeds the failure evidence back into the next prompt.
+3. **Council generation** — LLM path, RAG + Knowledge-Tree context, multi-model vote.
+4. **Verify Gate** — on FAIL, a **reflexion** retry feeds the failure evidence back into the next prompt.
 
 ### False-positive scoring
 
-Every static finding carries a `confidence` (0.0–1.0) and, when it's been marked down, a `fp_reason`. Semgrep hits start at 0.90, built-in regex hits at 0.85. Findings at or below `FP_DROP_THRESHOLD` (0.15) are dropped from ordinary scans.
+Every finding carries a `confidence` (Semgrep 0.90, built-in regex 0.85) and, if marked down, an `fp_reason`. Findings ≤ `FP_DROP_THRESHOLD` (0.15) are dropped from ordinary scans.
 
 | Signal | Effect |
 |---|---|
@@ -246,9 +246,9 @@ Every static finding carries a `confidence` (0.0–1.0) and, when it's been mark
 | Match sits inside a code comment | confidence 0.0 — dropped from scans, but **visible to the verifier** |
 | File is test / fixture / mock code | −0.45, kept but marked |
 
-On the bundled `vuln-webapp` this removes 2 Critical false positives, both of which were the scanner matching its own English prose: `query (should` inside `// Safe: parameterized query (should NOT be flagged)`.
+On `vuln-webapp` this drops 2 Critical false positives — the scanner matching its own comment text: `query (should` inside `// Safe: parameterized query (should NOT be flagged)`.
 
-Semgrep never runs with `--config auto`, which uploads project metadata to semgrep.dev on every run and cannot be cached. The ladder is: a local `cyphex/semgrep_rules.yml` if you drop one in (fully offline) → the static `p/owasp-top-ten` pack, which Semgrep caches locally after the first fetch.
+Semgrep never runs `--config auto` (uploads project metadata on every run). Ladder: a local `cyphex/semgrep_rules.yml` if present (fully offline) → the static `p/owasp-top-ten` pack, cached after the first fetch.
 
 ---
 
@@ -270,12 +270,12 @@ Semgrep never runs with `--config auto`, which uploads project metadata to semgr
 
 **The loop each agent runs:**
 
-1. **Baseline** — one GET against the root to establish a response-time baseline, so timing-based inference (blind SQLi, sleep payloads) has something to compare against.
-2. **Plan** — the Oracle reads the attack-surface summary and returns ranked hypotheses. Capped at `MAX_HYPOTHESES = 10`.
-3. **Probe** — hypotheses execute in parallel batches of `PARALLEL_BATCH = 3`, each getting up to `MAX_ATTEMPTS_PER_HYPOTHESIS = 5` probes.
-4. **Decide** — after each probe the Oracle judges the response as *confirmed / adapt / abandoned*. "Abandoned" ends that hypothesis immediately rather than burning all 5 attempts on slow local-LLM calls.
+1. **Baseline** — one GET to root, establishes a response-time baseline for timing-based inference (blind SQLi, sleep payloads).
+2. **Plan** — the Oracle reads the attack-surface summary, returns ranked hypotheses. Capped at `MAX_HYPOTHESES = 10`.
+3. **Probe** — hypotheses execute in parallel batches of `PARALLEL_BATCH = 3`, up to `MAX_ATTEMPTS_PER_HYPOTHESIS = 5` probes each.
+4. **Decide** — the Oracle judges the response as *confirmed / adapt / abandoned*. Abandoned ends the hypothesis immediately.
 5. **Mutate** — on *adapt*, the Oracle evolves the payload into an evasion variant and the loop repeats.
-6. **Chain** — a confirmed exploit updates the shared **attack graph**, and newly-discovered edges (`unauth data leak → admin takeover`) are surfaced as multi-step attack paths.
+6. **Chain** — a confirmed exploit updates the shared **attack graph**; new edges surface as multi-step attack paths (`unauth data leak → admin takeover`).
 
 ```mermaid
 flowchart TD
@@ -288,42 +288,42 @@ flowchart TD
     Decide -->|abandoned| End["Hypothesis ends immediately;<br/>remaining attempts not spent"]
 ```
 
-A **dead-route guard** keeps agents from spending budget on endpoints that don't exist. Crawler, API-discovery and network-recon agents feed the attack-surface index the Oracle plans against.
+A dead-route guard skips endpoints that don't exist; crawler, API-discovery and network-recon agents feed the attack-surface index the Oracle plans against.
 
 ### 2. The Oracle — local-model reasoning, spent where it pays
 
-The Oracle is the local-LLM brain behind every DeepAgent, with three entry points:
+The local-LLM brain behind every DeepAgent has three entry points:
 
-- **`plan()`** — reads the attack surface, returns 5–8 ranked attack hypotheses (highest impact / cheapest to test first).
-- **`decide()`** — judges a probe's response using status, body, size **and timing vs. the measured baseline**, returning confirmed/adapt/abandoned plus a confidence score and structured evidence.
+- **`plan()`** — returns 5–8 ranked attack hypotheses (highest impact / cheapest to test first).
+- **`decide()`** — judges status, body, size and timing vs. baseline; returns confirmed/adapt/abandoned + confidence + evidence.
 - **`mutate()`** — evolves a failing payload into evasion variants.
 
-A **meta-reasoning router** then picks a *patch-generation* strategy per finding, out of a bank of 16 (**9 enabled**):
+A **meta-reasoning router** then picks a *patch-generation* strategy per finding, from a bank of 16 (**9 enabled**):
 
 | Router | Availability | Routing |
 |---|---|---|
 | **Built-in** | Always on | Critical **or** a hard CWE (78, 918, 89, 94, 77, 22) → **Self-Consistency** K-vote · High → **Chain-of-Thought** · everything else → direct generation |
-| **`.[reasoning]` extra** | Optional install | CWE override first, then severity: Critical → Self-Consistency · High → **Self-Reflection** (draft → critique → improve) · Medium/Low → CoT. CWE overrides send CMDi/SSRF → **Tree-of-Thoughts**, auth-bypass/IDOR → **Decomposition**, path traversal → **Least-to-Most**. Expensive strategies are gated off on low-VRAM tiers. |
+| **`.[reasoning]` extra** | Optional install | CWE override first, then severity: Critical → Self-Consistency · High → **Self-Reflection** (draft → critique → improve) · Medium/Low → CoT. CMDi/SSRF → **Tree-of-Thoughts**, auth-bypass/IDOR → **Decomposition**, path traversal → **Least-to-Most**. Expensive strategies gated off on low-VRAM tiers. |
 
 Every patch keeps its reasoning tree for audit. → [PRD §11.20](CYPHEX_PRD.md)
 
 ### 3. Vectorless RAG + Knowledge Tree — context without a vector DB
 
-Small models write good patches only with good context. The RAG path uses **no embeddings and no vector store**: a keyword/regex **code-tree index** extracts, per vulnerability, the whole brace-balanced enclosing function, the file's imports, a **CWE fix recipe**, and an **in-repo secure example** so patches match the codebase's own style.
+Small models need good context. No embeddings, no vector store — a regex code-tree index extracts, per vulnerability, the enclosing function, imports, a CWE fix recipe, and an in-repo secure example so patches match the codebase's own style.
 
-On top sits a **PageIndex-style Knowledge Tree** (`backend/rag/`) — a hierarchical JSON tree of `code_tree` + `knowledge_tree` + a deterministic `cwe_index`, built from your repo plus a bundled security corpus (OWASP Top-10 notes, CWE fix patterns, Express secure-coding patterns) and cached under `.cyphex/knowledge_tree.json`.
+On top: a **PageIndex-style Knowledge Tree** (`backend/rag/`) — `code_tree` + `knowledge_tree` + a deterministic `cwe_index`, built from your repo plus a bundled security corpus, cached under `.cyphex/knowledge_tree.json`.
 
-Its **fast path is 0-LLM**: `CWE + file:line` → enclosing function, fix recipe, secure example, related knowledge. Measured on `vuln-webapp`, a CWE-89 lookup returns a 502-char fix recipe, a 543-char function body and a 547-char in-repo secure example. The deep path shows the model only branch *summaries*, never the whole tree.
+Fast path is **0-LLM**: `CWE + file:line` → function, fix recipe, secure example. Measured on `vuln-webapp`: CWE-89 returns a 502-char recipe, 543-char function, 547-char in-repo example. The deep path shows the model only branch *summaries*, never the whole tree.
 
-> No embeddings in the RAG context path. *(The optional `[memory]` extra — cognee cross-project memory — is the exception: it does use `nomic-embed-text` at 768 dims over a local LanceDB store.)*
+> No embeddings in the RAG path. The optional `[memory]` extra (cognee) is the exception — `nomic-embed-text`, 768 dims, local LanceDB.
 
 ### 4. The Council — multi-model validation
 
-One model writing and grading its own patch is a single point of failure. CYPHEX assigns **three roles** — `detector`, `validator`, `patcher` — and scores every available Ollama model for each.
+One model grading its own patch is a single point of failure. CYPHEX assigns three roles — `detector`, `validator`, `patcher` — and scores every Ollama model for each.
 
-The scoring heuristic is deliberately blunt: **parameter count is the primary driver**, and code specialisation is a 15% bonus rather than an override. An 8B general model beats a 7B code model at most tasks, including code, because the extra parameters buy better reasoning; the code model only wins on pure generation.
+Scoring is deliberately blunt: **parameter count drives it**, code specialisation is only a 15% bonus. An 8B general model beats a 7B code model at most tasks, including code — the extra parameters buy better reasoning.
 
-The council then runs a **debate protocol** — the patcher proposes, validators vote with reasons, and the finding is confirmed, sent back, or dropped as a false positive. A separate **fact-check pass** has a second model re-read the written report specifically hunting for findings the first model invented.
+The **debate protocol**: the patcher proposes, validators vote with reasons, the finding is confirmed, sent back, or dropped as a false positive. A separate **fact-check pass** has a second model re-read the report hunting for findings the first model invented.
 
 `cyphex council-doctor` reports which model landed in which role.
 
@@ -331,7 +331,7 @@ The council then runs a **debate protocol** — the patcher proposes, validators
 
 ## The Behavioural Immune System
 
-Instead of matching known signatures, CYPHEX **learns what *normal* looks like for *your* app** and blocks the anomalies.
+CYPHEX learns what *normal* looks like for *your* app and blocks the anomalies, instead of matching known signatures.
 
 **The 15-dimension feature vector**, extracted per input string:
 
@@ -346,10 +346,10 @@ Instead of matching known signatures, CYPHEX **learns what *normal* looks like f
 | 7 | `max_token_length` | 15 | `token_count` |
 | 8 | `sql_keyword_score` | | |
 
-- **Scoring** is `max(isolation-forest, heuristic)` — the heuristic layer is 15 threshold rules over those features, one fed by the 24-pattern injection bank — plus a small agreement boost when both detectors fire. **BLOCK ≥ 0.7** (`GENOME_BLOCK_THRESHOLD`). Without numpy/scikit-learn the heuristic layer alone still scores.
-- **Coverage** goes well past SQLi/XSS: SSTI, NoSQLi, SSRF/cloud-metadata, LDAP injection, CRLF header injection and XXE are all in the pattern bank (100% detection on each of those classes in the benchmark corpus).
-- **Adversarial co-evolution** — an AI red team mutates attacks while the blue team retrains the genome, breeding from both blocked *and* bypassed payloads plus fresh diversity injection. Defaults: 10 generations × 20 payloads, early-stop at ≥99% block rate for 3 consecutive generations. Starting rates vary run to run and the curve is **not strictly monotonic**.
-- **Persistence** — genomes are saved with an **HMAC sidecar** (`.pkl` + `.pkl.hmac`, key mode `0600`) and refuse to load an unsigned or tampered file, so a poisoned pickle can't be swapped in. Attack history round-trips too, so run *N+1* keeps hardening from run *N*'s bypasses.
+- **Scoring** — `max(isolation-forest, heuristic)`; heuristic is 15 threshold rules over those features (one fed by the 24-pattern injection bank), plus an agreement boost when both fire. **BLOCK ≥ 0.7** (`GENOME_BLOCK_THRESHOLD`). Heuristic alone still scores without numpy/scikit-learn.
+- **Coverage** — past SQLi/XSS: SSTI, NoSQLi, SSRF/cloud-metadata, LDAP injection, CRLF header injection, XXE (100% detection on each in the benchmark corpus).
+- **Adversarial co-evolution** — red team mutates attacks, blue team retrains on blocked + bypassed + fresh diverse payloads. Defaults: 10 generations × 20 payloads, early-stop at ≥99% block rate for 3 consecutive generations. Not strictly monotonic run to run.
+- **Persistence** — genomes saved with an **HMAC sidecar** (`.pkl` + `.pkl.hmac`, key mode `0600`); refuse to load an unsigned or tampered file. Attack history round-trips too, so run *N+1* keeps hardening from run *N*'s bypasses.
 
 The co-evolution loop, visualised:
 
@@ -376,7 +376,7 @@ Sample scores (`/search` endpoint, untrained genome):
 
 ### Benchmarked quality
 
-**91.3% recall · 97.7% precision · 94.4% F1 · 3.3% FPR · ~0.04 ms/sample** — on a **76-sample corpus (46 attack / 30 benign; 42 TP, 1 FP, 4 FN)**. Small *n*: treat as directional, not certified. The co-evolution block rates are measured against payloads CYPHEX generated itself — in-distribution, not a generalization claim.
+**91.3% recall · 97.7% precision · 94.4% F1 · 3.3% FPR · ~0.04 ms/sample** on a 76-sample corpus (46 attack / 30 benign). Small *n* — directional, not certified. Co-evolution rates are in-distribution, not a generalization claim.
 
 ```bash
 python3 cyphex_benchmark.py                       # exits non-zero if recall < 80% or FPR > 10% → CI gate
@@ -385,15 +385,15 @@ python3 cyphex_benchmark.py --data cic-ids2018.csv --threshold 0.6 --json out.js
                                                   # verdict, but does NOT set an exit code)
 ```
 
-Output includes the full confusion matrix, per-attack-class detection rates, and the exact list of missed attacks and false positives — the four current misses are `admin'--`, `" OR ""="`, `| whoami` and a Windows-style traversal path. `--data` accepts any labelled CSV corpus with `payload,label[,attack]` columns.
+Output includes the confusion matrix, per-class detection rates, and every miss/false positive — current misses: `admin'--`, `" OR ""="`, `| whoami`, a Windows-style traversal path. `--data` accepts any labelled CSV with `payload,label[,attack]` columns.
 
 ---
 
 ## Network Scanning (optional)
 
-`--network` / `/net` adds a layer below the application: host discovery and port sweep, service and device-type inference from banners, and a per-host risk score. High-risk ports (21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5432…) and cleartext protocols (21, 23, 25, 80, 110, 143, 8080) are weighted into that score, and a `NetworkVulnMapper` correlates open services against known weaknesses.
+`--network` / `/net` adds host discovery, port sweep, service/device-type inference from banners, and a per-host risk score weighted on high-risk ports (21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5432…) and cleartext protocols (21, 23, 25, 80, 110, 143, 8080). `NetworkVulnMapper` correlates open services against known weaknesses.
 
-There is a **separate 25-dimension network genome** for traffic-level anomalies — including ARP rate, ICMP rate and SYN-without-ACK rate as scan indicators — with its own HMAC-signed persistence. `/netwatch` runs it as a live monitor.
+A separate **25-dimension network genome** covers traffic-level anomalies (ARP rate, ICMP rate, SYN-without-ACK rate), HMAC-signed. `/netwatch` runs it live.
 
 > `/net <cidr>` attacks the range you name **directly** — no sandbox, no authorization check. See [Security & Ethics](#security--ethics).
 
@@ -401,11 +401,11 @@ There is a **separate 25-dimension network genome** for traffic-level anomalies 
 
 ## RASP + Auto-Heal Daemon
 
-A **zero-dependency Express shield** (`sdks/node/cyphex-rasp.js`, a single `app.use()` — or let `python3 cyphex_cli.py onboard --path <app>` inject it for you) inspects query strings, recursively-flattened JSON bodies, and cookie / referer / x-forwarded-for / user-agent headers. It blocks attacks with a **403** above a tunable `confidenceThreshold` (default 0.7), or runs in **detect-only mode** (`blockMode: false`) for a staged rollout.
+A **zero-dependency Express shield** (`sdks/node/cyphex-rasp.js`, a single `app.use()` — or let `python3 cyphex_cli.py onboard --path <app>` inject it) inspects query strings, JSON bodies, and cookie/referer/UA headers. Blocks with a **403** above a tunable `confidenceThreshold` (default 0.7), or runs **detect-only** (`blockMode: false`) for a staged rollout.
 
-It then ships the event to the **`/watch` auto-heal daemon** on `127.0.0.1:3004`, which applies its own 70% confidence floor before handing the finding to the AI council to **patch your real source in place**. `GET /api/status` and `GET /api/heal-log` expose uptime, healed/rejected counts and the full healing history. The daemon enforces API-key auth, so **the same `CYPHEX_API_KEY` must be set on both sides** or telemetry is silently dropped.
+Events ship to the **`/watch` auto-heal daemon** on `127.0.0.1:3004`, which applies its own 70% floor before the AI council **patches your real source in place**. `GET /api/status` and `GET /api/heal-log` expose the healing history. API-key auth is enforced — **the same `CYPHEX_API_KEY` must be set on both sides** or telemetry is silently dropped.
 
-> **Stack-trace caveat.** The RASP captures a stack trace to resolve the calling application frame. Mounted globally via `app.use()` it fires *before* any route handler runs, so no app frame is on the stack and no `file:line` is resolved. **Mount it per-route** (`app.get('/x', cyphexRasp(opts), handler)`) to get the exact vulnerable `file:line`.
+> **Stack-trace caveat.** Mounted globally via `app.use()`, the RASP fires *before* any route handler runs, so no `file:line` is resolved. **Mount it per-route** (`app.get('/x', cyphexRasp(opts), handler)`) to get the exact vulnerable line.
 
 ---
 
@@ -444,9 +444,9 @@ cyphex                                  # no args → slash-command workspace (a
 <bare path or URL>                      # auto-scans it; Tab completes commands
 ```
 
-**`./cx` launcher** — the same engine, non-interactively: `cx scan`, `cx deep`, `cx net`, `cx benchmark`, `cx doctor`, `cx models`, `cx --version`, or `cx <path|url>` to auto-scan.
+**`./cx` launcher** — same engine, non-interactively: `cx scan`, `cx deep`, `cx net`, `cx benchmark`, `cx doctor`, `cx models`, `cx --version`, or `cx <path|url>` to auto-scan.
 
-**Legacy entry points** (`python3 cyphex_cli.py <cmd>`): `watch`, `github-hook`, `onboard`, `netmap`, `netwatch`, `netaudit`, and a `scan` that additionally accepts `--branch` — not yet ported to the `cyphex` binary.
+**Legacy** (`python3 cyphex_cli.py <cmd>`): `watch`, `github-hook`, `onboard`, `netmap`, `netwatch`, `netaudit`, `scan --branch` — not yet ported to the `cyphex` binary.
 
 ---
 
@@ -479,13 +479,13 @@ Notable non-env knobs:
 | `EVOLUTION_PAYLOADS_PER_GEN` | `20` | Payloads bred per generation |
 | `EVOLUTION_CONVERGENCE_THRESHOLD` | `0.99` | Early-stop block rate |
 
-> `config.py` also carries `GROQ_*` / `CEREBRAS_* `/ `AI_BACKEND_MODE` fields for a cloud fallback path. The default is `AI_BACKEND_MODE = "local"` and the documented, tested path is local-only — setting a cloud key sends your code off-box.
+> `config.py` also carries `GROQ_*`/`CEREBRAS_*`/`AI_BACKEND_MODE` for a cloud fallback path. Default is `AI_BACKEND_MODE = "local"`; a cloud key sends your code off-box.
 
 ---
 
 ## Using CYPHEX in CI
 
-The immune benchmark is the piece designed as a gate — it exits non-zero if recall drops below 80% or FPR climbs above 10%:
+The immune benchmark is the gate — exits non-zero if recall drops below 80% or FPR climbs above 10%:
 
 ```yaml
 - name: Immune-system regression gate
@@ -499,7 +499,7 @@ The immune benchmark is the piece designed as a gate — it exits non-zero if re
     sarif_file: results.sarif
 ```
 
-Use `--no-patch` in CI. A full patching run needs Ollama with pulled models and takes ~18 minutes; `--judge` gives you a deterministic artifact set if you want to diff scan-over-scan.
+Use `--no-patch` in CI — a full patching run needs Ollama and ~18 minutes. `--judge` gives deterministic artifacts for diffing scan-over-scan.
 
 ---
 
@@ -544,9 +544,9 @@ pytest                      # 136 tests, ~7s
 pytest -m integration       # slow tests that drive real local models (needs Ollama)
 ```
 
-Integration tests are excluded by default via `addopts = "-m 'not integration'"` in `pyproject.toml`. They are excluded for a reason: `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
+Integration tests are excluded by default (`addopts = "-m 'not integration'"`) — `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
 
-The Verify Gate tests are the ones worth reading if you want to understand the system's guarantees — they are mutation-checked, meaning each of the gate's invariants was deliberately broken to confirm the suite catches it.
+The Verify Gate tests are worth reading to understand the system's guarantees — mutation-checked, meaning each invariant was deliberately broken to confirm the suite catches it.
 
 ---
 
@@ -559,7 +559,7 @@ The Verify Gate tests are the ones worth reading if you want to understand the s
 | Scan finds nothing on a real repo | Check `cyphex doctor` for Semgrep. Without it you're on the 16 built-in regex rulesets only |
 | Every patch comes back UNVERIFIABLE | The re-scan or syntax check couldn't run — usually missing `node` for a JS target. Install Node 18+ |
 | Patches are slow | Expected: ~18 min for a full patching run on 7B/8B. Use `--no-patch` to scan only |
-| RASP telemetry never reaches the daemon | `CYPHEX_API_KEY` must be identical on both sides, and the vendored RASP copy must be the current `sdks/node/cyphex-rasp.js` (older copies send no `X-API-Key`) |
+| RASP telemetry never reaches the daemon | `CYPHEX_API_KEY` must match on both sides; use the current `sdks/node/cyphex-rasp.js` (older copies send no `X-API-Key`) |
 | RASP reports no `file:line` | It's mounted globally. Mount per-route to get an app frame on the stack |
 | Sandbox deploy fails | Docker missing or the target needs its own Dockerfile. CYPHEX falls back to a resource-capped subprocess |
 | `pytest` hangs | You ran integration tests. Default `pytest` excludes them |
@@ -569,17 +569,17 @@ The Verify Gate tests are the ones worth reading if you want to understand the s
 ## What CYPHEX Can't Do (Yet)
 
 - **Not a substitute for human review or a formal pentest.** It's a fast, verified first pass.
-- **A full run with patching takes ~18 minutes** on a laptop with 7B/8B models. Most of that is LLM latency.
+- **A full run takes ~18 minutes** on 7B/8B models — mostly LLM latency.
 - **Nuclei/ZAP and the DeepAgents never run in the same scan** — `--deepagents` replaces them.
-- **The built-in static scanner is regex-based**: 16 rulesets, broad but shallow. Semgrep does the deep work wherever it's installed. Confidence scoring trims the obvious false positives but is itself heuristic — a finding marked "test file" can still be real.
-- **`p/owasp-top-ten` needs one online fetch** before Semgrep can serve it from cache. Genuinely air-gapped runs need a local `cyphex/semgrep_rules.yml`; none is bundled.
+- **The built-in scanner is regex-based** (16 rulesets, broad but shallow); Semgrep does the deep work. Confidence scoring is itself heuristic — a "test file" mark can still be real.
+- **`p/owasp-top-ten` needs one online fetch** before caching. Air-gapped runs need a local `cyphex/semgrep_rules.yml`; none bundled.
 - **Only 4 CWEs have deterministic templates** (89, 78, 798, 942). Everything else goes through the LLM path, with the variance that implies.
 - **Sandbox deployment is strongest on Node/Express** targets; other stacks may need your own Dockerfile. The RASP shield is **Express-only** today.
 - **Benchmark numbers come from a 76-sample corpus.** Directional, not certified.
-- **Hardware detection keys off GPU VRAM.** A machine with no detectable GPU reports 0 GB and `cyphex doctor` will flag it; the `--mode` override is declared but not yet read by the engine.
-- **Known gaps in the patch applier**: its own path-containment guard is currently inert because the CLI does not pass `source_dir` (containment is still enforced a layer up, at patch resolution), and a legacy **non-atomic** write path is still used when the v2 patcher is unavailable. Atomic writes also replace the file via `os.replace`, so a patched file **loses its original permission bits and any hard links**.
-- **No bracket-balance guard in the applier.** The council *prompt* instructs the model to preserve net brace depth, but nothing enforces it — an orphaned brace is caught one step later by `node --check`, which then auto-rolls-back.
-- **Older RASP copies vendored into a target app predate daemon auth** — they send no `X-API-Key`, so the daemon silently drops their telemetry. Always take the current `sdks/node/cyphex-rasp.js`.
+- **Hardware detection keys off GPU VRAM** — no GPU reports 0 GB; `--mode` override is declared but unread by the engine.
+- **Applier gaps**: its path-containment guard is inert (CLI doesn't pass `source_dir`; enforced a layer up instead), a legacy non-atomic write path exists as fallback, and atomic writes via `os.replace` drop original permission bits and hard links.
+- **No bracket-balance guard in the applier** — the council prompt asks for balanced braces, nothing enforces it; `node --check` catches the damage and auto-rolls-back.
+- **Older vendored RASP copies predate daemon auth** — no `X-API-Key`, telemetry silently dropped. Use the current `sdks/node/cyphex-rasp.js`.
 
 ---
 
@@ -599,13 +599,13 @@ The Verify Gate tests are the ones worth reading if you want to understand the s
 
 ## Security & Ethics
 
-- **Local-first AI.** Every model call goes to your own Ollama at `127.0.0.1:11434`. No cloud LLM, no LLM API key, no billing — your source, findings and patches are only ever sent to that local model.
-- **Not network-isolated, though.** Deploying a target runs `npm install` / `pip install` / `docker build` against public registries; `cyphex setup` downloads Semgrep and Nuclei; the optional cognee extra fetches a tokenizer from HuggingFace on first use; and the opt-in `github-hook` mode pushes a fix branch and opens a PR via `api.github.com` with your `GITHUB_TOKEN`. **That PR flow is the only path that sends your code off-box** — everything else stays local. For an air-gapped run, pre-warm those caches and leave those features off.
-- **Offense goes wherever you point it.** `cyphex scan <path>` and `--repo` attack only the sandboxed copy of your app. But `cyphex scan http://…` and `/net <cidr>` attack the host or range you name **directly, with no sandbox and no built-in authorization check** — only use them against systems you own or are contractually permitted to test.
-- **Hardened against the code it scans.** `npm install --ignore-scripts` blocks install-time RCE from a malicious `postinstall`; the sandbox environment is an explicit allow-list (never `os.environ.copy()`) so a scanned app can't read your tokens; archives are extracted with path-traversal guards and a 1 GB zip-bomb cap; the target is force-rebound to `127.0.0.1` so a deliberately-vulnerable app is never exposed to the LAN.
-- **Quiet by default.** Nuclei runs with `-duc -ni` (no update check, no out-of-band interactsh callbacks), Semgrep with `--metrics=off` and never `--config auto` (which would upload project metadata to semgrep.dev on every run). The local API binds `127.0.0.1` and compares tokens with `hmac.compare_digest`.
-- **Fail-closed patching.** Symlinked targets refused, line ranges validated before splicing, atomic temp-file + `os.replace` writes, auto-rollback on syntax failure, HMAC-signed genome caches. *(See [limitations](#what-cyphex-cant-do-yet) for where this isn't yet airtight.)*
-- **Graceful degradation.** Missing Docker / scikit-learn / Semgrep / Nuclei → CYPHEX degrades and tells you, rather than crashing.
+- **Local-first AI** — every model call hits your own Ollama at `127.0.0.1:11434`. No cloud LLM, no API key, no billing.
+- **Not network-isolated** — deploy runs `npm`/`pip`/`docker build` against public registries; `cyphex setup` downloads Semgrep/Nuclei; cognee fetches a tokenizer from HuggingFace once; `github-hook` pushes a PR via `api.github.com`. Only that PR flow sends code off-box; air-gapped runs should pre-warm caches and skip it.
+- **Offense goes wherever you point it** — `cyphex scan <path>`/`--repo` stay sandboxed, but `scan http://…` and `/net <cidr>` attack the target **directly, no sandbox, no authorization check**. Only use against systems you're permitted to test.
+- **Hardened against the code it scans** — `npm install --ignore-scripts` blocks postinstall RCE; env is an explicit allow-list (never `os.environ.copy()`); archives get path-traversal guards + a 1 GB zip-bomb cap; the target is force-rebound to `127.0.0.1`.
+- **Quiet by default** — Nuclei with `-duc -ni`, Semgrep with `--metrics=off` and never `--config auto`. Local API binds `127.0.0.1`, compares tokens with `hmac.compare_digest`.
+- **Fail-closed patching** — symlinks refused, line ranges validated, atomic writes, auto-rollback on syntax failure, HMAC-signed genome caches. *(See [limitations](#what-cyphex-cant-do-yet) for gaps.)*
+- **Graceful degradation** — missing Docker / scikit-learn / Semgrep / Nuclei → CYPHEX degrades and tells you, rather than crashing.
 
 ---
 
