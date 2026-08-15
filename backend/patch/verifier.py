@@ -292,7 +292,11 @@ def _rescan_file(location, vuln, source_dir: str) -> Optional[bool]:
         return None  # Can't verify — caller must mark UNVERIFIABLE, never PASS
 
     try:
-        findings = run_static_analysis(source_dir)
+        # flag_comments=False: the scanner normally treats a match inside a
+        # comment as a false positive, but here that would let a patch which
+        # merely comments the vulnerable line out register as "finding gone".
+        # Verification sees commented matches; ordinary scans do not.
+        findings = run_static_analysis(source_dir, flag_comments=False)
     except Exception:
         return None  # Scanner error — can't determine, never PASS
 

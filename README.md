@@ -15,7 +15,7 @@
 <p align="center">
   <a href="#-quick-start">Quick Start</a> · <a href="#-what-a-scan-actually-does">Sample Run</a> ·
   <a href="#-the-verify-gate">Verify Gate</a> · <a href="#-how-it-works--the-8-step-pipeline">Pipeline</a> ·
-  <a href="#-usage">Usage</a> · <a href="#️-what-cyphex-cant-do-yet">Limitations</a> ·
+  <a href="#-usage">Usage</a> · <a href="#-what-cyphex-cant-do-yet">Limitations</a> ·
   <a href="CYPHEX_PRD.md">Full Docs (PRD)</a>
 </p>
 
@@ -118,7 +118,7 @@ A **FAIL** verdict is **rolled back** to the original bytes. An **UNVERIFIABLE**
 | # | Waypoint | What happens |
 |---|---|---|
 | 1 | **Get Source** | Copy/clone the target into a per-scan sandbox copy; detect framework. Clone URLs are restricted to `https://` / `git@` / `ssh://`. |
-| 2 | **Static Analysis** | Semgrep (`--metrics=off`) **+** a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — **merged and de-duplicated**. |
+| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) **+** a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — **merged and de-duplicated**, then [confidence-scored](#-false-positive-scoring) to drop the obvious false positives. |
 | 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port published on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
 | 3b | **Network Scan** *(opt)* | Host/port sweep + per-device network genome. |
 | 4 | **Dynamic Scan** | Crawler + API discovery, then **either** the built-in agent suite with Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — the two paths are mutually exclusive. A multi-model council then debates the findings and drops the false positives. |
@@ -126,6 +126,22 @@ A **FAIL** verdict is **rolled back** to the original bytes. An **UNVERIFIABLE**
 | 6 | **Attack Arena** | BEFORE/AFTER defence demo — defence rate plus false positives on benign traffic. |
 | 7 | **Security Report** | The AI council writes it; a **second model fact-checks** it for invented findings. |
 | 8 | **Patch + Verify + Score** | Per vuln: **patch-memory cache** → deterministic **template** → **council** (LLM generates, multiple models vote, prompted with Vectorless-RAG + Knowledge-Tree context) → **[Verify Gate](#-the-verify-gate)** → before/after posture score from PASS-verified fixes only. |
+
+### 🎯 False-positive scoring
+
+Every static finding carries a `confidence` (0.0–1.0) and, when it's been marked down, a `fp_reason`. Semgrep hits start at 0.90, built-in regex hits at 0.85. Three rules move the number:
+
+| Signal | Effect |
+|---|---|
+| SQL call is already parameterised (`?` / `$1` / params array / `prepare(`) | dropped outright — on **every** path |
+| Match sits inside a code comment | confidence 0.0, dropped from scans |
+| File is test / fixture / mock code | −0.45, kept but marked |
+
+The first two are asymmetric on purpose, and the asymmetry is what keeps the Verify Gate honest. A patch that parameterises a query *must* read as "finding gone", so that suppression applies during verification too. A patch that merely **comments the vulnerable line out** must *not* — so the verifier re-scans with comment-matching switched back on, and commenting-out is scored as still-vulnerable and rolled back.
+
+On the bundled `vuln-webapp` this removes 2 Critical false positives, both of which were the scanner matching its own English prose: `query (should` inside `// Safe: parameterized query (should NOT be flagged)`.
+
+Semgrep never runs with `--config auto`, which uploads project metadata to semgrep.dev on every run and cannot be cached. CYPHEX prefers a local `cyphex/semgrep_rules.yml` if you drop one in (fully offline), else the static `p/owasp-top-ten` pack, which Semgrep caches locally after the first fetch.
 
 ---
 
@@ -235,7 +251,8 @@ cyphex                                  # no args → slash-command workspace (a
 - **Not a substitute for human review or a formal pentest.** It's a fast, verified first pass.
 - **A full run with patching takes ~18 minutes** on a laptop with 7B/8B models. Most of that is LLM latency.
 - **Nuclei/ZAP and the DeepAgents never run in the same scan** — `--deepagents` replaces them.
-- **The built-in static scanner is regex-based**: 16 rulesets, broad but shallow. Semgrep does the deep work wherever it's installed.
+- **The built-in static scanner is regex-based**: 16 rulesets, broad but shallow. Semgrep does the deep work wherever it's installed. Confidence scoring trims the obvious false positives but is itself heuristic — a finding marked "test file" can still be real.
+- **`p/owasp-top-ten` needs one online fetch** before Semgrep can serve it from cache. Genuinely air-gapped runs need a local `cyphex/semgrep_rules.yml`; none is bundled.
 - **Sandbox deployment is strongest on Node/Express** targets; other stacks may need your own Dockerfile. The RASP shield is **Express-only** today.
 - **Benchmark numbers come from a 76-sample corpus.** Directional, not certified.
 - **Hardware detection keys off GPU VRAM.** A machine with no detectable GPU reports 0 GB and `cyphex doctor` will flag it; the `--mode` override is declared but not yet read by the engine.
@@ -264,8 +281,8 @@ cyphex                                  # no args → slash-command workspace (a
 - **Not network-isolated, though.** Deploying a target runs `npm install` / `pip install` / `docker build` against public registries; `cyphex setup` downloads Semgrep and Nuclei; the optional cognee extra fetches a tokenizer from HuggingFace on first use; and the opt-in `github-hook` mode pushes a fix branch and opens a PR via `api.github.com` with your `GITHUB_TOKEN`. **That PR flow is the only path that sends your code off-box** — everything else stays local. For an air-gapped run, pre-warm those caches and leave those features off.
 - **Offense goes wherever you point it.** `cyphex scan <path>` and `--repo` attack only the sandboxed copy of your app. But `cyphex scan http://…` and `/net <cidr>` attack the host or range you name **directly, with no sandbox and no built-in authorization check** — only use them against systems you own or are contractually permitted to test.
 - **Hardened against the code it scans.** `npm install --ignore-scripts` blocks install-time RCE from a malicious `postinstall`; the sandbox environment is an explicit allow-list (never `os.environ.copy()`) so a scanned app can't read your tokens; archives are extracted with path-traversal guards and a 1 GB zip-bomb cap; the target is force-rebound to `127.0.0.1` so a deliberately-vulnerable app is never exposed to the LAN.
-- **Quiet by default.** Nuclei runs with `-duc -ni` (no update check, no out-of-band interactsh callbacks), Semgrep with `--metrics=off`. The local API binds `127.0.0.1` and compares tokens with `hmac.compare_digest`.
-- **Fail-closed patching.** Symlinked targets refused, line ranges validated before splicing, atomic temp-file + `os.replace` writes, auto-rollback on syntax failure, HMAC-signed genome caches. *(See [limitations](#️-what-cyphex-cant-do-yet) for where this isn't yet airtight.)*
+- **Quiet by default.** Nuclei runs with `-duc -ni` (no update check, no out-of-band interactsh callbacks), Semgrep with `--metrics=off` and never `--config auto` (which would upload project metadata to semgrep.dev on every run). The local API binds `127.0.0.1` and compares tokens with `hmac.compare_digest`.
+- **Fail-closed patching.** Symlinked targets refused, line ranges validated before splicing, atomic temp-file + `os.replace` writes, auto-rollback on syntax failure, HMAC-signed genome caches. *(See [limitations](#-what-cyphex-cant-do-yet) for where this isn't yet airtight.)*
 - **Graceful degradation.** Missing Docker / scikit-learn / Semgrep / Nuclei → CYPHEX degrades and tells you, rather than crashing.
 
 ---

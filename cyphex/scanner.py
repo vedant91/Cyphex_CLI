@@ -33,6 +33,8 @@ class StaticFinding:
     message: str
     fix_hint: str = ""
     source: str = "builtin"  # "semgrep" | "builtin"
+    confidence: float = 0.85  # 0.0 = almost certainly a false positive, 1.0 = certain
+    fp_reason: str = ""       # Why confidence was lowered, if it was
 
 
 # ══════════════════════════════════════════════════════════════
@@ -50,19 +52,44 @@ def semgrep_available() -> bool:
     return shutil.which("semgrep") is not None
 
 
-def run_semgrep(source_dir: str, config: str = "auto") -> list[StaticFinding]:
+def _semgrep_config() -> str:
+    """
+    Pick the Semgrep ruleset, preferring the least network-dependent option.
+
+    The ladder matters for a local-first tool:
+      1. `semgrep_rules.yml` next to this module — fully offline, nothing fetched.
+      2. `p/owasp-top-ten` — a static registry pack. Fetched once, then served
+         from Semgrep's local cache on every later run.
+      3. Never `auto`: it uploads project metadata to semgrep.dev to pick rules,
+         and it does so on *every* run, so it can't be cached or run offline.
+    """
+    local_rules = os.path.join(os.path.dirname(__file__), "semgrep_rules.yml")
+    return local_rules if os.path.exists(local_rules) else "p/owasp-top-ten"
+
+
+def run_semgrep(source_dir: str, config: Optional[str] = None) -> list[StaticFinding]:
     """
     Run Semgrep scan and return normalized findings.
-    Uses 'auto' config (5000+ rules across 30+ languages).
+
+    `config` defaults to the offline-preferring ruleset from _semgrep_config().
     """
+    config = config or _semgrep_config()
     try:
         # --metrics=off keeps this a local-first tool (no telemetry phone-home).
-        cmd = ["semgrep", "--config", config, "--json", "--quiet", "--timeout", "120", "--metrics=off"]
+        # --no-git-ignore scans files the target's .gitignore would hide; real
+        # source is sometimes gitignored, and Semgrep's own .semgrepignore still
+        # excludes node_modules and friends.
+        flags = ["--json", "--quiet", "--timeout", "120", "--metrics=off", "--no-git-ignore"]
         if os.name == "nt":
-            wsl_path = subprocess.run(["wsl", "wslpath", "-a", source_dir], capture_output=True, text=True).stdout.strip()
-            cmd = ["wsl", "semgrep", "--config", config, "--json", "--quiet", "--timeout", "120", "--metrics=off", wsl_path]
+            wsl_path = subprocess.run(
+                ["wsl", "wslpath", "-a", source_dir],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            if not wsl_path:
+                return []  # WSL path conversion failed — caller falls back to built-in
+            cmd = ["wsl", "semgrep", "--config", config, *flags, wsl_path]
         else:
-            cmd.append(source_dir)
+            cmd = ["semgrep", "--config", config, *flags, source_dir]
 
         result = subprocess.run(
             cmd,
@@ -100,6 +127,7 @@ def run_semgrep(source_dir: str, config: str = "auto") -> list[StaticFinding]:
                 message=r.get("extra", {}).get("message", ""),
                 fix_hint=metadata.get("fix", ""),
                 source="semgrep",
+                confidence=0.90,  # Semgrep's curated rules are higher-precision than our regexes
             ))
         return findings
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
@@ -591,15 +619,137 @@ def _get_language_for_file(file_path: str) -> Optional[str]:
     return None
 
 
-def run_builtin_scan(source_dir: str) -> list[StaticFinding]:
+# ── False-positive confidence scoring ────────────────────────────────
+# Every built-in finding carries a confidence. Findings scoring at or below
+# FP_DROP_THRESHOLD are dropped from ordinary scans.
+#
+# One rule deliberately does NOT depend on the threshold: an already
+# parameterised SQL call is skipped outright, on every path including patch
+# verification. That is load-bearing — when a patch fixes a SQLi by adding
+# placeholders, the re-scan has to read the finding as *gone*, or the Verify
+# Gate would roll back a correct fix.
+#
+# Comment matches are the mirror image: they are dropped from ordinary scans
+# (a commented-out example query is not a vulnerability) but the verifier
+# re-scans with flag_comments=False, so a patch that merely comments the
+# vulnerable line out can never masquerade as a fix.
+FP_DROP_THRESHOLD = 0.15
+
+# Path segments marking test/fixture code — a real match, but far lower stakes.
+_TEST_PATH_MARKERS = ("/test/", "/tests/", "/__tests__/", "/fixtures/",
+                      "/mocks/", ".test.", ".spec.")
+
+# Line prefixes meaning the regex matched inside a comment.
+_COMMENT_PREFIXES = ("//", "#", "*", "/*", '"""', "'''")
+
+# Proof a SQL call is already parameterised.
+_PARAMETERISED_SQL = (
+    r'(?:query|execute|raw|find)\s*\([^)]+,\s*\[',                            # query(sql, [v])
+    r'(?:query|execute|raw)\s*\([^)]+,\s*(?:params|values|args|bindings)\b',  # query(sql, params)
+    r'prepare\s*\(',                                                          # prepared statement
+    r'\?\s*[,)\]]',                                                           # ? placeholder
+    r'\$\d+',                                                                 # $1 (PostgreSQL)
+)
+
+
+def _score_line(
+    line: str,
+    line_num: int,
+    lines: list,
+    rule: dict,
+    is_test_file: bool,
+    flag_comments: bool,
+) -> Optional[tuple]:
+    """
+    Score one rule hit. Returns (confidence, fp_reason), or None when the hit
+    should be dropped outright regardless of threshold.
+    """
+    stripped = line.strip()
+
+    # An already-parameterised SQL call is safe — drop unconditionally.
+    if rule["cwe"] == "CWE-89":
+        # Current line + next 2. Deliberately narrow: a wider window lets an
+        # unrelated prepared statement nearby mask a real injection.
+        context = line
+        for offset in range(1, 3):
+            if line_num - 1 + offset < len(lines):
+                context += " " + lines[line_num - 1 + offset]
+        if any(re.search(p, context, re.IGNORECASE) for p in _PARAMETERISED_SQL):
+            return None
+
+    confidence = 0.85
+    fp_reason = ""
+
+    if flag_comments and stripped.startswith(_COMMENT_PREFIXES):
+        confidence = 0.0
+        fp_reason = "Pattern match is inside a code comment"
+    elif is_test_file:
+        confidence -= 0.45
+        fp_reason = "Pattern in test/fixture file"
+
+    return confidence, fp_reason
+
+
+def _scan_lines(
+    lines: list,
+    lang: str,
+    rel_path: str,
+    *,
+    min_confidence: float,
+    flag_comments: bool,
+) -> list[StaticFinding]:
+    """
+    Apply every rule for `lang` to `lines`. Shared by the directory walk and
+    the single-file path so the two can never drift apart on which findings
+    they suppress — the patch verifier depends on that agreement.
+    """
+    is_test_file = any(m in rel_path.replace("\\", "/") for m in _TEST_PATH_MARKERS)
+    out = []
+    for line_num, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        for rule in LANGUAGE_PATTERNS[lang]["rules"]:
+            if not re.search(rule["pattern"], line, re.IGNORECASE):
+                continue
+
+            scored = _score_line(line, line_num, lines, rule, is_test_file, flag_comments)
+            if scored is None:
+                continue
+            confidence, fp_reason = scored
+            if confidence <= min_confidence:
+                continue
+
+            out.append(StaticFinding(
+                rule_id=rule["id"],
+                name=rule["name"],
+                severity=rule["severity"],
+                cwe=rule["cwe"],
+                file_path=rel_path,
+                line_number=line_num,
+                code_snippet=line.strip()[:120],
+                message=f"{rule['name']} detected in {lang}",
+                fix_hint=rule.get("fix_hint", ""),
+                source="builtin",
+                confidence=confidence,
+                fp_reason=fp_reason,
+            ))
+    return out
+
+
+def run_builtin_scan(
+    source_dir: str,
+    min_confidence: float = FP_DROP_THRESHOLD,
+    flag_comments: bool = True,
+) -> list[StaticFinding]:
     """
     Run the built-in regex scanner across all supported files.
-    Falls back to this when Semgrep is not installed.
+    Runs alongside Semgrep; also the sole scanner when Semgrep is absent.
     """
     findings = []
     skip_dirs = {
         "node_modules", ".git", "__pycache__", "venv", ".venv",
         "dist", "build", ".next", "target", "vendor", "Pods",
+        ".cyphex", "sandboxes", "workdir", "sessions",
     }
 
     for root, dirs, files in os.walk(source_dir):
@@ -618,48 +768,11 @@ def run_builtin_scan(source_dir: str) -> list[StaticFinding]:
             except (OSError, IOError):
                 continue
 
-            rules = LANGUAGE_PATTERNS[lang]["rules"]
-            for line_num, line in enumerate(lines, start=1):
-                for rule in rules:
-                    if re.search(rule["pattern"], line, re.IGNORECASE):
-                        # ── False-positive suppression for parameterized queries ──
-                        # If this is a SQLi rule, check whether the call already
-                        # passes a params array (e.g., db.query(sql, [val]) or
-                        # query(sql, params)).  Those are SAFE — skip them.
-                        if rule["cwe"] == "CWE-89":
-                            # Build a multi-line context window (current + next 2 lines)
-                            context_window = line
-                            for offset in range(1, 3):
-                                if line_num - 1 + offset < len(lines):
-                                    context_window += " " + lines[line_num - 1 + offset]
-                            # Patterns that prove parameterised usage:
-                            #   query(sql, [val1, val2])   query(sql, [email])
-                            #   query(sql, params)         query(sql, values)
-                            #   query(`...`, [val])        execute(sql, [val])
-                            param_patterns = [
-                                r'(?:query|execute|raw)\s*\([^,]+,\s*\[',        # second arg is array literal [...]
-                                r'(?:query|execute|raw)\s*\([^,]+,\s*(?:params|values|args|bindings)\b',  # named params
-                            ]
-                            is_parameterised = any(
-                                re.search(pp, context_window, re.IGNORECASE)
-                                for pp in param_patterns
-                            )
-                            if is_parameterised:
-                                continue  # Safe — already parameterised, skip finding
-
-                        rel_path = os.path.relpath(fpath, source_dir)
-                        findings.append(StaticFinding(
-                            rule_id=rule["id"],
-                            name=rule["name"],
-                            severity=rule["severity"],
-                            cwe=rule["cwe"],
-                            file_path=rel_path,
-                            line_number=line_num,
-                            code_snippet=line.strip()[:120],
-                            message=f"{rule['name']} detected in {lang}",
-                            fix_hint=rule.get("fix_hint", ""),
-                            source="builtin",
-                        ))
+            findings.extend(_scan_lines(
+                lines, lang, os.path.relpath(fpath, source_dir),
+                min_confidence=min_confidence,
+                flag_comments=flag_comments,
+            ))
 
     # Deduplicate (same rule + same file + same line)
     seen = set()
@@ -673,18 +786,27 @@ def run_builtin_scan(source_dir: str) -> list[StaticFinding]:
     return unique
 
 
-def run_static_analysis(source_dir: str) -> list[StaticFinding]:
+def run_static_analysis(
+    source_dir: str,
+    min_confidence: float = FP_DROP_THRESHOLD,
+    flag_comments: bool = True,
+) -> list[StaticFinding]:
     """
     Run static analysis on source code.
     Runs BOTH Semgrep (when available) AND the built-in 20-language scanner and
     returns the UNION (deduped) — the two were previously mutually exclusive, so
     turning Semgrep on silently shrank coverage to just one ruleset.
+
+    The patch verifier calls this with flag_comments=False so that commenting
+    out a vulnerable line cannot read as "finding gone" (see FP_DROP_THRESHOLD).
     """
     findings: list[StaticFinding] = []
     if semgrep_available():
         findings = run_semgrep(source_dir)
 
-    builtin = run_builtin_scan(source_dir)
+    builtin = run_builtin_scan(
+        source_dir, min_confidence=min_confidence, flag_comments=flag_comments
+    )
     seen = {(f.file_path, f.line_number, f.rule_id) for f in findings}
     for b in builtin:
         key = (b.file_path, b.line_number, b.rule_id)
@@ -694,7 +816,12 @@ def run_static_analysis(source_dir: str) -> list[StaticFinding]:
     return findings
 
 
-def scan_single_file(file_path: str, source_dir: Optional[str] = None) -> list[StaticFinding]:
+def scan_single_file(
+    file_path: str,
+    source_dir: Optional[str] = None,
+    min_confidence: float = FP_DROP_THRESHOLD,
+    flag_comments: bool = True,
+) -> list[StaticFinding]:
     """
     Scan exactly one file (used by the patch verifier for scoped re-scans).
 
@@ -718,22 +845,11 @@ def scan_single_file(file_path: str, source_dir: Optional[str] = None) -> list[S
                     lines = f.readlines()
             except (OSError, IOError):
                 return []
-            rules = LANGUAGE_PATTERNS[lang]["rules"]
-            for line_num, line in enumerate(lines, start=1):
-                for rule in rules:
-                    if re.search(rule["pattern"], line, re.IGNORECASE):
-                        findings.append(StaticFinding(
-                            rule_id=rule["id"],
-                            name=rule["name"],
-                            severity=rule["severity"],
-                            cwe=rule["cwe"],
-                            file_path=file_path,
-                            line_number=line_num,
-                            code_snippet=line.strip()[:120],
-                            message=f"{rule['name']} detected in {lang}",
-                            fix_hint=rule.get("fix_hint", ""),
-                            source="builtin",
-                        ))
+            findings = _scan_lines(
+                lines, lang, file_path,
+                min_confidence=min_confidence,
+                flag_comments=flag_comments,
+            )
 
     # Normalize file_path relative to source_dir for stable comparisons.
     if source_dir:
