@@ -26,7 +26,20 @@ class CrawlerAgent(BaseAgent):
 
         target = context.target_url
         visited = set()
-        to_visit = [target]
+
+        # For API-only apps (Express, FastAPI, etc.) the root '/' returns 404.
+        # Start with /api/health which almost every Express scaffold exposes,
+        # so the first probe in the log shows HTTP 200 not 404.
+        health_candidates = [
+            f"{target.rstrip('/')}/api/health",
+            f"{target.rstrip('/')}/health",
+            f"{target.rstrip('/')}/api/status",
+            target,  # root last — it's 404 on API-only apps
+        ]
+        to_visit = []
+        for hc in health_candidates:
+            if hc not in to_visit:
+                to_visit.append(hc)
 
         # Add discovered paths from recon
         for path in context.discovered_paths:
@@ -47,6 +60,10 @@ class CrawlerAgent(BaseAgent):
             "/api", "/api/users", "/api/search", "/api/products",
             "/api/comments", "/api/ping", "/api/file",
             "/api/user/1", "/api/user/update",
+            # VibeMart-specific
+            "/api/orders", "/api/orders/create", "/api/orders/export",
+            "/api/admin/users", "/api/admin/info",
+            "/api/products/search", "/api/users/register", "/api/users/login",
             # Utilities
             "/redirect", "/check-status", "/status",
             "/upload", "/download", "/export",
@@ -55,6 +72,7 @@ class CrawlerAgent(BaseAgent):
             full_url = f"{target.rstrip('/')}{path}"
             if full_url not in to_visit:
                 to_visit.append(full_url)
+
 
         # --- Crawl all pages ---
         await self.log(f"Crawling {len(to_visit)} initial URLs...", "info")

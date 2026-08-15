@@ -92,12 +92,17 @@ async def run_nuclei(
     try:
         proc = await asyncio.to_thread(
             subprocess.run, cmd,
-            capture_output=True, text=True, timeout=timeout,
+            # Use errors='replace' to prevent Windows cp1252 codec crashes
+            # that kill the reader thread and leave proc.stdout as None.
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=timeout,
             stdin=subprocess.DEVNULL  # Prevent interactive prompts
         )
 
         findings = []
-        stdout = proc.stdout.strip()
+        # Guard: proc.stdout can be None if the reader thread crashed (Windows encoding)
+        stdout = (proc.stdout or "").strip()
         if not stdout:
             return findings
 
@@ -130,6 +135,10 @@ async def run_nuclei(
         print(f"  [DAST] Nuclei timed out after {timeout}s — no findings returned")
         return []
     except FileNotFoundError:
+        return []
+    except Exception as e:
+        # Catch-all: encoding errors, permission errors, etc.
+        print(f"  [DAST] Nuclei error: {e!r} — skipping")
         return []
 
 
