@@ -1,0 +1,4 @@
+Approach,Remediation_Time_Min,Syntax_Accuracy_Pct
+Manual Patching,180.0,98.0
+Raw AI Assistant,15.0,62.0
+CYPHEX Pipeline,1.5,100.0

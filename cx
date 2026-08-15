@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# cx — CYPHEX interactive launcher
+# Place this in /usr/local/bin/cx or add the project directory to PATH.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_EXEC="$SCRIPT_DIR/.venv/bin/python3"
+
+# Fallback to system python if venv python doesn't exist (e.g. not set up yet)
+if [ ! -f "$PYTHON_EXEC" ]; then
+    PYTHON_EXEC="python3"
+fi
+
+cd "$SCRIPT_DIR" && source .venv/bin/activate 2>/dev/null || true
+exec "$PYTHON_EXEC" "$SCRIPT_DIR/cx.py" "$@"

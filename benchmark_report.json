@@ -1,0 +1,118 @@
+{
+  "threshold": 0.5,
+  "total": 76,
+  "attacks": 46,
+  "benign": 30,
+  "confusion": {
+    "tp": 42,
+    "fp": 1,
+    "tn": 29,
+    "fn": 4
+  },
+  "precision": 0.9767,
+  "recall": 0.913,
+  "f1": 0.9438,
+  "accuracy": 0.9342,
+  "fpr": 0.0333,
+  "per_class": [
+    {
+      "class": "crlf",
+      "detected": 1,
+      "total": 1,
+      "rate": 1.0
+    },
+    {
+      "class": "ldapi",
+      "detected": 1,
+      "total": 1,
+      "rate": 1.0
+    },
+    {
+      "class": "nosqli",
+      "detected": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    {
+      "class": "ssrf",
+      "detected": 5,
+      "total": 5,
+      "rate": 1.0
+    },
+    {
+      "class": "ssti",
+      "detected": 4,
+      "total": 4,
+      "rate": 1.0
+    },
+    {
+      "class": "xss",
+      "detected": 8,
+      "total": 8,
+      "rate": 1.0
+    },
+    {
+      "class": "xxe",
+      "detected": 2,
+      "total": 2,
+      "rate": 1.0
+    },
+    {
+      "class": "cmdi",
+      "detected": 6,
+      "total": 7,
+      "rate": 0.8571428571428571
+    },
+    {
+      "class": "path_traversal",
+      "detected": 4,
+      "total": 5,
+      "rate": 0.8
+    },
+    {
+      "class": "sqli",
+      "detected": 8,
+      "total": 10,
+      "rate": 0.8
+    }
+  ],
+  "misses": [
+    {
+      "payload": "admin'--",
+      "label": "sqli",
+      "score": 0.3
+    },
+    {
+      "payload": "\" OR \"\"=\"",
+      "label": "sqli",
+      "score": 0.30000000000000004
+    },
+    {
+      "payload": "| whoami",
+      "label": "cmdi",
+      "score": 0.0
+    },
+    {
+      "payload": "..\\..\\..\\windows\\system32\\config\\sam",
+      "label": "path_traversal",
+      "score": 0.4
+    }
+  ],
+  "false_positives": [
+    {
+      "payload": "Our A/B test showed variant 1 = 1 conversion lift",
+      "score": 0.7
+    }
+  ],
+  "gates": {
+    "min_recall": 0.8,
+    "max_fpr": 0.1,
+    "passed": true
+  },
+  "corpus": "CYPHEX Immune System \u2014 Web-Attack Payload Benchmark v1",
+  "endpoint": "/search",
+  "elapsed_ms": 3.1,
+  "per_sample_ms": 0.04,
+  "sklearn_active": true,
+  "detector": "BehavioralGenome (heuristic + IsolationForest)"
+}

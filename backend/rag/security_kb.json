@@ -1,0 +1,179 @@
+{
+  "kb_version": "1.0.0",
+  "source": "OWASP Cheat Sheets + CWE Mitre",
+  "last_updated": "2026-06-14",
+  "entries": {
+    "CWE-89": {
+      "name": "SQL Injection",
+      "description": "User input concatenated into SQL queries allows attackers to modify query logic",
+      "fix_strategies": [
+        {
+          "name": "Parameterized Query",
+          "description": "Replace string concatenation/template literals with parameterized placeholders",
+          "pattern": "db.query(\"SELECT * FROM users WHERE id = ?\", [userId])",
+          "applies_to": ["mysql", "mysql2", "pg", "sqlite3", "better-sqlite3"]
+        },
+        {
+          "name": "ORM Method",
+          "description": "Use ORM's built-in methods instead of raw SQL",
+          "pattern": "User.findOne({ where: { id: userId } })",
+          "applies_to": ["sequelize", "typeorm", "prisma", "mongoose"]
+        },
+        {
+          "name": "Input Validation + Cast",
+          "description": "Validate and cast input to expected type before use",
+          "pattern": "const id = parseInt(req.params.id, 10); if (isNaN(id)) return res.status(400).send('Invalid ID');",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["string concatenation with user input", "template literals with ${req.body}", "string formatting with %s or f-strings"]
+    },
+    "CWE-79": {
+      "name": "Cross-Site Scripting (XSS)",
+      "description": "User input rendered in HTML without escaping allows script injection",
+      "fix_strategies": [
+        {
+          "name": "Output Encoding",
+          "description": "Escape HTML entities before rendering user content",
+          "pattern": "const safe = escapeHtml(userInput); res.send(`<p>${safe}</p>`);",
+          "applies_to": ["express", "koa", "fastify"]
+        },
+        {
+          "name": "Remove dangerouslySetInnerHTML",
+          "description": "Replace dangerouslySetInnerHTML with text content",
+          "pattern": "<h3>{article.title}</h3>",
+          "applies_to": ["react", "next"]
+        },
+        {
+          "name": "DOMPurify Sanitization",
+          "description": "Sanitize HTML before rendering if HTML is required",
+          "pattern": "const clean = DOMPurify.sanitize(userHtml);",
+          "applies_to": ["react", "vue", "angular"]
+        }
+      ],
+      "anti_patterns": ["res.send(req.query.q)", "innerHTML = userInput", "dangerouslySetInnerHTML={{__html: userInput}}"]
+    },
+    "CWE-78": {
+      "name": "OS Command Injection",
+      "description": "User input passed to shell commands allows arbitrary command execution",
+      "fix_strategies": [
+        {
+          "name": "execFile with Arguments Array",
+          "description": "Use execFile/spawn with args array instead of exec with string interpolation",
+          "pattern": "execFile('ping', ['-c', '1', hostname], callback)",
+          "applies_to": ["child_process", "subprocess"]
+        },
+        {
+          "name": "Input Allowlist",
+          "description": "Validate input against a strict allowlist pattern",
+          "pattern": "if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) return res.status(400).send('Invalid');",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["exec(`ping ${host}`)", "os.system(f'ping {host}')", "shell=True"]
+    },
+    "CWE-22": {
+      "name": "Path Traversal",
+      "description": "User input in file paths allows reading/writing arbitrary files",
+      "fix_strategies": [
+        {
+          "name": "Basename Extraction",
+          "description": "Use only the filename, stripping all path components",
+          "pattern": "const safeName = path.basename(req.params.file);",
+          "applies_to": ["*"]
+        },
+        {
+          "name": "Path Canonicalization",
+          "description": "Resolve the path and verify it's within the allowed directory",
+          "pattern": "const resolved = path.resolve(baseDir, userPath); if (!resolved.startsWith(baseDir)) throw new Error('Access denied');",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["path.join(uploadDir, req.params.file)", "open(f'/data/{filename}')"]
+    },
+    "CWE-798": {
+      "name": "Hardcoded Credentials",
+      "description": "Secrets hardcoded in source code are exposed in version control",
+      "fix_strategies": [
+        {
+          "name": "Environment Variables",
+          "description": "Move secrets to environment variables",
+          "pattern": "const dbPassword = process.env.DB_PASSWORD;",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["password = 'admin123'", "MYSQL_ROOT_PASSWORD: secret", "apiKey: 'sk-...'"]
+    },
+    "CWE-918": {
+      "name": "Server-Side Request Forgery (SSRF)",
+      "description": "User-controlled URLs allow fetching internal resources",
+      "fix_strategies": [
+        {
+          "name": "URL Validation + Private IP Block",
+          "description": "Parse URL and block requests to private/internal IPs",
+          "pattern": "const parsed = new URL(userUrl); const ip = dns.resolve(parsed.hostname); if (isPrivateIP(ip)) throw new Error('Blocked');",
+          "applies_to": ["*"]
+        },
+        {
+          "name": "URL Allowlist",
+          "description": "Only allow requests to known-safe domains",
+          "pattern": "const allowed = ['api.example.com']; if (!allowed.includes(parsed.hostname)) throw new Error('Not allowed');",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["fetch(req.body.url)", "requests.get(user_url)", "axios.get(urlParam)"]
+    },
+    "CWE-942": {
+      "name": "Permissive CORS Policy",
+      "description": "Wildcard CORS allows any origin to access the API",
+      "fix_strategies": [
+        {
+          "name": "Origin Allowlist",
+          "description": "Replace wildcard with specific allowed origins",
+          "pattern": "const allowedOrigins = ['https://app.example.com']; app.use(cors({ origin: allowedOrigins }));",
+          "applies_to": ["express", "fastify", "flask", "django"]
+        }
+      ],
+      "anti_patterns": ["cors({ origin: '*' })", "Access-Control-Allow-Origin: *"]
+    },
+    "CWE-693": {
+      "name": "Missing Security Headers",
+      "description": "Response headers don't include standard security protections",
+      "fix_strategies": [
+        {
+          "name": "Helmet Middleware",
+          "description": "Add helmet or equivalent security headers middleware",
+          "pattern": "const helmet = require('helmet'); app.use(helmet());",
+          "applies_to": ["express"]
+        }
+      ],
+      "anti_patterns": ["no X-Content-Type-Options", "no X-Frame-Options", "no Content-Security-Policy"]
+    },
+    "CWE-614": {
+      "name": "Cookie Without Secure Flag",
+      "description": "Session cookies sent over HTTP can be intercepted",
+      "fix_strategies": [
+        {
+          "name": "Secure Cookie Flags",
+          "description": "Set secure, httpOnly, and sameSite flags on cookies",
+          "pattern": "res.cookie('session', token, { secure: true, httpOnly: true, sameSite: 'strict' });",
+          "applies_to": ["express", "flask", "django"]
+        }
+      ],
+      "anti_patterns": ["res.cookie('session', token)", "secure=False"]
+    },
+    "CWE-287": {
+      "name": "Improper Authentication",
+      "description": "Missing or bypassable authentication checks",
+      "fix_strategies": [
+        {
+          "name": "Authentication Middleware",
+          "description": "Add authentication middleware to protected routes",
+          "pattern": "router.get('/admin', requireAuth, adminController.dashboard);",
+          "applies_to": ["*"]
+        }
+      ],
+      "anti_patterns": ["no auth check before sensitive operation", "direct access to admin endpoints"]
+    }
+  }
+}

@@ -35,6 +35,7 @@ class EvolutionController:
         self.mutation = MutationEngine()
         self.history: list[EvolutionResult] = []
         self.current_generation = 0
+        self._last_generation_results: list[dict] = []  # Actual payloads + verdicts
 
     async def run_evolution(
         self,
@@ -67,8 +68,12 @@ class EvolutionController:
         print(f"  🧬 Payloads per generation: {payloads_per_gen}")
 
         # ─── Build initial genome from scan results ───
+        # Skip if already profiled (the caller may have built or loaded it) so we
+        # don't retrain on normal-only samples and clobber restored/accumulated
+        # adversarial state.
         print("  🔵 BLUE TEAM: Building behavioral genome from scan data...")
-        self.genome.build_from_scan(context)
+        if not self.genome.endpoint_profiles:
+            self.genome.build_from_scan(context)
         print(f"  🔵 Genome profiled {len(self.genome.endpoint_profiles)} endpoints")
 
         # ─── Generate initial attack payloads ───
@@ -205,6 +210,9 @@ class EvolutionController:
             self.genome.state.total_attacks_seen += len(payloads)
             self.genome.state.total_attacks_blocked += len(blocked)
 
+        # Store actual results for next-gen mutation (the evolution fix)
+        self._last_generation_results = blocked + bypassed
+
         return EvolutionResult(
             generation=gen_num,
             payloads_generated=len(payloads),
@@ -219,15 +227,13 @@ class EvolutionController:
     async def _prepare_next_generation(self, result: EvolutionResult) -> list[dict]:
         """
         Prepare payloads for the next generation.
-        Red team mutates blocked payloads to try to evade the evolved genome.
+        Red team mutates blocked payloads AND builds on bypassed payloads
+        (successful evasions breed new evasions).
         """
-        # Collect blocked payloads from the generation
-        blocked_payloads = [
-            p for p in self._get_last_blocked()
-        ]
+        blocked_payloads = self._get_last_blocked()
+        bypassed_payloads = self._get_last_bypassed()
 
-        if not blocked_payloads:
-            # If nothing was blocked, generate fresh payloads
+        if not blocked_payloads and not bypassed_payloads:
             return self.mutation.generate_initial_payloads(count=config.EVOLUTION_PAYLOADS_PER_GEN)
 
         # Determine what features triggered detection
@@ -238,12 +244,20 @@ class EvolutionController:
             "generation": result.generation,
         }
 
-        # Red team mutates
+        # Red team mutates BLOCKED payloads (try to evade detection)
         new_payloads = await self.mutation.mutate_blocked_payloads(
             blocked_payloads[:10], genome_feedback
         )
 
-        # Also add some fresh payloads to keep diversity
+        # ALSO mutate BYPASSED payloads (breed from successful evasions)
+        for bp in bypassed_payloads[:5]:
+            variants = self.mutation.generate_variants(
+                bp.get("payload", ""), count=2,
+                attack_type=bp.get("type", "sqli")
+            )
+            new_payloads.extend(variants)
+
+        # Add some fresh payloads to keep diversity
         fresh = self.mutation.generate_initial_payloads(
             count=max(5, config.EVOLUTION_PAYLOADS_PER_GEN // 4)
         )
@@ -259,29 +273,12 @@ class EvolutionController:
         return new_payloads[:config.EVOLUTION_PAYLOADS_PER_GEN]
 
     def _get_last_blocked(self) -> list[dict]:
-        """Get blocked payloads from last generation (stored in memory)."""
-        # Re-score all known payloads to find currently blocked ones
-        blocked = []
-        for attack_type in ["sqli", "xss", "cmdi"]:
-            bases = {
-                "sqli": self.mutation.SQLI_BASES,
-                "xss": self.mutation.XSS_BASES,
-                "cmdi": self.mutation.CMDI_BASES,
-            }.get(attack_type, [])
+        """Get blocked payloads from last generation (real results, not re-scored)."""
+        return [p for p in self._last_generation_results if p.get("verdict") == "BLOCKED"]
 
-            endpoints = list(self.genome.endpoint_profiles.keys())
-            ep = endpoints[0] if endpoints else "default"
-
-            for payload in bases:
-                score = self.genome.score_request(ep, payload)
-                if score >= config.GENOME_BLOCK_THRESHOLD:
-                    blocked.append({
-                        "payload": payload,
-                        "anomaly_score": score,
-                        "endpoint": ep,
-                        "type": attack_type,
-                    })
-        return blocked
+    def _get_last_bypassed(self) -> list[dict]:
+        """Get bypassed payloads from last generation (used as mutation seeds)."""
+        return [p for p in self._last_generation_results if p.get("verdict") == "BYPASSED"]
 
     def _analyze_triggered_features(self, blocked: list[dict]) -> list[str]:
         """Analyze which detection features triggered blocking."""

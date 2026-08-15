@@ -26,8 +26,22 @@ class CyphexConfig:
     OLLAMA_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5-coder:7b"  # Best coding model you have installed
 
+    # ─── Cross-project patch memory (cognee, optional — pip install ".[memory]") ───
+    COGNEE_LLM_MODEL: str = ""              # Falls back to OLLAMA_MODEL if unset
+    COGNEE_EMBEDDING_MODEL: str = "nomic-embed-text"
+    COGNEE_RECALL_TIMEOUT_S: float = 20.0    # CHUNKS retrieval + cold vector load
+    COGNEE_REMEMBER_TIMEOUT_S: float = 300.0  # cognify() runs an LLM extraction pass;
+                                              # cognee's own Ollama structured-output retry
+                                              # floor is 240s (stop_after_delay), so a 120s
+                                              # budget ALWAYS cancelled cognify mid-pass →
+                                              # empty TimeoutError, nothing persisted. Must
+                                              # exceed 240s. Runs post-remediation, so a
+                                              # larger budget never delays the actual fix.
+                                              # Runs after the patch is applied, so a
+                                              # larger budget never delays remediation.
+
     # ─── Cerebras AI (Cloud — LEGACY, currently broken) ───
-    CEREBRAS_API_KEY: str = "csk-9wd82fm4xkhfrvyjm646848njjhnmfrw4jhcfn6ccyddn5jv"
+    CEREBRAS_API_KEY: str = ""  # Set via CEREBRAS_API_KEY env var
     CEREBRAS_MODEL: str = "llama-3.3-70b"
     CEREBRAS_MAX_TOKENS: int = 4096
     CEREBRAS_API_URL: str = "https://api.cerebras.ai/v1/chat/completions"
@@ -52,6 +66,16 @@ class CyphexConfig:
     IS_WINDOWS: bool = os.name == "nt"
     SHELL: str = "powershell" if os.name == "nt" else "/bin/bash"
 
+    # ─── API Security ───
+    # If empty, API is restricted to localhost clients only.
+    API_AUTH_TOKEN: str = ""
+    API_BIND_HOST: str = "127.0.0.1"
+    API_BIND_PORT: int = 8000
+    API_RELOAD: bool = False
+    # Comma-separated origins, e.g. "http://localhost:5173,http://127.0.0.1:5173"
+    API_CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    MAX_UPLOAD_MB: int = 500
+
     def __post_init__(self):
         # Override from env if available
         self.AI_BACKEND_MODE = os.getenv("AI_BACKEND_MODE", self.AI_BACKEND_MODE)
@@ -59,6 +83,16 @@ class CyphexConfig:
         self.CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", self.CEREBRAS_API_KEY)
         self.OLLAMA_URL = os.getenv("OLLAMA_URL", self.OLLAMA_URL)
         self.OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", self.OLLAMA_MODEL)
+        self.COGNEE_LLM_MODEL = os.getenv("COGNEE_LLM_MODEL", self.COGNEE_LLM_MODEL)
+        self.COGNEE_EMBEDDING_MODEL = os.getenv("COGNEE_EMBEDDING_MODEL", self.COGNEE_EMBEDDING_MODEL)
+        self.COGNEE_RECALL_TIMEOUT_S = float(os.getenv("COGNEE_RECALL_TIMEOUT_S", self.COGNEE_RECALL_TIMEOUT_S))
+        self.COGNEE_REMEMBER_TIMEOUT_S = float(os.getenv("COGNEE_REMEMBER_TIMEOUT_S", self.COGNEE_REMEMBER_TIMEOUT_S))
+
+        # Fall back to the main coding model if no cognee-specific model is set
+        # — users shouldn't be forced into downloading a separate large model
+        # just for this optional feature.
+        if not self.COGNEE_LLM_MODEL:
+            self.COGNEE_LLM_MODEL = self.OLLAMA_MODEL
 
         # Set working dir
         if not self.WORKING_DIR:

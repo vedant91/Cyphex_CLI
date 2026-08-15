@@ -1,8 +1,0 @@
-{"author":"Alice","body":"Great article! Very informative.","date":"2026-04-01","_id":"5XSk8bCzIsSKIqCM"}
-{"author":"Bob","body":"I learned so much from this post.","date":"2026-04-02","_id":"QkfusUsE1bpuEotE"}
-{"author":"cYpH3x","body":"<script>alert('Target2_Stored_XSS_Active')</script>","date":"2026-04-11","_id":"f534oNCzIp4ajAUZ"}
-{"$$deleted":true,"_id":"5XSk8bCzIsSKIqCM"}
-{"$$deleted":true,"_id":"QkfusUsE1bpuEotE"}
-{"$$deleted":true,"_id":"f534oNCzIp4ajAUZ"}
-{"author":"Alice","body":"Great article! Very informative.","date":"2026-04-01","_id":"iONj3mcYFTdGkd46"}
-{"author":"Bob","body":"I learned so much from this post.","date":"2026-04-02","_id":"Sab7tmoub19EiSvF"}

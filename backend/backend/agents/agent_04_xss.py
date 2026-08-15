@@ -10,6 +10,7 @@ Tests for XSS vulnerabilities:
 """
 
 import re
+import shlex
 from urllib.parse import quote
 
 from agents.base_agent import BaseAgent
@@ -40,6 +41,11 @@ class XSSAgent(BaseAgent):
 
     # Unique canary for detection
     CANARY = "cYpH3x_X55"
+
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
 
     async def run(self, context: ScanContext) -> AgentResult:
         await self.log("═══ XSS TESTING ═══", "info")
@@ -87,8 +93,9 @@ class XSSAgent(BaseAgent):
         """Run dalfox XSS scanner."""
         for form in context.all_forms[:5]:
             await self.log(f"Running dalfox on {form.action}...", "info")
+            action_q = self._q(form.action)
             out = await self.terminal.run(
-                f'dalfox url "{form.action}" '
+                f'dalfox url {shlex.quote(form.action)} '
                 f'--silence --no-color --timeout 10',
                 timeout=60,
             )
@@ -115,17 +122,20 @@ class XSSAgent(BaseAgent):
                     else:
                         data_parts.append(f"{inp}=test")
                 data_str = "&".join(data_parts)
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
 
                 if form.method.upper() == "POST":
                     out = await self.terminal.run(
-                        f'curl -s -X POST "{form.action}" '
-                        f'-d "{data_str}" '
+                        f'curl -s -X POST {shlex.quote(form.action)} '
+                        f'-d {shlex.quote(data_str)} '
                         f'--max-time 10'
                     )
                 else:
                     url = f"{form.action}?{data_str}"
+                    url_q = self._q(url)
                     out = await self.terminal.run(
-                        f'curl -s --max-time 10 "{url}"'
+                        f'curl -s --max-time 10 {shlex.quote(url)}'
                     )
 
                 if not out.stdout:
@@ -165,8 +175,9 @@ class XSSAgent(BaseAgent):
         """Test a URL parameter for reflected XSS."""
         for payload, ptype in self.XSS_PAYLOADS[:5]:
             test_url = f"{param.url}?{param.name}={quote(payload, safe='')}"
+            test_url_q = self._q(test_url)
             out = await self.terminal.run(
-                f'curl -s --max-time 10 "{test_url}"'
+                f'curl -s --max-time 10 {shlex.quote(test_url)}'
             )
 
             if out.stdout and payload in out.stdout:
@@ -204,8 +215,9 @@ class XSSAgent(BaseAgent):
         ]
 
         for url, page_data in context.sitemap.items():
+            url_q = self._q(url)
             out = await self.terminal.run(
-                f'curl -sL --max-time 10 "{url}"'
+                f'curl -sL --max-time 10 {shlex.quote(url)}'
             )
             if not out.stdout:
                 continue
@@ -260,11 +272,13 @@ class XSSAgent(BaseAgent):
                 else:
                     data_parts.append(f"{inp}=test_cyphex")
             data_str = "&".join(data_parts)
+            action_q = self._q(form.action)
+            data_q = self._q(data_str)
 
             # Step 1: Submit the stored payload (don't follow redirect)
             await self.terminal.run(
-                f'curl -s -X POST "{form.action}" '
-                f'-d "{data_str}" '
+                f'curl -s -X POST {shlex.quote(form.action)} '
+                f'-d {shlex.quote(data_str)} '
                 f'--max-time 10'
             )
 
@@ -286,8 +300,9 @@ class XSSAgent(BaseAgent):
                     display_url = f"{context.target_url.rstrip('/')}{display_url}"
 
             if display_url:
+                display_url_q = self._q(display_url)
                 out2 = await self.terminal.run(
-                    f'curl -sL --max-time 10 "{display_url}"'
+                    f'curl -sL --max-time 10 {shlex.quote(display_url)}'
                 )
                 if out2.stdout and self.CANARY in out2.stdout:
                     await self.add_vuln(Vuln(
@@ -316,8 +331,9 @@ class XSSAgent(BaseAgent):
             url = f"{context.target_url.rstrip('/')}{path}"
 
             # First check if admin page is publicly accessible (BAC)
+            url_q = self._q(url)
             out = await self.terminal.run(
-                f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 "{url}"'
+                f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 {shlex.quote(url)}'
             )
             body = out.stdout or ""
             status = "000"
@@ -363,8 +379,9 @@ class XSSAgent(BaseAgent):
                 for param_name in params:
                     xss_payload = '<script>alert(1)</script>'
                     test_url = f"{url}?{param_name}={quote(xss_payload, safe='')}"
+                    test_url_q = self._q(test_url)
                     out2 = await self.terminal.run(
-                        f'curl -s --max-time 5 "{test_url}"'
+                        f'curl -s --max-time 5 {shlex.quote(test_url)}'
                     )
                     if out2.stdout and xss_payload in out2.stdout:
                         await self.add_vuln(Vuln(

@@ -10,6 +10,7 @@ Tests for:
 """
 
 import re
+import shlex
 from urllib.parse import quote
 
 from agents.base_agent import BaseAgent
@@ -18,6 +19,11 @@ from models.agent_result import AgentResult
 
 
 class LogicAgent(BaseAgent):
+
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
 
     async def run(self, context: ScanContext) -> AgentResult:
         await self.log("═══ BUSINESS LOGIC TESTING ═══", "info")
@@ -79,8 +85,9 @@ class LogicAgent(BaseAgent):
             for test_id in [1, 2, 3]:
                 url = f"{context.target_url.rstrip('/')}" + \
                       pattern.replace("{id}", str(test_id))
+                url_q = self._q(url)
                 out = await self.terminal.run(
-                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 "{url}"'
+                    f"curl -s -w '\\n__STATUS__%{{http_code}}' --max-time 5 {url_q}"
                 )
 
                 body = out.stdout
@@ -122,8 +129,9 @@ class LogicAgent(BaseAgent):
                     test_url = endpoint.replace(
                         f"/{current_id}", f"/{test_id}"
                     )
+                    test_url_q = self._q(test_url)
                     out = await self.terminal.run(
-                        f'curl -s --max-time 5 "{test_url}"'
+                        f"curl -s --max-time 5 {test_url_q}"
                     )
                     if out.stdout and len(out.stdout) > 50:
                         if any(kw in out.stdout.lower() for kw in [
@@ -154,14 +162,15 @@ class LogicAgent(BaseAgent):
         for path in ["/api/user/update", "/api/profile", "/api/settings",
                      "/api/register", "/api/signup"]:
             url = f"{context.target_url.rstrip('/')}{path}"
+            url_q = self._q(url)
+            json_q = self._q('{"username":"test","role":"admin","is_admin":true,"admin":1,"privilege":"superuser"}')
 
             # Try sending privileged fields with JSON
             out = await self.terminal.run(
-                f'curl -s -X POST "{url}" '
-                f'-H "Content-Type: application/json" '
-                f'-d \'{{"username":"test","role":"admin","is_admin":true,'
-                f'"admin":1,"privilege":"superuser"}}\' '
-                f'--max-time 10'
+                f"curl -s -X POST {url_q} "
+                f"-H 'Content-Type: application/json' "
+                f"-d {json_q} "
+                f"--max-time 10"
             )
 
             if out.stdout and any(kw in out.stdout.lower() for kw in [
@@ -188,10 +197,11 @@ class LogicAgent(BaseAgent):
                 "admin=1", "privilege=superuser"
             ])
             data_str = "&".join(data_parts)
+            action_q = self._q(form.action)
+            data_q = self._q(data_str)
 
             out = await self.terminal.run(
-                f'curl -s -X POST "{form.action}" '
-                f'-d "{data_str}" --max-time 10'
+                f"curl -s -X POST {action_q} -d {data_q} --max-time 10"
             )
 
             if out.stdout and "admin" in out.stdout.lower():
@@ -243,8 +253,9 @@ class LogicAgent(BaseAgent):
         for param in url_params:
             for payload, target_name in ssrf_payloads:
                 url = f"{param.url}?{param.name}={quote(payload)}"
+                url_q = self._q(url)
                 out = await self.terminal.run(
-                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 "{url}"'
+                    f"curl -s -w '\\n__STATUS__%{{http_code}}' --max-time 5 {url_q}"
                 )
 
                 body = out.stdout
@@ -308,10 +319,9 @@ class LogicAgent(BaseAgent):
 
     async def _test_cors(self, context: ScanContext):
         """Test for CORS misconfiguration."""
+        target_q = self._q(context.target_url)
         out = await self.terminal.run(
-            f'curl -s -I '
-            f'-H "Origin: https://evil-cyphex.com" '
-            f'--max-time 5 "{context.target_url}"'
+            f"curl -s -I -H 'Origin: https://evil-cyphex.com' --max-time 5 {target_q}"
         )
 
         if "evil-cyphex" in out.stdout:
@@ -344,12 +354,13 @@ class LogicAgent(BaseAgent):
 
         for path in restricted_paths[:3]:
             url = f"{context.target_url.rstrip('/')}{path}"
+            url_q = self._q(url)
 
             # Try different HTTP methods
             for method in ["PUT", "DELETE", "PATCH", "OPTIONS"]:
                 out = await self.terminal.run(
-                    f'curl -s -X {method} -o /dev/null '
-                    f'-w "%{{http_code}}" --max-time 5 "{url}"'
+                    f"curl -s -X {self._q(method)} -o /dev/null "
+                    f"-w '%{{http_code}}' --max-time 5 {url_q}"
                 )
                 status = out.stdout.strip().replace("'", "")
                 if status == "200":

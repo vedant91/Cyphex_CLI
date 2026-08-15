@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyphex v3 Architecture Flow</title>
+    <!-- Load Mermaid JS -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            background-color: #11111b; /* Dark background matching terminal theme */
+            color: #cdd6f4;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #cba6f7;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .mermaid {
+            background-color: #181825;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            max-width: 1200px;
+            width: 100%;
+        }
+    </style>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'dark',
+            securityLevel: 'loose',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+    </script>
+</head>
+<body>
+
+    <h1>Cyphex v3: Autonomous Security Pipeline</h1>
+    <p style="color: #a6adc8; margin-bottom: 20px;">with Cognee Graph Memory & Oracle Reasoning</p>
+
+    <div class="mermaid">
+        graph TD
+            %% Define Styles (Cyberpunk / Catppuccin inspired)
+            classDef init fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4,rx:5px,ry:5px
+            classDef sast fill:#1e1e2e,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4,rx:5px,ry:5px
+            classDef dast fill:#1e1e2e,stroke:#f38ba8,stroke-width:2px,color:#cdd6f4,rx:5px,ry:5px
+            classDef mem fill:#11111b,stroke:#f9e2af,stroke-width:3px,color:#f9e2af,rx:10px,ry:10px,stroke-dasharray: 5 5
+            classDef ai fill:#1e1e2e,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4,rx:5px,ry:5px
+            
+            %% Start Node
+            Start[🚀 Start Scan <br> Target URL & Source]:::init
+            
+            %% Phase 1
+            subgraph P1 [PHASE 1: Initialization & RAG]
+                Index[CodeIndexer <br> Build AST & Routes]:::sast
+                KB[Load Security KB <br> to Cognee]:::mem
+                Session[Load Past Session <br> Lessons]:::mem
+            end
+            
+            %% Phase 2
+            subgraph P2 [PHASE 2: SAST Static Analysis]
+                Static[Regex & AST Analysis]:::sast
+                StaticVulns[Extract File <br> Vulnerabilities]:::sast
+            end
+            
+            %% Phase 3
+            subgraph P3 [PHASE 3: DAST Agents]
+                A2[Agent 02: Crawler]:::dast
+                A2b[Agent 02b: API Discovery]:::dast
+                A3_14[Agents 03-14: <br> Attack Simulation]:::dast
+            end
+            
+            %% Phase 4
+            subgraph P4 [PHASE 4: Cognee Graph Memory]
+                C_Write[remember: Write <br> Endpoints & Vulns]:::mem
+                C_Graph[cognify: Build <br> Knowledge Graph]:::mem
+                C_Read[recall: Query <br> Context]:::mem
+            end
+            
+            %% Phase 5
+            subgraph P5 [PHASE 5: Oracle Reasoning]
+                Council[Agent Council <br> Filter False Positives]:::ai
+                Patcher[Oracle Patcher <br> 16 Cognitive Archs]:::ai
+                Gen[Generate Secure Code]:::ai
+                Reg[Regression Testing]:::ai
+            end
+            
+            %% End Node
+            End[✅ Final Report <br> & Graph Persisted]:::init
+
+            %% Edges connecting the flow
+            Start --> Index
+            Start --> KB
+            Start --> Session
+            
+            Index --> Static
+            Static --> StaticVulns
+            
+            Index --> A2b
+            
+            A2 --> C_Write
+            A2b --> C_Write
+            C_Write --> C_Graph
+            C_Graph --> C_Read
+            
+            C_Read -.->|Injects Targets| A3_14
+            A3_14 --> C_Write
+            
+            StaticVulns --> Council
+            A3_14 --> Council
+            
+            Council --> Patcher
+            C_Read -.->|Injects Fix Patterns| Patcher
+            Session -.->|Injects Past Lessons| Patcher
+            Index -.->|Injects File Context| Patcher
+            
+            Patcher --> Gen
+            Gen --> Reg
+            Reg --> End
+    </div>
+
+</body>
+</html>

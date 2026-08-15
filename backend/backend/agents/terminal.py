@@ -132,6 +132,39 @@ class AgentTerminal:
         start_time = time.time()
 
         try:
+            # --- CYPLEX VIRTUAL SUBSYSTEM (CVS) INTERCEPTION ---
+            # Attempt to execute the command natively via pure Python first
+            from backend.backend.agents.cvs_shell import execute_cvs_command
+            cvs_result = await execute_cvs_command(command, self.working_dir, timeout)
+            if cvs_result.get("handled", False):
+                duration_ms = (time.time() - start_time) * 1000
+                stdout_text = cvs_result.get("stdout", "")
+                stderr_text = cvs_result.get("stderr", "")
+                
+                for line in stdout_text.splitlines():
+                    self._print_output(line, "stdout")
+                    await log_queue.put({
+                        "type": "terminal_log",
+                        "agent_name": self.agent_name,
+                        "command": command,
+                        "stdout": line,
+                        "success": True
+                    })
+                for line in stderr_text.splitlines():
+                    self._print_output(line, "stderr")
+                    
+                result = TerminalOutput(
+                    command=command,
+                    stdout=stdout_text,
+                    stderr=stderr_text,
+                    exit_code=cvs_result.get("exit_code", 0),
+                    duration_ms=round(duration_ms, 2),
+                    timestamp=datetime.now(),
+                )
+                self.command_history.append(result)
+                return result
+            # ---------------------------------------------------
+
             if config.IS_WINDOWS:
                 # Windows + Uvicorn: asyncio.create_subprocess_shell raises
                 # NotImplementedError because Uvicorn forces SelectorEventLoop.

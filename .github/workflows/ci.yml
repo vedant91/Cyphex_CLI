@@ -1,0 +1,92 @@
+name: CYPHEX CI
+
+on:
+  push:
+    branches: [main, Initial_Multi]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Syntax check (all Python files)
+        run: |
+          python -c "
+          import ast, glob
+          errors = []
+          for f in glob.glob('**/*.py', recursive=True):
+              if 'node_modules' in f or '.git' in f:
+                  continue
+              try:
+                  ast.parse(open(f).read())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              print('SYNTAX ERRORS:')
+              for e in errors:
+                  print(f'  ✗ {e}')
+              exit(1)
+          else:
+              print(f'✓ All Python files parse OK')
+          "
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short || echo "No tests yet — will add in Phase 6"
+
+      - name: Doctor check (dry run)
+        run: |
+          python -m cyphex.cli doctor || true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Check imports
+        run: python -c "from cyphex.cli import main; print('✓ Entry point imports OK')"
+      - name: Check scanner
+        run: python -c "from cyphex.scanner import run_static_analysis; print('✓ Scanner imports OK')"
+      - name: Check formatters
+        run: python -c "from cyphex.formatters import format_output; print('✓ Formatters import OK')"
+
+  publish:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

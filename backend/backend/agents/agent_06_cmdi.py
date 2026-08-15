@@ -9,6 +9,7 @@ Tests for:
 """
 
 import re
+import shlex
 from urllib.parse import quote
 
 from agents.base_agent import BaseAgent
@@ -43,6 +44,11 @@ class CMDiAgent(BaseAgent):
         ("${7*7}", "49", "Spring EL"),
     ]
 
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
+
     async def run(self, context: ScanContext) -> AgentResult:
         await self.log("═══ COMMAND INJECTION & SSTI TESTING ═══", "info")
 
@@ -71,8 +77,9 @@ class CMDiAgent(BaseAgent):
         for path in ["/api/ping", "/ping", "/api/exec", "/api/system"]:
             for param_name in ["host", "ip", "cmd", "target"]:
                 url = f"{context.target_url.rstrip('/')}{path}"
+                probe_url = f"{url}?{param_name}=test"
                 out = await self.terminal.run(
-                    f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 "{url}?{param_name}=test"'
+                    f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(probe_url)}'
                 )
                 status = out.stdout.strip().replace("'", "")
                 if status not in ["404", "000"]:
@@ -106,9 +113,11 @@ class CMDiAgent(BaseAgent):
                 continue
             data_str = "&".join(f"{k}=test" for k in form.inputs)
             await self.log(f"Running commix on {form.action}...", "info")
+            url_q = self._q(form.action)
+            data_q = self._q(data_str)
             out = await self.terminal.run(
-                f'python3 /opt/commix/commix.py --url="{form.action}" '
-                f'--data="{data_str}" --batch --level=2',
+                f'python3 /opt/commix/commix.py --url={shlex.quote(form.action)} '
+                f'--data={shlex.quote(data_str)} --batch --level=2',
                 timeout=90,
             )
             if "command injection" in out.stdout.lower():
@@ -133,15 +142,18 @@ class CMDiAgent(BaseAgent):
                     else:
                         data_parts.append(f"{inp}=test")
                 data_str = "&".join(data_parts)
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
 
                 if form.method.upper() == "POST":
                     out = await self.terminal.run(
-                        f'curl -s -X POST "{form.action}" '
-                        f'-d "{data_str}" --max-time 10'
+                        f'curl -s -X POST {shlex.quote(form.action)} '
+                        f'-d {shlex.quote(data_str)} --max-time 10'
                     )
                 else:
+                    get_url = f"{form.action}?{data_str}"
                     out = await self.terminal.run(
-                        f'curl -s --max-time 10 "{form.action}?{data_str}"'
+                        f'curl -s --max-time 10 {shlex.quote(get_url)}'
                     )
 
                 if self._is_cmdi_confirmed(out.stdout, expected_cmd):
@@ -164,9 +176,10 @@ class CMDiAgent(BaseAgent):
         for payload, expected_cmd in self.CMDI_PAYLOADS[:6]:
             encoded = quote(payload, safe="")
             url = f"{param.url}?{param.name}={encoded}"
+            url_q = self._q(url)
 
             out = await self.terminal.run(
-                f'curl -s --max-time 10 "{url}"'
+                f'curl -s --max-time 10 {shlex.quote(url)}'
             )
 
             if self._is_cmdi_confirmed(out.stdout, expected_cmd):
@@ -217,15 +230,18 @@ class CMDiAgent(BaseAgent):
                     else:
                         data_parts.append(f"{inp}=test")
                 data_str = "&".join(data_parts)
+                action_q = self._q(form.action)
+                data_q = self._q(data_str)
 
                 if form.method.upper() == "POST":
                     out = await self.terminal.run(
-                        f'curl -s -X POST "{form.action}" '
-                        f'-d "{data_str}" --max-time 10'
+                        f'curl -s -X POST {shlex.quote(form.action)} '
+                        f'-d {shlex.quote(data_str)} --max-time 10'
                     )
                 else:
+                    get_url = f"{form.action}?{data_str}"
                     out = await self.terminal.run(
-                        f'curl -s --max-time 10 "{form.action}?{data_str}"'
+                        f'curl -s --max-time 10 {shlex.quote(get_url)}'
                     )
 
                 if out.stdout and expected in out.stdout:
@@ -277,10 +293,13 @@ class CMDiAgent(BaseAgent):
             else:
                 data_parts.append(f"{inp}=test")
         data_str = "&".join(data_parts)
+        action_q = self._q(form.action)
+        method_q = self._q(form.method)
+        data_q = self._q(data_str)
 
         out = await self.terminal.run(
-            f'curl -s -X {form.method} "{form.action}" '
-            f'-d "{data_str}" --max-time 10'
+            f'curl -s -X {shlex.quote(form.method)} {shlex.quote(form.action)} '
+            f'-d {shlex.quote(data_str)} --max-time 10'
         )
 
         if out.stdout and ("uid=" in out.stdout or "root:" in out.stdout):

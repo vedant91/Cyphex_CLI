@@ -12,6 +12,7 @@ Tests for auth vulnerabilities:
 import re
 import json
 import base64
+import shlex
 from urllib.parse import quote
 
 from agents.base_agent import BaseAgent
@@ -36,6 +37,11 @@ class AuthAgent(BaseAgent):
         ("admin", "P@ssw0rd"),
     ]
 
+    @staticmethod
+    def _q(value: str) -> str:
+        """Shell-quote untrusted values before embedding in terminal commands."""
+        return shlex.quote(str(value))
+
     async def run(self, context: ScanContext) -> AgentResult:
         await self.log("═══ AUTHENTICATION TESTING ═══", "info")
 
@@ -48,7 +54,7 @@ class AuthAgent(BaseAgent):
             for path in ["/api/login", "/login", "/auth/login", "/api/auth/login"]:
                 url = f"{context.target_url.rstrip('/')}{path}"
                 out = await self.terminal.run(
-                    f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 "{url}"'
+                    f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(url)}'
                 )
                 status = out.stdout.strip().replace("'", "")
                 if status not in ["404", "000"]:
@@ -121,9 +127,10 @@ class AuthAgent(BaseAgent):
         )
 
         for username, password in self.DEFAULT_CREDS:
+            data_str = f"{username_field}={username}&{password_field}={password}"
             out = await self.terminal.run(
-                f'curl -s -X POST "{form.action}" '
-                f'-d "{username_field}={username}&{password_field}={password}" '
+                f'curl -s -X POST {shlex.quote(form.action)} '
+                f'-d {shlex.quote(data_str)} '
                 f'-H "Content-Type: application/x-www-form-urlencoded" '
                 f'--max-time 10'
             )
@@ -161,10 +168,14 @@ class AuthAgent(BaseAgent):
         parsed = urlparse(form.action)
 
         await self.log("Running hydra brute force...", "info")
+        # Build the hydra "path:params:condition" argument as a single token
+        # before quoting — hydra expects it as one positional argument.
+        hydra_form_arg = f"{parsed.path}:username=^USER^&password=^PASS^:Invalid"
         out = await self.terminal.run(
             f"hydra -l admin -P /usr/share/wordlists/rockyou.txt "
-            f"-s {parsed.port or 80} {parsed.hostname} http-post-form "
-            f'"{parsed.path}:username=^USER^&password=^PASS^:Invalid" '
+            f"-s {shlex.quote(str(parsed.port or 80))} "
+            f"{shlex.quote(parsed.hostname or '')} http-post-form "
+            f"{shlex.quote(hydra_form_arg)} "
             f"-t 16 -I -f -V",
             timeout=60,
         )
@@ -211,12 +222,23 @@ class AuthAgent(BaseAgent):
                     # Decode header
                     header_b64 = parts[0] + "=" * (4 - len(parts[0]) % 4)
                     header = json.loads(base64.b64decode(header_b64))
-                    await self.log(f"  JWT Header: {header}", "info")
+                    # Log only non-sensitive structure (alg/typ), never the
+                    # full decoded header, to avoid leaking token internals.
+                    await self.log(
+                        f"  JWT Header: alg={header.get('alg')!r} "
+                        f"typ={header.get('typ')!r}",
+                        "info",
+                    )
 
                     # Decode payload
                     payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
                     payload = json.loads(base64.b64decode(payload_b64))
-                    await self.log(f"  JWT Payload: {payload}", "warning")
+                    # Log only claim KEYS, never claim values (may contain
+                    # PII, session identifiers, or other secrets).
+                    await self.log(
+                        f"  JWT Payload claims present: {sorted(payload.keys())}",
+                        "warning",
+                    )
 
                     # Check for weak algorithm
                     if header.get("alg") in ["none", "None", "NONE"]:
@@ -251,10 +273,11 @@ class AuthAgent(BaseAgent):
         # Test forged token against protected endpoints
         for path in ["/api/admin", "/admin", "/api/users", "/dashboard"]:
             url = f"{context.target_url.rstrip('/')}{path}"
+            auth_header = f"Authorization: Bearer {forged_token}"
             out = await self.terminal.run(
                 f'curl -s '
-                f'-H "Authorization: Bearer {forged_token}" '
-                f'--max-time 10 "{url}"'
+                f'-H {shlex.quote(auth_header)} '
+                f'--max-time 10 {shlex.quote(url)}'
             )
 
             if out.stdout and any(kw in out.stdout.lower() for kw in [
@@ -289,9 +312,10 @@ class AuthAgent(BaseAgent):
         test_users = ["admin", "administrator", "root", "nonexistent_xyz_999"]
 
         for user in test_users:
+            data_str = f"{username_field}={user}&{password_field}=wrongpass123"
             out = await self.terminal.run(
-                f'curl -s -X POST "{form.action}" '
-                f'-d "{username_field}={user}&{password_field}=wrongpass123" '
+                f'curl -s -X POST {shlex.quote(form.action)} '
+                f'-d {shlex.quote(data_str)} '
                 f'-w "\\n__TIME__%{{time_total}}" '
                 f'--max-time 10'
             )
@@ -332,10 +356,11 @@ class AuthAgent(BaseAgent):
         # Send 10 rapid requests
         blocked = False
         for i in range(10):
+            data_str = f"{username_field}=admin&{password_field}=wrong{i}"
             out = await self.terminal.run(
                 f'curl -s -o /dev/null -w "%{{http_code}}" '
-                f'-X POST "{form.action}" '
-                f'-d "{username_field}=admin&{password_field}=wrong{i}" '
+                f'-X POST {shlex.quote(form.action)} '
+                f'-d {shlex.quote(data_str)} '
                 f'--max-time 5'
             )
             status = out.stdout.strip().replace("'", "")
@@ -362,8 +387,9 @@ class AuthAgent(BaseAgent):
             for test_id in [1, 2, 3]:
                 path = path_template.replace("{id}", str(test_id))
                 url = f"{context.target_url.rstrip('/')}{path}"
+                url_q = self._q(url)
                 out = await self.terminal.run(
-                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 "{url}"'
+                    f'curl -s -w "\\n__STATUS__%{{http_code}}" --max-time 5 {shlex.quote(url)}'
                 )
 
                 body = out.stdout

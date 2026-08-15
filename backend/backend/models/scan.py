@@ -83,6 +83,7 @@ class Vuln:
     attack_chain: str = ""
     business_impact: str = ""
     fix: str = ""
+    cwe: str = ""
 
     def to_dict(self) -> dict:
         d = {

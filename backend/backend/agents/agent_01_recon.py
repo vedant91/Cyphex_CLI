@@ -11,6 +11,7 @@ Performs initial target fingerprinting:
 """
 
 import re
+import shlex
 from urllib.parse import urlparse
 
 from agents.base_agent import BaseAgent
@@ -32,7 +33,7 @@ class ReconAgent(BaseAgent):
         # ─── 1. Grab HTTP headers ───
         await self.log("Fetching HTTP headers...", "info")
         out = await self.terminal.run(
-            f'curl -sI -L --max-redirs 5 --max-time 10 "{target}"'
+            f'curl -sI -L --max-redirs 5 --max-time 10 {shlex.quote(target)}'
         )
         if out.success:
             context.headers = self._parse_headers(out.stdout)
@@ -44,7 +45,7 @@ class ReconAgent(BaseAgent):
         # ─── 2. Grab full homepage for fingerprinting ───
         await self.log("Fetching homepage for fingerprinting...", "info")
         out = await self.terminal.run(
-            f'curl -sL --max-time 15 "{target}"'
+            f'curl -sL --max-time 15 {shlex.quote(target)}'
         )
         if out.success:
             self._fingerprint_from_html(out.stdout, context)
@@ -62,8 +63,9 @@ class ReconAgent(BaseAgent):
         ]
 
         for path in sensitive_paths:
+            probe_url = f"{target}{path}"
             out = await self.terminal.run(
-                f'curl -so /dev/null -w "%{{http_code}}" --max-time 5 "{target}{path}"'
+                f'curl -so /dev/null -w "%{{http_code}}" --max-time 5 {shlex.quote(probe_url)}'
             )
             status = out.stdout.strip().replace("'", "")
             if status in ["200", "301", "302", "403"]:
@@ -75,7 +77,7 @@ class ReconAgent(BaseAgent):
                     if path in ["/.env", "/.git/HEAD", "/robots.txt",
                                 "/phpinfo.php", "/.aws/credentials"]:
                         content_out = await self.terminal.run(
-                            f'curl -sL --max-time 5 "{target}{path}"'
+                            f'curl -sL --max-time 5 {shlex.quote(probe_url)}'
                         )
                         if content_out.success:
                             await self._analyze_sensitive_file(
@@ -89,7 +91,8 @@ class ReconAgent(BaseAgent):
         if has_nmap:
             await self.log("Running nmap service scan...", "info")
             out = await self.terminal.run(
-                f"nmap -sV --script=http-headers -p {port} {host} -T4",
+                f"nmap -sV --script=http-headers -p {shlex.quote(str(port))} "
+                f"{shlex.quote(host)} -T4",
                 timeout=60,
             )
             if out.success:
@@ -102,7 +105,8 @@ class ReconAgent(BaseAgent):
         if has_gobuster:
             await self.log("Running directory brute-force...", "info")
             out = await self.terminal.run(
-                f'gobuster dir -u {target} -w /usr/share/wordlists/dirb/common.txt '
+                f'gobuster dir -u {shlex.quote(target)} '
+                f'-w /usr/share/wordlists/dirb/common.txt '
                 f'-t 30 -q --no-error',
                 timeout=90,
             )
@@ -279,9 +283,33 @@ class ReconAgent(BaseAgent):
                     f"Secrets found: {', '.join(secrets_found) if secrets_found else 'potential sensitive data'}"
                 ),
                 confirmed=True,
-                evidence=content[:300],
+                evidence=self._redact_evidence(content),
                 fix=f"Block access to {path}. Rotate all exposed credentials.",
             ))
+
+    def _redact_evidence(self, content: str, max_len: int = 150) -> str:
+        """
+        Truncate and mask sensitive file content before it is stored as
+        Vuln.evidence (which flows into reports/UI). Never persist raw
+        credential bytes — only enough structure to prove the finding.
+        """
+        snippet = content[:max_len]
+
+        redaction_patterns = [
+            r"AKIA[0-9A-Z]{16}",
+            r"(?:DB_PASS|DB_PASSWORD|DATABASE_PASSWORD)\s*[=:]\s*\S+",
+            r"(?:JWT_SECRET|SECRET_KEY)\s*[=:]\s*\S+",
+            r"(?:API_KEY|STRIPE_SK|sk_live_)\S*\s*[=:]?\s*\S+",
+            r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?"
+            r"-----END (?:RSA |EC )?PRIVATE KEY-----",
+            r"(?:password|passwd|pwd)\s*[=:]\s*[\"']?[^\s\"']+",
+        ]
+        for pattern in redaction_patterns:
+            snippet = re.sub(pattern, "[REDACTED]", snippet, flags=re.IGNORECASE)
+
+        if len(content) > max_len:
+            snippet += " ... [TRUNCATED]"
+        return snippet
 
     def _parse_nmap(self, output: str, context: ScanContext):
         """Parse nmap output to update context."""

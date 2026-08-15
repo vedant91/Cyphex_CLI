@@ -1,0 +1,149 @@
+{
+  "scan_id": "cli_82a5c0f4",
+  "timestamp": "2026-06-13T20:48:05.149713+00:00",
+  "score": 14,
+  "summary": {
+    "critical": 2,
+    "high": 16,
+    "medium": 1,
+    "low": 0,
+    "total_vulns": 19,
+    "duration_seconds": 214.8
+  },
+  "target": "http://localhost:61389",
+  "vulnerabilities": [
+    {
+      "name": "[STATIC] XSS (Cross-Site Scripting)",
+      "severity": "High",
+      "endpoint": "app_standalone.js:144",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Hardcoded Secrets",
+      "severity": "High",
+      "endpoint": "app_standalone.js:30",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Hardcoded Secrets",
+      "severity": "High",
+      "endpoint": "app_standalone.js:271",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Missing Auth",
+      "severity": "High",
+      "endpoint": "app_standalone.js:285",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] JWT Weak Secret",
+      "severity": "High",
+      "endpoint": "app_standalone.js:30",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] IDOR (Insecure Direct Object Reference)",
+      "severity": "High",
+      "endpoint": "app_standalone.js:165",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] SSRF (Server-Side Request Forgery)",
+      "severity": "High",
+      "endpoint": "app_standalone.js:262",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] SQL Injection",
+      "severity": "Critical",
+      "endpoint": "app.js:405",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] XSS (Cross-Site Scripting)",
+      "severity": "High",
+      "endpoint": "app.js:267",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Hardcoded Secrets",
+      "severity": "High",
+      "endpoint": "app.js:160",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Hardcoded Secrets",
+      "severity": "High",
+      "endpoint": "app.js:431",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Missing Auth",
+      "severity": "High",
+      "endpoint": "app.js:447",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] JWT Weak Secret",
+      "severity": "High",
+      "endpoint": "app.js:160",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] IDOR (Insecure Direct Object Reference)",
+      "severity": "High",
+      "endpoint": "app.js:295",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] SSRF (Server-Side Request Forgery)",
+      "severity": "High",
+      "endpoint": "app.js:419",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] Container Running as Root",
+      "severity": "Medium",
+      "endpoint": "Dockerfile:20",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] XSS via innerHTML",
+      "severity": "High",
+      "endpoint": "app_standalone.js:144",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] XSS via innerHTML",
+      "severity": "High",
+      "endpoint": "app.js:267",
+      "payload": "",
+      "confirmed": false
+    },
+    {
+      "name": "[STATIC] SQL Injection (Template Literal)",
+      "severity": "Critical",
+      "endpoint": "app.js:405",
+      "payload": "",
+      "confirmed": false
+    }
+  ]
+}
