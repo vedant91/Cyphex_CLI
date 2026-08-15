@@ -54,13 +54,35 @@ async def test_cold_start_recall_returns_empty_list(tmp_path, monkeypatch):
     assert hits == []
 
 
+def test_project_id_is_stable_and_distinct():
+    """Cross-project memory only works if project identity is stable per repo
+    and distinct between repos. Pure hashing — no models, no I/O."""
+    a1 = cm.project_id_for("https://github.com/example/project-a.git", "")
+    a2 = cm.project_id_for("https://github.com/example/project-a.git", "")
+    b = cm.project_id_for("https://github.com/example/project-b.git", "")
+
+    assert a1 == a2
+    assert a1 != b
+
+
+@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_cross_project_recall():
+async def test_cross_project_recall(tmp_path, monkeypatch):
     """
     The actual value proposition: a fix remembered while working on one
     project should be recallable while working on a completely different
     project, for a semantically similar vulnerability.
+
+    Marked `integration` — remember_fix() runs cognee's cognify, which drives a
+    local LLM and can take minutes. Run with `pytest -m integration`.
+
+    The monkeypatch is not optional: without it this writes into the repo's real
+    .cognee_data/, permanently polluting cross-project memory with test
+    fixtures and making later recalls return them.
     """
+    monkeypatch.setattr(cm, "COGNEE_DATA_DIR", str(tmp_path / "cognee_data"))
+    monkeypatch.setattr(cm, "_configured", False)
+
     project_a = cm.project_id_for("https://github.com/example/project-a.git", "")
     project_b = cm.project_id_for("https://github.com/example/project-b.git", "")
     assert project_a != project_b

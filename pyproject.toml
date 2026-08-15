@@ -52,3 +52,10 @@ include = ["cyphex*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Integration tests drive real local models (cognee cognify via Ollama) and take
+# minutes, so `pytest` runs the fast suite by default. Opt in with:
+#   pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+    "integration: hits real local models/stores — slow, needs Ollama running",
+]

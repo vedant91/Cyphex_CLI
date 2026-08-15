@@ -349,7 +349,18 @@ TRANSFORMS: dict[str, dict[str, dict]] = {
     },
     "CWE-942": {
         "generic": {
-            "detect": r'(?:cors|Access-Control-Allow-Origin)\s*[:(]\s*["\']?\*["\']?',
+            # Mirrors the two forms _fix_wildcard_cors actually rewrites. The
+            # previous pattern — `(?:cors|Access-Control-Allow-Origin)\s*[:(]\s*["\']?\*`
+            # — accepted a set of inputs disjoint from the transform's: it matched
+            # `cors: "*"` and raw `Access-Control-Allow-Origin: *`, neither of
+            # which the transform touches, while rejecting `cors({ origin: "*" })`
+            # and `"Access-Control-Allow-Origin", "*"`, which it does. Detect and
+            # transform could therefore never fire on the same input, so this
+            # template returned None for every possible input.
+            "detect": (
+                r'cors\s*\(\s*\{\s*origin\s*:\s*["\']?\*'
+                r'|["\']Access-Control-Allow-Origin["\']\s*,\s*["\']?\*'
+            ),
             "transform": _fix_wildcard_cors,
         },
     },
