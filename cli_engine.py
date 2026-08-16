@@ -1991,9 +1991,42 @@ class CyphexEngine:
             except ImportError:
                 pass  # cyphex package not installed — skip DAST tools
 
+            # ── 13 DeepAgents — Adaptive Oracle-Guided DAST ──────────────────
+            if use_deepagents:
+                print()
+                print(f"  {C.CYAN}{'─'*70}{C.RST}")
+                print(f"  {C.BOLD}{C.CYAN}⬡ DEEPAGENTS  — 13-Agent Autonomous Swarm{C.RST}")
+                print(f"  {C.GHOST}SQLi · XSS · CMDi · Auth · IDOR · SSRF · SSTI · XXE")
+                print(f"  PathTraversal · BusinessLogic · PromptInjection · Race · MassAssign{C.RST}")
+                print(f"  {C.CYAN}{'─'*70}{C.RST}\n")
+                try:
+                    import sys as _sys
+                    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend", "backend"))
+                    from orchestrator import AgentOrchestrator as _DeepOrchestrator
+                    from reasoning.cognee_memory import get_memory as _get_memory
+
+                    _memory = _get_memory(self.scan_id, target_url)
+                    await _memory.initialize()
+
+                    _deep_orch = _DeepOrchestrator(
+                        scan_id=self.scan_id,
+                        target_url=target_url,
+                        source_dir=getattr(self, "source_dir", "") or "",
+                        cognee_memory=_memory,
+                        event_callback=None,
+                    )
+                    context = await _deep_orch.execute_agents(context)
+                    deep_count = len(context.confirmed_vulns)
+                    print(f"\n  {C.G}[DEEPAGENTS][OK]{C.RST} Swarm complete — {deep_count} total confirmed vulns\n")
+                except Exception as _de:
+                    print(f"  {C.Y}[DEEPAGENTS][SKIP]{C.RST} Orchestrator error: {str(_de)[:80]}")
+                    print(f"  {C.DIM}Ensure Ollama is running: ollama serve{C.RST}\n")
+
+
             print(f"\n  {C.G}[SCAN][OK]{C.RST} endpoints={len(context.all_endpoints)} forms={len(forms_found)} vulns={len(context.confirmed_vulns)}")
 
         return context
+
 
     async def _run_network_scan(self) -> None:
         """
