@@ -398,6 +398,10 @@ class AttackOracle:
         self.reasoner = get_reasoner()
 
 
+# Global semaphore to serialize LLM calls and prevent Ollama queue timeouts
+_LLM_SEMAPHORE = asyncio.Semaphore(1)
+
+
     async def _call_reasoner(
         self,
         role: str,
@@ -416,27 +420,29 @@ class AttackOracle:
         print(f"  [DeepAgent:{role}] {model} + {strategy} strategy")
 
         async def _run():
-            # CyphexReasoner.generate() is synchronous — run in a thread
-            # so it doesn't block the asyncio event loop
-            return await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.reasoner.generate(
-                    model=model,
-                    prompt=f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT:",
-                    task_type={
-                        "planner": "vuln_analysis",
-                        "analyst": "vuln_analysis",
-                        "mutator": "patch_generate",
-                    }.get(role, "default"),
-                    severity=severity,
-                    cwe=cwe,
+            async with _LLM_SEMAPHORE:
+                # CyphexReasoner.generate() is synchronous — run in a thread
+                # so it doesn't block the asyncio event loop
+                return await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.reasoner.generate(
+                        model=model,
+                        prompt=f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT:",
+                        task_type={
+                            "planner": "vuln_analysis",
+                            "analyst": "vuln_analysis",
+                            "mutator": "patch_generate",
+                        }.get(role, "default"),
+                        severity=severity,
+                        cwe=cwe,
+                    )
                 )
-            )
 
         try:
-            result = await asyncio.wait_for(_run(), timeout=timeout)
+            # Add 120s to the timeout to account for waiting in the semaphore queue
+            result = await asyncio.wait_for(_run(), timeout=timeout + 120.0)
         except asyncio.TimeoutError:
-            print(f"  [DeepAgent:{role}] timed out after {timeout}s — skipping")
+            print(f"  [DeepAgent:{role}] timed out after {timeout}s (in queue or inference) — skipping")
             return None
 
         if not result or not result.response:
