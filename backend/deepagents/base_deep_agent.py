@@ -70,24 +70,29 @@ class BaseDeepAgent:
         # Measure baseline response time once
         self._baseline_ms = await self._measure_baseline()
 
-        # Oracle generates attack plan (90s hard timeout — prevents VRAM load stall)
+        # Generate adaptive attack plan via agent-reasoning enhanced local model
         surface_summary = self.asi.summarise_for_prompt()
-        console.print(f"[dim]DeepAgent {self.__class__.__name__} consulting Oracle...[/dim]")
+        console.print(
+            f"[dim]  ▸ {self.__class__.__name__}: analysing surface, generating hypotheses...[/dim]"
+        )
         try:
-            plan = await asyncio.wait_for(
-                self.oracle.plan(
-                    target=self.target,
-                    surface_summary=surface_summary,
-                    vuln_class=self.PRIMARY_VULN_CLASS,
-                ),
-                timeout=120.0,  # Hard outer limit: 2 min total for plan
+            plan = await self.oracle.plan(
+                target=self.target,
+                surface_summary=surface_summary,
+                vuln_class=self.PRIMARY_VULN_CLASS,
             )
-            console.print(
-                f"[cyan]Oracle[/cyan] generated {len(plan.hypotheses)} hypotheses "
-                f"for {self.__class__.__name__}."
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            console.print(f"[yellow]Oracle plan skipped for {self.__class__.__name__}: {str(e)[:60]}[/yellow]")
+            if plan.hypotheses:
+                console.print(
+                    f"[cyan]  ◈ {self.__class__.__name__}[/cyan] "
+                    f"[green]{len(plan.hypotheses)} hypotheses generated[/green]"
+                )
+            else:
+                console.print(
+                    f"[dim]  ◈ {self.__class__.__name__}: no LLM hypotheses — "
+                    f"running deterministic pre-flight only[/dim]"
+                )
+        except Exception as e:
+            console.print(f"[yellow]  ◈ {self.__class__.__name__} plan error: {str(e)[:80]}[/yellow]")
             return AgentResult(agent=self.__class__.__name__, vulns=self.vulns, context=context)
 
 
