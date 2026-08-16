@@ -13,7 +13,14 @@ import os
 import sys
 import shutil
 import subprocess
-import readline
+try:
+    import readline  # Unix tab-completion
+except ImportError:
+    try:
+        import pyreadline3 as readline  # Windows alternative (pip install pyreadline3)
+    except ImportError:
+        readline = None  # No tab-completion on this platform — REPL still works
+
 import glob
 import time
 import textwrap
@@ -190,9 +197,11 @@ def _completer(text, state):
         return options[state]
     return None
 
-readline.set_completer(_completer)
-readline.parse_and_bind("tab: complete")
-readline.set_completer_delims(" \t\n")
+if readline is not None:
+    readline.set_completer(_completer)
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer_delims(" \t\n")
+
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
