@@ -390,8 +390,13 @@ class AttackOracle:
 
     def __init__(self, orchestrator=None):
         # Keep orchestrator param for backward compatibility — not used
-        from backend.reasoning.oracle_adapter import get_reasoner
+        # Try both import paths: project root context and backend/ context
+        try:
+            from backend.reasoning.oracle_adapter import get_reasoner
+        except ImportError:
+            from reasoning.oracle_adapter import get_reasoner
         self.reasoner = get_reasoner()
+
 
     async def _call_reasoner(
         self,
