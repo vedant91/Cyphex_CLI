@@ -70,22 +70,26 @@ class BaseDeepAgent:
         # Measure baseline response time once
         self._baseline_ms = await self._measure_baseline()
 
-        # Oracle generates attack plan
+        # Oracle generates attack plan (90s hard timeout — prevents VRAM load stall)
         surface_summary = self.asi.summarise_for_prompt()
         console.print(f"[dim]DeepAgent {self.__class__.__name__} consulting Oracle...[/dim]")
         try:
-            plan = await self.oracle.plan(
-                target=self.target,
-                surface_summary=surface_summary,
-                vuln_class=self.PRIMARY_VULN_CLASS,
+            plan = await asyncio.wait_for(
+                self.oracle.plan(
+                    target=self.target,
+                    surface_summary=surface_summary,
+                    vuln_class=self.PRIMARY_VULN_CLASS,
+                ),
+                timeout=120.0,  # Hard outer limit: 2 min total for plan
             )
             console.print(
                 f"[cyan]Oracle[/cyan] generated {len(plan.hypotheses)} hypotheses "
                 f"for {self.__class__.__name__}."
             )
-        except Exception as e:
-            console.print(f"[red]Oracle plan failed for {self.__class__.__name__}: {e}[/red]")
+        except (asyncio.TimeoutError, Exception) as e:
+            console.print(f"[yellow]Oracle plan skipped for {self.__class__.__name__}: {str(e)[:60]}[/yellow]")
             return AgentResult(agent=self.__class__.__name__, vulns=self.vulns, context=context)
+
 
         # Execute hypotheses in parallel batches
         hypotheses = plan.hypotheses[:self.MAX_HYPOTHESES]

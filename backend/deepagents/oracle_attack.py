@@ -261,20 +261,33 @@ class AttackOracle:
 
     async def plan(self, target: str, surface_summary: str,
                    vuln_class: str) -> AttackPlan:
-        """Generate an ordered attack plan via the planner model."""
-        model = await _resolve_model(_ROLE_PLANNER)
+        """Generate an ordered attack plan via the planner model (90s hard timeout)."""
+        model = await asyncio.wait_for(_resolve_model(_ROLE_PLANNER), timeout=15.0)
+        print(f"  [Oracle] Planning {vuln_class} attacks with {model}...")
         prompt = (
             f"Target: {target}\n\n"
             f"Vulnerability class to test: {vuln_class}\n\n"
             f"Observed attack surface:\n{surface_summary}\n\n"
             "Generate a prioritised, hypothesis-driven attack plan with 5-8 hypotheses."
         )
-        response = await self.orchestrator._call(
-            model=model,
-            system=ORACLE_PLAN_SYSTEM,
-            prompt=prompt,
-            task_name="Reasoning",
-        )
+        try:
+            response = await asyncio.wait_for(
+                self.orchestrator._call(
+                    model=model,
+                    system=ORACLE_PLAN_SYSTEM,
+                    prompt=prompt,
+                    task_name="Reasoning",
+                ),
+                timeout=90.0,
+            )
+        except asyncio.TimeoutError:
+            print(f"  [Oracle] Plan timed out for {vuln_class} — using fast fallback payloads")
+            # Return a minimal plan so the agent can still run pre-flight probes
+            return AttackPlan(
+                target_summary=f"{target} — timeout fallback",
+                primary_vulnerability_class=vuln_class,
+                hypotheses=[],
+            )
         return AttackPlan.from_json(response)
 
     async def decide(self, hypothesis: Hypothesis, response_status: int,
@@ -303,12 +316,20 @@ class AttackOracle:
             f"Rejection signal: {hypothesis.reject_signal}\n\n"
             "Decide: confirmed / adapt (provide next probe) / abandoned"
         )
-        response = await self.orchestrator._call(
-            model=model,
-            system=ORACLE_DECIDE_SYSTEM,
-            prompt=prompt,
-            task_name="Reasoning",
-        )
+        response = None
+        try:
+            response = await asyncio.wait_for(
+                self.orchestrator._call(
+                    model=model,
+                    system=ORACLE_DECIDE_SYSTEM,
+                    prompt=prompt,
+                    task_name="Reasoning",
+                ),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            # Don't block the swarm — skip this hypothesis
+            return Decision(action="abandoned", thinking="Oracle timed out", confidence=0)
         return Decision.from_json(response)
 
     async def mutate(self, payload: str, vuln_class: str,
@@ -322,12 +343,17 @@ class AttackOracle:
             "Generate 5 bypass variants of this payload."
         )
         try:
-            response = await self.orchestrator._call(
-                model=model,
-                system=ORACLE_MUTATE_SYSTEM,
-                prompt=prompt,
-                task_name="Generating",
+            response = await asyncio.wait_for(
+                self.orchestrator._call(
+                    model=model,
+                    system=ORACLE_MUTATE_SYSTEM,
+                    prompt=prompt,
+                    task_name="Generating",
+                ),
+                timeout=60.0,
             )
             return response.get("variants", [])
+        except asyncio.TimeoutError:
+            return []
         except Exception:
             return []
