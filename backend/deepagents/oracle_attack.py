@@ -20,20 +20,52 @@ import httpx
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-# ── Model preferences (ordered by capability for security reasoning) ──
-# We prefer code-tuned models for attack planning, but any chat model works.
-_PREFERRED_MODELS = [
-    "qwen2.5-coder:7b",
-    "deepseek-coder:6.7b",
-    "llama3.1:8b",
-    "llama3.2:3b",
-    "deepseek-coder:1.3b",
-    "mistral:7b",
-    "codellama:7b",
-    "phi3:mini",
-]
+# ── Multi-model role assignments ──────────────────────────────────────────────
+# Each role has a preference list ordered by fitness for the task.
+# Fallback chain ensures we always get a working model.
+#
+#  PLANNER  — complex attack surface decomposition, hypothesis generation
+#             Needs: code understanding, security domain, structured JSON output
+#  ANALYST  — evidence evaluation, HTTP response analysis, logic reasoning
+#             Needs: general reasoning, instruction following
+#  MUTATOR  — payload generation, WAF bypass variants, fast turnaround
+#             Needs: code/string manipulation, fast inference (smallest usable)
 
-# Embedding-only models — cannot do chat, never pick these
+_ROLE_PREFERENCES = {
+    "planner": [
+        "qwen2.5-coder:7b",
+        "qwen2.5-coder:3b",
+        "deepseek-coder:6.7b",
+        "codellama:7b",
+        "llama3.1:8b",
+        "mistral:7b",
+        "llama3.2:3b",
+    ],
+    "analyst": [
+        "llama3.1:8b",
+        "mistral:7b",
+        "qwen2.5-coder:7b",
+        "llama3.2:3b",
+        "deepseek-coder:6.7b",
+    ],
+    "mutator": [
+        "deepseek-coder:1.3b",
+        "deepseek-coder:6.7b",
+        "qwen2.5-coder:3b",
+        "llama3.2:3b",
+        "qwen2.5-coder:7b",
+        "llama3.1:8b",
+    ],
+}
+
+# Roles map to agent-reasoning cognitive strategies
+_ROLE_STRATEGY = {
+    "planner": "decomposed",   # Break attack surface into falsifiable hypotheses
+    "analyst": "cot",          # Step-by-step evidence evaluation
+    "mutator": "cot",          # Payload mutation reasoning
+}
+
+# Embedding-only models — cannot do chat completion, never route to these
 _EMBEDDING_MODELS = {
     "nomic-embed-text", "mxbai-embed-large", "all-minilm",
     "bge-large", "bge-m3", "snowflake-arctic-embed",
@@ -41,12 +73,12 @@ _EMBEDDING_MODELS = {
 
 OLLAMA_BASE = "http://localhost:11434"
 
-_MODEL_CACHE: list[str] = []
-_SELECTED_MODEL: str = ""
+_MODEL_CACHE: list[str] = []  # All available Ollama models (fetched once)
+_ROLE_CACHE: dict[str, str] = {}  # role -> resolved model (cached per scan)
 
 
 async def _get_available_models() -> list[str]:
-    """Query Ollama for locally available models."""
+    """Query Ollama for locally available models (5s timeout)."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(f"{OLLAMA_BASE}/api/tags")
@@ -56,42 +88,54 @@ async def _get_available_models() -> list[str]:
 
 
 def _is_embedding_model(name: str) -> bool:
-    """Return True if the model is embedding-only (cannot do chat)."""
-    base = name.split(":")[0].lower()
-    return any(e in base for e in _EMBEDDING_MODELS)
+    """Return True if model is embedding-only (cannot do chat)."""
+    base = name.split(":")[0].lower().replace("-", "_")
+    return any(e.replace("-", "_") in base for e in _EMBEDDING_MODELS)
 
 
-async def _resolve_best_model() -> str:
+async def _resolve_model_for_role(role: str) -> str:
     """
-    Pick the best available chat model for security reasoning.
-    Skips embedding-only models. Prefers code-tuned models.
-    Caches result for the scan lifetime.
+    Resolve the best available model for a given role.
+    Checks Ollama's installed models against the role's preference list.
+    Skips embedding-only models. Caches per role for the scan lifetime.
     """
-    global _MODEL_CACHE, _SELECTED_MODEL
-    if _SELECTED_MODEL:
-        return _SELECTED_MODEL
+    global _MODEL_CACHE, _ROLE_CACHE
+
+    if role in _ROLE_CACHE:
+        return _ROLE_CACHE[role]
 
     if not _MODEL_CACHE:
-        _MODEL_CACHE = await _get_available_models()
+        try:
+            _MODEL_CACHE = await asyncio.wait_for(_get_available_models(), timeout=8.0)
+        except asyncio.TimeoutError:
+            _MODEL_CACHE = []
 
-    # Try preferred order first
-    for preferred in _PREFERRED_MODELS:
+    preferences = _ROLE_PREFERENCES.get(role, _ROLE_PREFERENCES["analyst"])
+
+    # Walk preference list — first match wins
+    for preferred in preferences:
         for available in _MODEL_CACHE:
-            if available == preferred or available.startswith(preferred.split(":")[0] + ":"):
-                if not _is_embedding_model(available):
-                    _SELECTED_MODEL = available
-                    return available
+            # Match exact name OR same base (e.g. 'qwen2.5-coder' matches 'qwen2.5-coder:7b')
+            pbase = preferred.split(":")[0].lower()
+            abase = available.split(":")[0].lower()
+            if (available == preferred or abase == pbase) and not _is_embedding_model(available):
+                _ROLE_CACHE[role] = available
+                return available
 
-    # Fall back to any non-embedding model
+    # Last resort: any non-embedding model
     for available in _MODEL_CACHE:
         if not _is_embedding_model(available):
-            _SELECTED_MODEL = available
+            _ROLE_CACHE[role] = available
             return available
 
-    return "llama3.2:3b"  # Last resort
+    # Absolute fallback — let Ollama error surface naturally
+    fallback = preferences[0]
+    _ROLE_CACHE[role] = fallback
+    return fallback
 
 
 # ── System prompts ─────────────────────────────────────────────────────────────
+
 
 ORACLE_PLAN_SYSTEM = """\
 You are an elite offensive security researcher.
@@ -322,63 +366,72 @@ def _extract_json(text: str) -> Optional[dict]:
 
 class AttackOracle:
     """
-    DeepAgent reasoning engine powered by agent-reasoning cognitive architectures.
+    DeepAgent reasoning engine — multi-model, role-routed, agent-reasoning enhanced.
 
-    Uses CyphexReasoner directly — no CouncilOrchestrator/VRAMManager overhead.
-    The agent-reasoning interceptor wraps each call with a cognitive strategy:
-      plan()   → decomposed  (break surface into falsifiable hypotheses)
-      decide() → cot         (step-by-step evidence evaluation)
-      mutate() → cot         (bypass payload reasoning)
+    Three specialised models, each enhanced by Oracle's agent-reasoning cognitive
+    architectures, work together on the Observe-Think-Attack loop:
 
-    Falls back gracefully to empty plan / abandoned decision if LLM unavailable.
+      PLANNER  (qwen2.5-coder:7b  + decomposed strategy)
+        → Analyses the attack surface and generates prioritised hypotheses.
+          'decomposed' breaks the surface into sub-problems then synthesises.
+
+      ANALYST  (llama3.1:8b       + cot strategy)
+        → Evaluates HTTP probe responses and decides confirmed/adapt/abandon.
+          'cot' forces step-by-step evidence reasoning, reducing false positives.
+
+      MUTATOR  (deepseek-coder:1.3b + cot strategy)
+        → Generates WAF-bypass payload variants quickly.
+          Smallest usable model for fast turnaround on each blocked attempt.
+
+    All roles auto-resolve to the best available Ollama model if the preferred
+    one is not installed — no hardcoded model names in the hot path.
+    Falls back to empty plan / abandoned decision if LLM is unavailable.
     """
 
     def __init__(self, orchestrator=None):
-        # Keep orchestrator param for backward compatibility — not used anymore
+        # Keep orchestrator param for backward compatibility — not used
         from backend.reasoning.oracle_adapter import get_reasoner
         self.reasoner = get_reasoner()
-        self._model: str = ""  # resolved lazily on first call
-
-    async def _get_model(self) -> str:
-        """Resolve and cache the best available chat model."""
-        if not self._model:
-            self._model = await asyncio.wait_for(_resolve_best_model(), timeout=10.0)
-        return self._model
 
     async def _call_reasoner(
         self,
+        role: str,
         system: str,
         prompt: str,
-        task_type: str,
         cwe: str = "",
         severity: str = "",
         timeout: float = 90.0,
     ) -> Optional[dict]:
         """
-        Call CyphexReasoner with the right cognitive strategy.
-        Returns parsed JSON dict or None on failure/timeout.
+        Call CyphexReasoner with the model and cognitive strategy for `role`.
+        Returns parsed JSON dict, or None on timeout/failure.
         """
-        model = await self._get_model()
-        print(f"  [DeepAgent] Thinking with {model} ({task_type} strategy)...")
+        model = await _resolve_model_for_role(role)
+        strategy = _ROLE_STRATEGY.get(role, "cot")
+        print(f"  [DeepAgent:{role}] {model} + {strategy} strategy")
 
         async def _run():
-            # CyphexReasoner.generate() is synchronous — run in thread
-            result = await asyncio.get_event_loop().run_in_executor(
+            # CyphexReasoner.generate() is synchronous — run in a thread
+            # so it doesn't block the asyncio event loop
+            return await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.reasoner.generate(
                     model=model,
                     prompt=f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT:",
-                    task_type=task_type,
+                    task_type={
+                        "planner": "vuln_analysis",
+                        "analyst": "vuln_analysis",
+                        "mutator": "patch_generate",
+                    }.get(role, "default"),
                     severity=severity,
                     cwe=cwe,
                 )
             )
-            return result
 
         try:
             result = await asyncio.wait_for(_run(), timeout=timeout)
         except asyncio.TimeoutError:
-            print(f"  [DeepAgent] Reasoning timed out ({timeout}s) — skipping LLM planning")
+            print(f"  [DeepAgent:{role}] timed out after {timeout}s — skipping")
             return None
 
         if not result or not result.response:
@@ -386,15 +439,15 @@ class AttackOracle:
 
         parsed = _extract_json(result.response)
         if parsed:
-            strat = result.strategy_name or result.strategy
-            print(f"  [DeepAgent] ◈ {strat} ({result.duration_ms:.0f}ms) → {len(result.response)} chars")
+            strat_name = result.strategy_name or result.strategy
+            print(f"  [DeepAgent:{role}] ◈ {strat_name} ({result.duration_ms:.0f}ms)")
         return parsed
 
     async def plan(self, target: str, surface_summary: str, vuln_class: str) -> AttackPlan:
         """
-        Generate an ordered, hypothesis-driven attack plan.
-        Uses 'decomposed' reasoning: breaks the attack surface into
-        sub-problems and solves each independently.
+        PLANNER role — qwen2.5-coder:7b + decomposed strategy.
+        Generates an ordered, hypothesis-driven attack plan by decomposing
+        the observed attack surface into falsifiable sub-problems.
         """
         prompt = (
             f"Target: {target}\n\n"
@@ -402,19 +455,19 @@ class AttackOracle:
             f"Observed attack surface:\n{surface_summary}\n\n"
             "Generate a prioritised, hypothesis-driven attack plan with 5-8 hypotheses. "
             "Focus ONLY on endpoints and parameters that actually exist in the surface above. "
-            "Think like a real attacker — adaptive, evidence-driven, no guessing."
+            "Think like a real attacker — adaptive, evidence-driven, not guessing."
         )
         data = await self._call_reasoner(
+            role="planner",
             system=ORACLE_PLAN_SYSTEM,
             prompt=prompt,
-            task_type="vuln_analysis",
             timeout=90.0,
         )
         if not data:
             return AttackPlan(
-                target_summary=f"{target} — LLM planning skipped",
+                target_summary=f"{target} — LLM planning unavailable",
                 primary_vulnerability_class=vuln_class,
-                hypotheses=[],
+                hypotheses=[],  # Falls through to deterministic pre-flight probes
             )
         return AttackPlan.from_json(data)
 
@@ -428,8 +481,9 @@ class AttackOracle:
         baseline_time: float = 0.0,
     ) -> Decision:
         """
-        Evaluate a probe response using CoT reasoning.
-        Decides: confirmed / adapt / abandoned.
+        ANALYST role — llama3.1:8b + cot strategy.
+        Evaluates HTTP probe response with step-by-step reasoning.
+        Decides: confirmed / adapt (with mutated probe) / abandoned.
         """
         time_note = ""
         if baseline_time > 0:
@@ -452,35 +506,38 @@ class AttackOracle:
             "Decide: confirmed / adapt (provide next probe) / abandoned"
         )
         data = await self._call_reasoner(
+            role="analyst",
             system=ORACLE_DECIDE_SYSTEM,
             prompt=prompt,
-            task_type="vuln_analysis",
             cwe=hypothesis.cwe,
             severity=hypothesis.severity,
             timeout=60.0,
         )
         if not data:
-            return Decision(action="abandoned", thinking="LLM unavailable", confidence=0)
+            return Decision(action="abandoned", thinking="ANALYST LLM unavailable", confidence=0)
         return Decision.from_json(data)
 
     async def mutate(self, payload: str, vuln_class: str, reason: str = "blocked") -> list[str]:
         """
-        Generate WAF-bypass variants of a failed payload using CoT reasoning.
-        Thinks step-by-step about encoding/obfuscation techniques.
+        MUTATOR role — deepseek-coder:1.3b + cot strategy.
+        Smallest, fastest model — generates 5 WAF-bypass payload variants
+        quickly so the agent can retry without slowing the whole swarm.
         """
         prompt = (
             f"Vulnerability class: {vuln_class}\n"
             f"Failed payload: {payload}\n"
             f"Failure reason: {reason}\n\n"
-            "Generate 5 bypass variants. Think about what defence blocked it "
-            "and what encoding or syntax change would evade it."
+            "Generate 5 bypass variants. Think step-by-step about "
+            "what defence blocked this and what encoding or syntax change evades it."
         )
         data = await self._call_reasoner(
+            role="mutator",
             system=ORACLE_MUTATE_SYSTEM,
             prompt=prompt,
-            task_type="patch_generate",  # CoT — step-by-step mutation reasoning
-            timeout=60.0,
+            timeout=45.0,  # Mutator should be fast — 45s cap
         )
         if not data:
             return []
         return data.get("variants", [])
+
+
