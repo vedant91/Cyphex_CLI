@@ -364,6 +364,10 @@ def _extract_json(text: str) -> Optional[dict]:
 
 # ── Oracle ─────────────────────────────────────────────────────────────────────
 
+# Global semaphore to serialize LLM calls and prevent Ollama queue timeouts
+_LLM_SEMAPHORE = asyncio.Semaphore(1)
+
+
 class AttackOracle:
     """
     DeepAgent reasoning engine — multi-model, role-routed, agent-reasoning enhanced.
@@ -396,10 +400,6 @@ class AttackOracle:
         except ImportError:
             from reasoning.oracle_adapter import get_reasoner
         self.reasoner = get_reasoner()
-
-
-# Global semaphore to serialize LLM calls and prevent Ollama queue timeouts
-_LLM_SEMAPHORE = asyncio.Semaphore(1)
 
 
     async def _call_reasoner(
