@@ -1,5 +1,5 @@
 """
-CYPHEX DeepAgent — Mass Assignment (CWE-915)
+CYPHEX DeepAgent ΓÇö Mass Assignment (CWE-915)
 
 Tests for mass assignment vulnerabilities where the server accepts extra
 model attributes (isAdmin, role, balance, verified) passed in a POST body
@@ -37,7 +37,7 @@ def _preferred_write_method(profile, default: str = "POST") -> str:
     Pick a state-changing HTTP method from an ASI EndpointProfile.
 
     `AttackSurfaceIndex.endpoints` maps path -> EndpointProfile, whose
-    `.methods` is a *set* of verbs actually observed — not a dict. Prefer a
+    `.methods` is a *set* of verbs actually observed ΓÇö not a dict. Prefer a
     write verb (POST/PUT/PATCH) since mass assignment only applies to those;
     fall back to `default` when the profile is missing or GET-only.
     """

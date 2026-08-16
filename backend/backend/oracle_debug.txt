@@ -1,0 +1,59 @@
+{
+  "target_summary": "http://localhost:3000",
+  "primary_vulnerability_class": "Business Logic",
+  "hypotheses": [
+    {
+      "id": "h1",
+      "vuln_type": "Insecure Direct Object Reference (IDOR)",
+      "cwe": "CWE-287",
+      "severity": "High",
+      "test_request": {
+        "method": "GET",
+        "path": "/api/users/12345",
+        "body": "",
+        "headers": {},
+        "payload": ""
+      },
+      "confirm_signal": "response_status == 200 AND response_body contains user data for user 12345",
+      "reject_signal": "response_status != 200 OR response_body does not contain user data for user 12345",
+      "next_if_confirmed": "h2",
+      "next_if_rejected": "h3"
+    },
+    {
+      "id": "h2",
+      "vuln_type": "Cross-Site Scripting (XSS)",
+      "cwe": "CWE-79",
+      "severity": "Medium",
+      "test_request": {
+        "method": "GET",
+        "path": "/api/users/search?q=",
+        "body": "",
+        "headers": {},
+        "payload": "<script>alert('XSS')</script>"
+      },
+      "confirm_signal": "response_body contains <script>alert('XSS')</script>",
+      "reject_signal": "response_body does not contain <script>alert('XSS')</script>",
+      "next_if_confirmed": "h3",
+      "next_if_rejected": "h4"
+    },
+    {
+      "id": "h3",
+      "vuln_type": "Insecure Deserialization",
+      "cwe": "CWE-502",
+      "severity": "Low",
+      "test_request": {
+        "method": "POST",
+        "path": "/api/serialize",
+        "body": "{\"data\": \"serialized_data\"}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "payload": ""
+      },
+      "confirm_signal": "response_status == 200 AND response_body contains deserialized data",
+      "reject_signal": "response_status != 200 OR response_body does not contain deserialized data",
+      "next_if_confirmed": "",
+      "next_if_rejected": ""
+    }
+  ]
+}

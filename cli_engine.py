@@ -1449,58 +1449,9 @@ class CyphexEngine:
                         deduped_get.append(item)
                 _live_get_with_params = deduped_get
 
-            if use_deepagents:
-                from backend.deepagents import (
-                    DeepSQLiAgent, DeepXSSAgent, DeepCMDiAgent, DeepAuthAgent,
-                    DeepIDORAgent, DeepSSRFAgent, DeepSSTIAgent,
-                    DeepPathTraversalAgent, DeepXXEAgent, DeepBusinessLogicAgent,
-                    DeepPromptInjectionAgent, DeepRaceConditionAgent,
-                    DeepMassAssignmentAgent,
-                )
-                agents_to_run = [
-                    DeepSQLiAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepXSSAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepCMDiAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepAuthAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepIDORAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepSSRFAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepSSTIAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepPathTraversalAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepXXEAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepBusinessLogicAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    # ── Merged from update_y1: LLM prompt injection (OWASP LLM01),
-                    #    TOCTOU race conditions, and mass assignment (CWE-915) ──
-                    DeepPromptInjectionAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepRaceConditionAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                    DeepMassAssignmentAgent(self.scan_id, target_url, attack_graph, asi, oracle),
-                ]
-
-                total = len(agents_to_run)
-                for idx, agent in enumerate(agents_to_run, 1):
-                    agent_header(
-                        f"DeepAgent {idx}/{total}",
-                        f"{agent.__class__.__name__} — {agent.PRIMARY_VULN_CLASS}",
-                        "Oracle-Guided Hypothesis Testing",
-                    )
-                    try:
-                        res = await agent.run(context)
-                        context.confirmed_vulns.extend(res.vulns)
-                        if res.vulns:
-                            print(
-                                f"  {C.NEON}✓{C.RST} {C.BOLD}{agent.__class__.__name__}{C.RST} "
-                                f"confirmed {C.R}{len(res.vulns)} vuln(s){C.RST}"
-                            )
-                        # Display any new attack chains
-                        if attack_graph.edges:
-                            print(f"  {C.CYAN}▸ Attack chains: {len(attack_graph.edges)} discovered{C.RST}")
-                    except Exception as e:
-                        print(f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} failed: {str(e)[:100]}")
-                        continue
-
-                return context
-
 
             from backend.config.dast_constants import XSS_PAYLOADS
+
             # Agent 04 - XSS
             agent_header("Agent 04", "XSS", "Probe reflected XSS payload execution paths")
             seen_xss = set()
@@ -1991,9 +1942,61 @@ class CyphexEngine:
             except ImportError:
                 pass  # cyphex package not installed — skip DAST tools
 
+            # ── 13 DeepAgents — Adaptive Oracle-Guided DAST ──────────────────
+            if use_deepagents:
+                print()
+                print(f"  {C.CYAN}{'─'*70}{C.RST}")
+                print(f"  {C.BOLD}{C.CYAN}⬡ DEEPAGENTS  — 13-Agent Autonomous Swarm{C.RST}")
+                print(f"  {C.GHOST}SQLi · XSS · CMDi · Auth · IDOR · SSRF · SSTI · XXE")
+                print(f"  PathTraversal · BusinessLogic · PromptInjection · Race · MassAssign{C.RST}")
+                print(f"  {C.CYAN}{'─'*70}{C.RST}\n")
+                try:
+                    import sys as _sys
+                    _project_root = os.path.dirname(os.path.abspath(__file__))
+                    _backend_root = os.path.join(_project_root, "backend")
+                    # Ensure all 3 path roots are available:
+                    #   project_root/          → backend.reasoning.*, backend.deepagents.*
+                    #   project_root/backend/  → reasoning.*, deepagents.*, config.*
+                    #   project_root/backend/backend/ → orchestrator, models, agents, immune
+                    for _p in [_project_root, _backend_root, os.path.join(_backend_root, "backend")]:
+                        if _p not in _sys.path:
+                            _sys.path.insert(0, _p)
+
+
+                    from orchestrator import AgentOrchestrator as _DeepOrchestrator
+
+                    # Cognee memory is optional — DeepAgents run fine without it
+                    _memory = None
+                    try:
+                        from reasoning.cognee_memory import get_memory as _get_memory
+                        _memory = _get_memory(self.scan_id, target_url)
+                        await _memory.initialize()
+                    except Exception as _mem_err:
+                        print(f"  {C.DIM}[DeepAgents] Memory unavailable ({str(_mem_err)[:60]}) — running without Cognee{C.RST}")
+
+                    _deep_orch = _DeepOrchestrator(
+                        scan_id=self.scan_id,
+                        target_url=target_url,
+                        source_dir=getattr(self, "source_dir", "") or "",
+                        cognee_memory=_memory,
+                        event_callback=None,
+                    )
+                    context = await _deep_orch.execute_agents(context)
+                    deep_count = len(context.confirmed_vulns)
+                    print(f"\n  {C.G}[DEEPAGENTS][OK]{C.RST} Swarm complete — {deep_count} total confirmed vulns\n")
+                except Exception as _de:
+                    import traceback as _tb
+                    print(f"  {C.Y}[DEEPAGENTS][SKIP]{C.RST} Orchestrator error: {str(_de)[:120]}")
+                    print(f"  {C.DIM}{_tb.format_exc()[-400:]}{C.RST}")
+                    print(f"  {C.DIM}Ensure Ollama is running: ollama serve{C.RST}\n")
+
+
+
+
             print(f"\n  {C.G}[SCAN][OK]{C.RST} endpoints={len(context.all_endpoints)} forms={len(forms_found)} vulns={len(context.confirmed_vulns)}")
 
         return context
+
 
     async def _run_network_scan(self) -> None:
         """

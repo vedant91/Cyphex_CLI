@@ -12,6 +12,7 @@ Every command + output is logged and streamed in real-time.
 
 import asyncio
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -55,6 +56,10 @@ AGENT_COLORS = {
     "LogicAgent": Colors.MAGENTA,
     "CerebrasAnalysisAgent": Colors.CYAN,
     "PatchAgent": Colors.GREEN,
+    "PromptInjectionAgent": Colors.MAGENTA,
+    "NetworkSecurityAgent": Colors.CYAN,
+    "SupplyChainAgent": Colors.YELLOW,
+    "AIFuzzerAgent": Colors.RED,
 }
 
 
@@ -110,141 +115,181 @@ class AgentTerminal:
                 "vulnerable", "injection", "exploit", "confirmed",
                 "critical", "found", "root:", "uid=", "password"
             ]):
-                self._safe_print(f"  {'':>8} {agent_tag} {Colors.RED}{Colors.BOLD}{line}{Colors.RESET}")
+                self._safe_print(f"  {'':>8} {agent_tag} {Colors.RED}{Colors.BOLD}{line[:200]}{'...' if len(line)>200 else ''}{Colors.RESET}")
             elif any(kw in line.lower() for kw in ["success", "complete", "done", "ok"]):
-                self._safe_print(f"  {'':>8} {agent_tag} {Colors.GREEN}{line}{Colors.RESET}")
+                self._safe_print(f"  {'':>8} {agent_tag} {Colors.GREEN}{line[:200]}{'...' if len(line)>200 else ''}{Colors.RESET}")
             else:
-                self._safe_print(f"  {'':>8} {agent_tag} {Colors.GRAY}{line}{Colors.RESET}")
+                # Truncate long lines (like massive HTML/JS dumps) to avoid flooding the terminal
+                display_line = line.strip()
+                if len(display_line) > 150:
+                    display_line = display_line[:75] + " ... " + display_line[-70:]
+                
+                # Further suppress noisy juice shop style tags to keep it clean
+                if any(tag in display_line for tag in ["<style>", "<script", "var(--", "font-family"]):
+                    return  # Skip printing highly noisy styling lines
+                    
+                if display_line:
+                    self._safe_print(f"  {'':>8} {agent_tag} {Colors.GRAY}{display_line}{Colors.RESET}")
 
-    async def run(self, command: str, timeout: int = 60) -> TerminalOutput:
+    async def run(self, command: str, timeout: int = 120, retries: int = 3, backoff: float = 2.0) -> TerminalOutput:
         """
-        Execute a real terminal command.
+        Execute a real terminal command with backoff for resilience.
         Streams output line by line to console.
         Returns full TerminalOutput with stdout/stderr/exit_code/duration.
         """
         # On Windows, PowerShell aliases 'curl' to Invoke-WebRequest.
-        # Replace 'curl' with 'curl.exe' and use cmd.exe shell.
+        # Replace 'curl' with 'curl.exe' and fix cmd.exe quoting issues.
         if config.IS_WINDOWS:
             if command.startswith("curl ") or " curl " in command:
                 command = command.replace("curl ", "curl.exe ", 1)
+            # cmd.exe expands %{...} as env vars — escape to %%{
+            if '%{' in command:
+                command = command.replace('%{', '%%{')
+            # cmd.exe doesn't support single quotes — convert to double
+            # But only for simple cases (not inside already-double-quoted strings)
+            if "'" in command and '"' not in command.split("'")[0]:
+                # Convert outer single quotes to double quotes
+                command = re.sub(r"'([^']*)'", r'"\1"', command)
 
-        self._print_command(command)
-        start_time = time.time()
-
-        try:
-            # --- CYPLEX VIRTUAL SUBSYSTEM (CVS) INTERCEPTION ---
-            # Attempt to execute the command natively via pure Python first
-            from backend.backend.agents.cvs_shell import execute_cvs_command
-            cvs_result = await execute_cvs_command(command, self.working_dir, timeout)
-            if cvs_result.get("handled", False):
-                duration_ms = (time.time() - start_time) * 1000
-                stdout_text = cvs_result.get("stdout", "")
-                stderr_text = cvs_result.get("stderr", "")
-                
-                for line in stdout_text.splitlines():
-                    self._print_output(line, "stdout")
-                    await log_queue.put({
-                        "type": "terminal_log",
-                        "agent_name": self.agent_name,
-                        "command": command,
-                        "stdout": line,
-                        "success": True
-                    })
-                for line in stderr_text.splitlines():
-                    self._print_output(line, "stderr")
-                    
-                result = TerminalOutput(
-                    command=command,
-                    stdout=stdout_text,
-                    stderr=stderr_text,
-                    exit_code=cvs_result.get("exit_code", 0),
-                    duration_ms=round(duration_ms, 2),
-                    timestamp=datetime.now(),
-                )
-                self.command_history.append(result)
-                return result
-            # ---------------------------------------------------
-
-            if config.IS_WINDOWS:
-                # Windows + Uvicorn: asyncio.create_subprocess_shell raises
-                # NotImplementedError because Uvicorn forces SelectorEventLoop.
-                # Use threaded subprocess.Popen as a reliable fallback.
-                return await self._run_windows(command, timeout, start_time)
-            else:
-                proc = await asyncio.create_subprocess_shell(
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=self.working_dir,
-                    executable="/bin/bash",
-                )
-
-            # Stream stdout line by line
-            stdout_lines = []
-            stderr_lines = []
-
-            async def read_stdout():
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    decoded = line.decode(errors="replace").rstrip()
-                    stdout_lines.append(decoded)
-                    self._print_output(decoded, "stdout")
-                    await log_queue.put({
-                        "type": "terminal_log",
-                        "agent_name": self.agent_name,
-                        "command": command,
-                        "stdout": decoded,
-                        "success": True
-                    })
-
-            async def read_stderr():
-                while True:
-                    line = await proc.stderr.readline()
-                    if not line:
-                        break
-                    decoded = line.decode(errors="replace").rstrip()
-                    stderr_lines.append(decoded)
-                    self._print_output(decoded, "stderr")
+        for attempt in range(retries):
+            self._print_command(f"{command} (Attempt {attempt+1}/{retries})")
+            start_time = time.time()
+            current_timeout = timeout + (attempt * 30)  # Increase timeout by 30s each attempt
 
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(read_stdout(), read_stderr(), proc.wait()),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                stderr_lines.append(f"[CYPHEX] Command timed out after {timeout}s")
-                self._print_output(f"[!] Command timed out after {timeout}s", "stderr")
+                # --- CYPLEX VIRTUAL SUBSYSTEM (CVS) INTERCEPTION ---
+                from agents.cvs_shell import execute_cvs_command
+                cvs_result = await execute_cvs_command(command, self.working_dir, current_timeout)
+                if cvs_result.get("handled", False):
+                    duration_ms = (time.time() - start_time) * 1000
+                    stdout_text = cvs_result.get("stdout", "")
+                    stderr_text = cvs_result.get("stderr", "")
+                    
+                    for line in stdout_text.splitlines():
+                        self._print_output(line, "stdout")
+                        await log_queue.put({
+                            "type": "terminal_log",
+                            "agent_name": self.agent_name,
+                            "command": command,
+                            "stdout": line,
+                            "success": True
+                        })
+                    for line in stderr_text.splitlines():
+                        self._print_output(line, "stderr")
+                        
+                    result = TerminalOutput(
+                        command=command,
+                        stdout=stdout_text,
+                        stderr=stderr_text,
+                        exit_code=cvs_result.get("exit_code", 0),
+                        duration_ms=round(duration_ms, 2),
+                        timestamp=datetime.now(),
+                    )
+                    self.command_history.append(result)
+                    return result
 
-            duration_ms = (time.time() - start_time) * 1000
-            result = TerminalOutput(
-                command=command,
-                stdout="\n".join(stdout_lines),
-                stderr="\n".join(stderr_lines),
-                exit_code=proc.returncode if proc.returncode is not None else -1,
-                duration_ms=round(duration_ms, 2),
-                timestamp=datetime.now(),
-            )
-            self.command_history.append(result)
-            return result
+                if config.IS_WINDOWS:
+                    result = await self._run_windows(command, current_timeout, start_time)
+                    if result.exit_code == 0 or attempt == retries - 1:
+                        return result
+                    self._print_output(f"[!] Command failed (code {result.exit_code}). Retrying...", "stderr")
+                else:
+                    proc = await asyncio.create_subprocess_shell(
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=self.working_dir,
+                        executable="/bin/bash",
+                    )
 
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            error_msg = f"[CYPHEX] Execution error: {str(e)}"
-            self._print_output(error_msg, "stderr")
-            result = TerminalOutput(
-                command=command,
-                stdout="",
-                stderr=error_msg,
-                exit_code=-1,
-                duration_ms=round(duration_ms, 2),
-                timestamp=datetime.now(),
-            )
-            self.command_history.append(result)
-            return result
+                    stdout_lines = []
+                    stderr_lines = []
+
+                    async def read_stdout():
+                        while True:
+                            line = await proc.stdout.readline()
+                            if not line:
+                                break
+                            decoded = line.decode(errors="replace").rstrip()
+                            stdout_lines.append(decoded)
+                            self._print_output(decoded, "stdout")
+                            await log_queue.put({
+                                "type": "terminal_log",
+                                "agent_name": self.agent_name,
+                                "command": command,
+                                "stdout": decoded,
+                                "success": True
+                            })
+
+                    async def read_stderr():
+                        while True:
+                            line = await proc.stderr.readline()
+                            if not line:
+                                break
+                            decoded = line.decode(errors="replace").rstrip()
+                            stderr_lines.append(decoded)
+                            self._print_output(decoded, "stderr")
+
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(read_stdout(), read_stderr(), proc.wait()),
+                            timeout=current_timeout,
+                        )
+                        duration_ms = (time.time() - start_time) * 1000
+                        result = TerminalOutput(
+                            command=command,
+                            stdout="\n".join(stdout_lines),
+                            stderr="\n".join(stderr_lines),
+                            exit_code=proc.returncode if proc.returncode is not None else -1,
+                            duration_ms=round(duration_ms, 2),
+                            timestamp=datetime.now(),
+                        )
+                        self.command_history.append(result)
+                        
+                        # Only return if it's a success or we've run out of retries.
+                        # For security scanning, we might consider HTTP 429/500/timeout as retryable.
+                        # But typically, curl exits with code 28 for timeout.
+                        if result.exit_code == 0 or attempt == retries - 1:
+                            return result
+                            
+                        # If curl timeout (28) or similar error, we retry
+                        self._print_output(f"[!] Command failed (code {result.exit_code}). Retrying...", "stderr")
+                        
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                        self._print_output(f"[!] Command timed out after {current_timeout}s.", "stderr")
+                        
+                        if attempt == retries - 1:
+                            duration_ms = (time.time() - start_time) * 1000
+                            result = TerminalOutput(
+                                command=command,
+                                stdout="\n".join(stdout_lines),
+                                stderr=f"[CYPHEX] Command timed out after {current_timeout}s\n" + "\n".join(stderr_lines),
+                                exit_code=-1,
+                                duration_ms=round(duration_ms, 2),
+                                timestamp=datetime.now(),
+                            )
+                            self.command_history.append(result)
+                            return result
+
+            except Exception as e:
+                self._print_output(f"[CYPHEX] Execution error: {str(e)}", "stderr")
+                if attempt == retries - 1:
+                    duration_ms = (time.time() - start_time) * 1000
+                    result = TerminalOutput(
+                        command=command,
+                        stdout="",
+                        stderr=f"[CYPHEX] Execution error: {str(e)}",
+                        exit_code=-1,
+                        duration_ms=round(duration_ms, 2),
+                        timestamp=datetime.now(),
+                    )
+                    self.command_history.append(result)
+                    return result
+                    
+            # Backoff before retry
+            await asyncio.sleep(backoff * (1.5 ** attempt))
 
     async def _run_windows(self, command: str, timeout: int, start_time: float) -> TerminalOutput:
         """

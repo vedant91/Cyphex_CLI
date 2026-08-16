@@ -48,9 +48,9 @@ class LFIAgent(BaseAgent):
         return shlex.quote(str(value))
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ LFI / FILE UPLOAD / XXE TESTING ═══", "info")
+        await self.log("=== LFI / FILE UPLOAD / XXE TESTING ===", "info")
 
-        # ─── 1. Find file inclusion parameters ───
+        # --- 1. Find file inclusion parameters ---
         file_params = [
             p for p in context.all_params
             if any(kw in p.name.lower() for kw in self.FILE_PARAM_KEYWORDS)
@@ -72,7 +72,7 @@ class LFIAgent(BaseAgent):
                         url=url, name=param_name, value="test.txt"
                     ))
 
-        # ─── 2. Test LFI on file parameters ───
+        # --- 2. Test LFI on file parameters ---
         if file_params:
             await self.log(
                 f"Testing {len(file_params)} file parameters for LFI...", "info"
@@ -82,7 +82,7 @@ class LFIAgent(BaseAgent):
         else:
             await self.log("No file-inclusion parameters found", "info")
 
-        # ─── 3. Test LFI on all forms ───
+        # --- 3. Test LFI on all forms ---
         await self.log("Testing forms for file inclusion...", "info")
         for form in context.all_forms:
             file_inputs = [
@@ -94,7 +94,7 @@ class LFIAgent(BaseAgent):
                 param = ParamData(url=form.action, name=inp)
                 await self._test_lfi(param, context)
 
-        # ─── 4. File upload testing ───
+        # --- 4. File upload testing ---
         upload_forms = [f for f in context.all_forms if f.has_file_upload]
         if upload_forms:
             await self.log(
@@ -103,11 +103,11 @@ class LFIAgent(BaseAgent):
             for form in upload_forms:
                 await self._test_file_upload(form, context)
 
-        # ─── 5. XXE testing ───
+        # --- 5. XXE testing ---
         await self.log("Testing for XXE...", "info")
         await self._test_xxe(context)
 
-        # ─── 6. Open redirect testing ───
+        # --- 6. Open redirect testing ---
         await self.log("Testing for open redirect...", "info")
         await self._test_open_redirect(context)
 

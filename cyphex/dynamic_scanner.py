@@ -50,32 +50,34 @@ async def run_nuclei(
     target_url: str,
     severity: str = "critical,high,medium,low,info",
     templates: Optional[list[str]] = None,
-    rate_limit: int = 50,
-    timeout: int = 300,
+    rate_limit: int = 30,
+    timeout: int = 90,
 ) -> list[DynamicFinding]:
     """
     Run Nuclei scan against a target URL.
 
+    Uses asyncio.create_subprocess_exec (truly async) + asyncio.wait_for hard
+    timeout so a hanging Nuclei process is killed immediately rather than
+    blocking a thread-pool worker for minutes.
+
     Args:
         target_url: The target to scan (e.g., http://localhost:3000)
-        severity: Comma-separated severity filter
-        templates: Specific template paths/tags (None = auto with web tags)
+        severity:   Comma-separated severity filter
+        templates:  Specific template paths/tags (None = auto with web tags)
         rate_limit: Max requests per second
-        timeout: Scan timeout in seconds
+        timeout:    Hard wall-clock kill timeout in seconds (default 90s)
     """
     cmd = [
         "nuclei",
         "-u", target_url,
         "-severity", severity,
-        "-jsonl",                        # stream JSONL results to stdout — reliable,
-                                         # unlike -json-export /dev/stdout which buffers
-                                         # to a file handle and often emits 0 bytes.
-        "-silent",                       # No banner on stdout
-        "-duc",                          # Disable update check (prevents hanging prompt)
-        "-ni",                           # Disable interactsh OOB (avoids startup stalls offline)
+        "-jsonl",           # Stream JSONL to stdout — reliable vs -json-export
+        "-silent",          # No banner on stdout
+        "-duc",             # Disable update check (prevents hanging prompt)
+        "-ni",              # Disable interactsh OOB (avoids startup stalls offline)
         "-rate-limit", str(rate_limit),
-        "-timeout", "10",               # Per-request timeout
-        "-retries", "1",
+        "-timeout", "8",    # Per-request timeout (seconds)
+        "-retries", "0",    # No retries — speed over coverage
         "-no-color",
     ]
 
@@ -84,52 +86,74 @@ async def run_nuclei(
         for t in templates:
             cmd.extend(["-t", t])
     else:
-        # Bespoke app deployed in the sandbox: generic detection tags only. The `cve`
-        # tag pulls in thousands of product-fingerprint templates that never match a
-        # custom app AND routinely blow past the scan timeout (→ silent empty result).
+        # Bespoke sandbox app: generic detection tags only.
+        # Avoid `cve` — pulls in thousands of product-fingerprint templates
+        # that never match custom apps and blow past the scan timeout.
         cmd.extend(["-tags", "exposure,misconfig,default-login,sqli,xss,lfi,ssrf,rce,redirect"])
 
+    proc = None
     try:
-        proc = await asyncio.to_thread(
-            subprocess.run, cmd,
-            capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL  # Prevent interactive prompts
+        # Truly async subprocess — does NOT block the event loop or a thread-pool worker.
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,  # Suppress progress/banner noise
+            stdin=asyncio.subprocess.DEVNULL,
         )
 
-        findings = []
-        stdout = proc.stdout.strip()
-        if not stdout:
-            return findings
-
-        # Nuclei can output either a JSON array or JSONL (one object per line)
+        # Hard wall-clock kill: if Nuclei hangs (template download, OOB wait, etc.)
+        # this cancels the coroutine and kills the OS process immediately.
         try:
-            data = json.loads(stdout)
-            if isinstance(data, list):
-                # JSON array format (from -json-export)
-                for r in data:
-                    if isinstance(r, dict):
-                        findings.append(_nuclei_to_finding(r))
-            elif isinstance(data, dict):
-                findings.append(_nuclei_to_finding(data))
-        except json.JSONDecodeError:
-            # JSONL format: one JSON object per line
-            for line in stdout.split("\n"):
-                if not line.strip():
-                    continue
-                try:
-                    r = json.loads(line)
-                    if isinstance(r, dict):
-                        findings.append(_nuclei_to_finding(r))
-                except json.JSONDecodeError:
-                    continue
+            stdout_bytes, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            print(f"  [DAST] Nuclei timed out after {timeout}s — killing process")
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            return []
+
+        # Decode safely — replace any bad bytes (Nuclei can emit ANSI sequences on Windows)
+        stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
+        if not stdout:
+            return []
+
+        findings = []
+        # Nuclei -jsonl emits one JSON object per line
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+                if isinstance(r, dict):
+                    findings.append(_nuclei_to_finding(r))
+            except json.JSONDecodeError:
+                continue
+
+        # Filter out Info-severity findings: for custom sandbox apps, Nuclei's
+        # CVE/exposure templates probe hundreds of non-existent paths (e.g.
+        # /wp-admin/, /cgi-bin/) and get 404 responses. The secrets-patterns
+        # template fires on every 404 body → thousands of Info false positives.
+        # Only Critical/High/Medium findings are actionable.
+        findings = [f for f in findings if f.severity.lower() != "info"]
 
         return findings
 
-    except subprocess.TimeoutExpired:
-        # Distinguish a broken/timed-out run from a genuinely clean target.
-        print(f"  [DAST] Nuclei timed out after {timeout}s — no findings returned")
-        return []
+
     except FileNotFoundError:
+        # Nuclei not installed — silent skip
+        return []
+    except Exception as e:
+        print(f"  [DAST] Nuclei error: {e!r} — skipping")
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         return []
 
 

@@ -28,7 +28,7 @@ from models.agent_result import AgentResult
 
 class SupplyChainAgent(BaseAgent):
 
-    # ─── Dependency manifest files to probe ───
+    # --- Dependency manifest files to probe ---
     MANIFEST_PATHS = [
         # Node.js / JavaScript
         "/package.json",
@@ -68,7 +68,7 @@ class SupplyChainAgent(BaseAgent):
         "/*.csproj",
     ]
 
-    # ─── Exposed build / CI artifacts ───
+    # --- Exposed build / CI artifacts ---
     BUILD_ARTIFACT_PATHS = [
         "/.env.production",
         "/.env.staging",
@@ -91,7 +91,7 @@ class SupplyChainAgent(BaseAgent):
         "/webpack.config.prod.js",
     ]
 
-    # ─── Source map files ───
+    # --- Source map files ---
     SOURCE_MAP_EXTENSIONS = [
         "/main.js.map",
         "/app.js.map",
@@ -102,7 +102,7 @@ class SupplyChainAgent(BaseAgent):
         "/dist/main.js.map",
     ]
 
-    # ─── Popular packages and their known typosquats ───
+    # --- Popular packages and their known typosquats ---
     TYPOSQUAT_MAP = {
         # npm
         "lodash": ["lodahs", "lodashs", "lodas", "lod-ash", "1odash"],
@@ -123,7 +123,7 @@ class SupplyChainAgent(BaseAgent):
         "pandas": ["pandass", "pands", "panadas"],
     }
 
-    # ─── Packages with known critical CVEs (manually curated high-profile) ───
+    # --- Packages with known critical CVEs (manually curated high-profile) ---
     KNOWN_VULN_PACKAGES = {
         "node-serialize": {"severity": "Critical", "cve": "CVE-2017-5941", "desc": "Remote code execution via untrusted deserialization"},
         "event-stream": {"severity": "Critical", "cve": "CVE-2018-16487", "desc": "Malicious dependency (flatmap-stream) injected to steal cryptocurrency"},
@@ -145,23 +145,23 @@ class SupplyChainAgent(BaseAgent):
     }
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ SUPPLY CHAIN VULNERABILITY TESTING ═══", "info")
+        await self.log("=== SUPPLY CHAIN VULNERABILITY TESTING ===", "info")
 
         target = context.target_url
 
-        # ─── 1. Probe for exposed dependency manifests ───
+        # --- 1. Probe for exposed dependency manifests ---
         await self.log("Probing for exposed dependency manifests...", "info")
         manifests_found = await self._probe_manifests(target, context)
 
-        # ─── 2. Probe for exposed build artifacts / CI config ───
+        # --- 2. Probe for exposed build artifacts / CI config ---
         await self.log("Probing for exposed build artifacts & CI configs...", "info")
         await self._probe_build_artifacts(target, context)
 
-        # ─── 3. Probe for source maps ───
+        # --- 3. Probe for source maps ---
         await self.log("Checking for exposed source maps...", "info")
         await self._probe_source_maps(target, context)
 
-        # ─── 4. Parse & analyze discovered manifests ───
+        # --- 4. Parse & analyze discovered manifests ---
         if manifests_found:
             await self.log(
                 f"Analyzing {len(manifests_found)} discovered manifests...", "info"
@@ -169,19 +169,19 @@ class SupplyChainAgent(BaseAgent):
             for manifest_path, manifest_content in manifests_found.items():
                 await self._analyze_manifest(manifest_path, manifest_content, context)
 
-        # ─── 5. Check SRI on external CDN scripts ───
+        # --- 5. Check SRI on external CDN scripts ---
         await self.log("Checking Subresource Integrity on external scripts...", "info")
         await self._check_sri(target, context)
 
-        # ─── 6. Run npm audit / pip-audit if available ───
+        # --- 6. Run npm audit / pip-audit if available ---
         await self.log("Running automated dependency audits...", "info")
         await self._run_package_audits(target, context)
 
-        # ─── 7. Check for dependency confusion attack surface ───
+        # --- 7. Check for dependency confusion attack surface ---
         await self.log("Checking dependency confusion attack surface...", "info")
         await self._check_dependency_confusion(manifests_found, context)
 
-        # ─── 8. Check for exposed .npmrc / .pypirc (private registry creds) ───
+        # --- 8. Check for exposed .npmrc / .pypirc (private registry creds) ---
         await self.log("Checking for exposed registry credentials...", "info")
         await self._check_registry_creds(target, context)
 
@@ -197,9 +197,9 @@ class SupplyChainAgent(BaseAgent):
             terminal_logs=self.terminal.command_history,
         )
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 1. MANIFEST PROBING
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _probe_manifests(
         self, target: str, context: ScanContext
@@ -227,7 +227,7 @@ class SupplyChainAgent(BaseAgent):
                 # Validate it's actually a manifest (not a generic 200 page)
                 if self._is_valid_manifest(path, content):
                     found[path] = content
-                    await self.log(f"  ⚠ EXPOSED: {path} → HTTP 200", "danger")
+                    await self.log(f"  ⚠ EXPOSED: {path} -> HTTP 200", "danger")
 
                     severity = "High"
                     cvss = 7.5
@@ -317,9 +317,9 @@ class SupplyChainAgent(BaseAgent):
         # Default: if it has some content and isn't HTML, accept it
         return len(content) > 20
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 2. BUILD ARTIFACT PROBING
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _probe_build_artifacts(self, target: str, context: ScanContext):
         """Probe for exposed build configs & CI pipelines."""
@@ -384,9 +384,9 @@ class SupplyChainAgent(BaseAgent):
                     ),
                 ))
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 3. SOURCE MAP PROBING
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _probe_source_maps(self, target: str, context: ScanContext):
         """Check for exposed JavaScript source maps."""
@@ -447,9 +447,9 @@ class SupplyChainAgent(BaseAgent):
                 ),
             ))
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 4. MANIFEST ANALYSIS (CVEs, typosquatting, outdated)
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _analyze_manifest(
         self, path: str, content: str, context: ScanContext
@@ -480,7 +480,7 @@ class SupplyChainAgent(BaseAgent):
             f"  Parsed {len(deps)} dependencies from {path}", "info"
         )
 
-        # ─── Check against known vulnerable packages ───
+        # --- Check against known vulnerable packages ---
         for pkg_name, version in deps.items():
             name_lower = pkg_name.lower().strip()
 
@@ -504,7 +504,7 @@ class SupplyChainAgent(BaseAgent):
                     ),
                 ))
 
-        # ─── Check for typosquatted packages ───
+        # --- Check for typosquatted packages ---
         for pkg_name in deps:
             typosquat_alert = self._check_typosquat(pkg_name)
             if typosquat_alert:
@@ -528,7 +528,7 @@ class SupplyChainAgent(BaseAgent):
                     ),
                 ))
 
-        # ─── Run OSV.dev API lookup for top dependencies ───
+        # --- Run OSV.dev API lookup for top dependencies ---
         await self._osv_lookup(deps, path, context)
 
     def _parse_package_json(self, content: str) -> dict[str, str]:
@@ -640,9 +640,9 @@ class SupplyChainAgent(BaseAgent):
 
         return None
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 5. OSV.dev CVE LOOKUP
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _osv_lookup(
         self, deps: dict[str, str], manifest_path: str, context: ScanContext
@@ -738,7 +738,7 @@ class SupplyChainAgent(BaseAgent):
                         ))
 
                         await self.log(
-                            f"  🚨 {vuln_id}: {pkg_name}@{clean_version} — {summary[:80]}",
+                            f"  [ALERT] {vuln_id}: {pkg_name}@{clean_version} — {summary[:80]}",
                             "danger",
                         )
 
@@ -748,9 +748,9 @@ class SupplyChainAgent(BaseAgent):
         if checked == 0:
             await self.log("  No CVEs found in checked dependencies", "info")
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 6. SRI (SUBRESOURCE INTEGRITY) CHECK
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _check_sri(self, target: str, context: ScanContext):
         """Check if external CDN scripts have integrity attributes."""
@@ -803,9 +803,9 @@ class SupplyChainAgent(BaseAgent):
                 ),
             ))
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 7. PACKAGE AUDIT TOOLS
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _run_package_audits(self, target: str, context: ScanContext):
         """Run npm audit / pip-audit if project files are accessible."""
@@ -865,9 +865,9 @@ class SupplyChainAgent(BaseAgent):
                 timeout=30,
             )
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 8. DEPENDENCY CONFUSION
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _check_dependency_confusion(
         self, manifests: dict[str, str], context: ScanContext
@@ -935,9 +935,9 @@ class SupplyChainAgent(BaseAgent):
                 except json.JSONDecodeError:
                     pass
 
-    # ═══════════════════════════════════════════════════
+    # ===================================================
     # 9. REGISTRY CREDENTIAL CHECK
-    # ═══════════════════════════════════════════════════
+    # ===================================================
 
     async def _check_registry_creds(self, target: str, context: ScanContext):
         """Check for exposed package manager credential files."""

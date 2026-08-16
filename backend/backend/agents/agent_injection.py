@@ -29,10 +29,10 @@ class InjectionAgent(BaseAgent):
     """
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ COMBINED INJECTION AGENT ═══", "info")
+        await self.log("=== COMBINED INJECTION AGENT ===", "info")
         await self.log("Phase 1: Running SQLi Agent...", "info")
 
-        # ─── Phase 1: SQLi Agent ───
+        # --- Phase 1: SQLi Agent ---
         sqli_agent = SQLiAgent(
             self.scan_id,
             self.target,
@@ -51,7 +51,7 @@ class InjectionAgent(BaseAgent):
         # Merge SQLi results immediately
         self.vulns.extend(sqli_vulns)
 
-        # ─── Phase 2: CMDi Agent ───
+        # --- Phase 2: CMDi Agent ---
         if sqli_found_injection and sqli_got_creds:
             await self.log(
                 "SQLi extracted credentials — CMDi still running for full coverage...",
@@ -79,7 +79,7 @@ class InjectionAgent(BaseAgent):
         # Merge CMDi results
         self.vulns.extend(cmdi_result.vulns)
 
-        # ─── Summary ───
+        # --- Summary ---
         total = len(self.vulns)
         sqli_count = len(sqli_vulns)
         cmdi_count = len(cmdi_result.vulns)

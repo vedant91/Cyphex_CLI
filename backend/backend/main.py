@@ -23,9 +23,18 @@ from datetime import datetime
 if os.name == "nt":
     os.system("")  # Enables ANSI escape codes on Windows
     os.environ.setdefault("PYTHONUTF8", "1")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
-# Add parent dir to path for imports
+# Add parent dir to path for imports (backend/backend/ = index 0 for config, models, agents)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add backend/ root at index 1 so deepagents package resolves (but doesn't shadow config.py)
+_backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _backend_root not in sys.path:
+    sys.path.insert(1, _backend_root)
 
 from scan_orchestrator import ScanOrchestrator
 from agents.terminal import Colors

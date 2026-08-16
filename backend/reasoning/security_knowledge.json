@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "description": "CYPHEX Security Knowledge Base — CWE, OWASP, MITRE ATT&CK mappings for Cognee ingestion",
+  "entries": [
+    {
+      "id": "cwe_89",
+      "text": "CWE-89: SQL Injection. Occurs when user-controlled input is interpolated directly into SQL queries without parameterization. Attackers can read, modify, or delete database contents. Fix: Use prepared statements with parameterized queries (? placeholders in Node.js db.query(), %s in Python psycopg2). NEVER concatenate or use template literals for SQL. OWASP: A03 Injection. MITRE ATT&CK: T1190 Exploit Public-Facing Application. Severity: Critical. Common in: PHP, Node.js (Express + sqlite3/mysql), Python (Flask + sqlite3), Java (JDBC)."
+    },
+    {
+      "id": "cwe_78",
+      "text": "CWE-78: OS Command Injection. Occurs when user input is passed to shell execution functions like exec(), execSync(), system(), os.popen(). Attackers can execute arbitrary OS commands. Fix: Use execFile() with argument arrays instead of exec() with string concatenation. Validate input against a strict allowlist. NEVER pass user input to shell commands. OWASP: A03 Injection. MITRE ATT&CK: T1059 Command and Scripting Interpreter. Severity: Critical."
+    },
+    {
+      "id": "cwe_79",
+      "text": "CWE-79: Cross-Site Scripting (XSS). Occurs when user input is reflected in HTML response without proper encoding. Types: Reflected (URL params), Stored (database), DOM-based (client-side). Fix: HTML-encode all output using framework escaping (EJS <%- → <%=, React auto-escapes JSX). Add Content-Security-Policy headers. Use DOMPurify for rich content. OWASP: A03 Injection. MITRE ATT&CK: T1189 Drive-by Compromise. Severity: High."
+    },
+    {
+      "id": "cwe_22",
+      "text": "CWE-22: Path Traversal. Occurs when user input is used to construct file paths without validation, allowing access to files outside intended directory. Payloads: ../../etc/passwd, ..\\..\\windows\\system32. Fix: Use path.resolve() then verify the resolved path starts with the allowed base directory. Reject paths containing '..' sequences. OWASP: A01 Broken Access Control. MITRE ATT&CK: T1005 Data from Local System. Severity: High."
+    },
+    {
+      "id": "cwe_918",
+      "text": "CWE-918: Server-Side Request Forgery (SSRF). Occurs when the server makes HTTP requests to attacker-controlled URLs, allowing access to internal services. Payloads: http://127.0.0.1, http://169.254.169.254/metadata (cloud). Fix: Validate URLs against an allowlist of permitted domains. Block requests to private IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x). OWASP: A10 SSRF. MITRE ATT&CK: T1046 Network Service Discovery. Severity: High."
+    },
+    {
+      "id": "cwe_287",
+      "text": "CWE-287: Improper Authentication. Occurs when authentication mechanisms can be bypassed. Includes: weak passwords, missing auth on admin endpoints, predictable session tokens. Fix: Enforce strong password policies, implement rate limiting, use secure session management (HttpOnly, Secure, SameSite cookies). OWASP: A07 Identification and Authentication Failures. MITRE ATT&CK: T1110 Brute Force. Severity: Critical."
+    },
+    {
+      "id": "cwe_798",
+      "text": "CWE-798: Hardcoded Credentials. Occurs when secrets (API keys, passwords, JWT secrets) are embedded directly in source code. Fix: Use environment variables (process.env.JWT_SECRET). Use crypto.randomBytes(64) for JWT secrets. Never commit .env files to git. OWASP: A07 Identification and Authentication Failures. MITRE ATT&CK: T1552 Unsecured Credentials. Severity: High. Fix is deterministic — replace literal with env var lookup."
+    },
+    {
+      "id": "cwe_942",
+      "text": "CWE-942: Overly Permissive Cross-Origin Resource Sharing (CORS). Occurs when CORS is configured with origin: '*', allowing any website to make authenticated requests. Fix: Restrict CORS origin to specific trusted domains using an allowlist. Set credentials: false if wildcard origin is needed. OWASP: A01 Broken Access Control. Severity: Medium. Fix is deterministic — replace '*' with specific origins."
+    },
+    {
+      "id": "cwe_200",
+      "text": "CWE-200: Information Exposure. Occurs when debug endpoints, stack traces, environment variables, or internal configuration are exposed to users. Fix: Disable debug endpoints in production. Set NODE_ENV=production. Remove /debug, /admin/debug, /env routes. Never expose process.env or stack traces in error responses. OWASP: A01 Broken Access Control. MITRE ATT&CK: T1082 System Information Discovery. Severity: Medium."
+    },
+    {
+      "id": "cwe_306",
+      "text": "CWE-306: Missing Authentication for Critical Function. Occurs when administrative or sensitive endpoints can be accessed without authentication. Fix: Add authentication middleware (JWT verification, session check) to all admin and sensitive routes. Implement role-based access control (RBAC). OWASP: A01 Broken Access Control. MITRE ATT&CK: T1068 Exploitation for Privilege Escalation. Severity: High."
+    },
+    {
+      "id": "mitre_attack_web",
+      "text": "MITRE ATT&CK Techniques for Web Application Attacks: T1190 Exploit Public-Facing Application (SQLi, XSS, CMDi exploit internet-facing apps for initial access). T1059 Command and Scripting Interpreter (command injection executes OS commands). T1189 Drive-by Compromise (XSS payloads execute in victim browser). T1005 Data from Local System (path traversal reads local files). T1046 Network Service Discovery (SSRF probes internal network). T1110 Brute Force (weak credential testing). T1552 Unsecured Credentials (hardcoded secrets in source). T1068 Exploitation for Privilege Escalation (missing auth on admin endpoints). T1082 System Information Discovery (debug info exposure)."
+    },
+    {
+      "id": "owasp_top10_2024",
+      "text": "OWASP Top 10 2024 Mapping: A01 Broken Access Control (CWE-284, CWE-287, CWE-306, CWE-862, CWE-942). A02 Cryptographic Failures (CWE-798, CWE-327). A03 Injection (CWE-89 SQLi, CWE-78 CMDi, CWE-79 XSS). A04 Insecure Design (CWE-209, business logic). A05 Security Misconfiguration (CWE-942 CORS, CWE-200 debug). A06 Vulnerable Components (CWE-1035 CVEs in dependencies). A07 Authentication Failures (CWE-287, CWE-798). A08 Software Integrity Failures. A09 Security Logging Failures. A10 SSRF (CWE-918)."
+    },
+    {
+      "id": "fix_patterns",
+      "text": "Common Secure Fix Patterns: SQLi Fix: Replace string interpolation with parameterized queries — db.query('SELECT * FROM t WHERE id = ?', [id]). CMDi Fix: Replace exec(cmd) with execFile(binary, [args]) — never pass user input to shell. XSS Fix: Use framework auto-escaping (React JSX, EJS <%=). Add Content-Security-Policy header. Path Traversal Fix: Resolve path then check prefix — const safe = path.resolve(base, input); if (!safe.startsWith(base)) reject. SSRF Fix: Parse URL, check against allowlist, block private IPs. Hardcoded Secret Fix: Replace literal with process.env.VAR_NAME. CORS Fix: Replace origin:'*' with specific domain allowlist."
+    }
+  ]
+}

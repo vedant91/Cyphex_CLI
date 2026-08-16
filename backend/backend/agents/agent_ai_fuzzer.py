@@ -27,28 +27,28 @@ class AIFuzzerAgent(BaseAgent):
     """
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ AI FUZZER (ANTI-WORMGPT MODE) ═══", "info")
+        await self.log("=== AI FUZZER (ANTI-WORMGPT MODE) ===", "info")
         await self.log(
             "Generating novel payloads using AI (simulating WormGPT tactics)...",
             "warning"
         )
 
-        # ─── 1. AI-Generated SQLi Payloads ───
+        # --- 1. AI-Generated SQLi Payloads ---
         if context.all_forms:
             await self.log("Generating AI-powered SQLi payloads...", "info")
             await self._ai_sqli_fuzzing(context)
 
-        # ─── 2. AI-Generated XSS Payloads ───
+        # --- 2. AI-Generated XSS Payloads ---
         if context.all_forms or context.all_params:
             await self.log("Generating AI-powered XSS payloads...", "info")
             await self._ai_xss_fuzzing(context)
 
-        # ─── 3. AI-Generated Logic Flaw Exploits ───
+        # --- 3. AI-Generated Logic Flaw Exploits ---
         if context.all_endpoints:
             await self.log("Generating AI-powered logic flaw exploits...", "info")
             await self._ai_logic_fuzzing(context)
 
-        # ─── 4. Adaptive Learning from Failures ───
+        # --- 4. Adaptive Learning from Failures ---
         await self._adaptive_learning(context)
 
         await self.log(

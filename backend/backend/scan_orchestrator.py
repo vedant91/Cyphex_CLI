@@ -183,83 +183,50 @@ class ScanOrchestrator:
                 "name": "PARALLEL ATTACK AGENTS",
             })
 
-            print(
-                f"  {Colors.YELLOW}Launching 6 attack agents simultaneously...{Colors.RESET}\n"
+            # Initialize Knowledge Tree and Memory for DeepAgents
+            from reasoning.cognee_memory import get_memory
+            from rag.knowledge_tree import KnowledgeTreeBuilder
+            from sandbox_manager import active_sandboxes
+            from orchestrator import AgentOrchestrator
+            
+            # Find source dir if target is a sandbox
+            source_dir = ""
+            for sb in active_sandboxes.values():
+                if sb.get("url") == target_url or str(sb.get("port", "")) in target_url:
+                    source_dir = sb.get("path", "")
+                    break
+            
+            # Initialize Cognee Memory (force 768 dimensions)
+            memory = get_memory(scan_id, target_url)
+            await memory.initialize()
+            
+            # Build Knowledge Graph if we have source code
+            if source_dir:
+                try:
+                    kb_builder = KnowledgeTreeBuilder(source_dir=source_dir, model=config.OLLAMA_MODEL)
+                    kb_builder.build()
+                except Exception as e:
+                    print(f"  {Colors.YELLOW}Warning: Knowledge tree build failed: {e}{Colors.RESET}")
+                    
+            # Initialize the DeepAgent Orchestrator
+            agent_orch = AgentOrchestrator(
+                scan_id=scan_id,
+                target_url=target_url,
+                source_dir=source_dir,
+                cognee_memory=memory,
+                event_callback=self._emit
             )
 
-            attack_agents = [
-                InjectionAgent(scan_id, target_url, cerebras_key),
-                XSSAgent(scan_id, target_url, cerebras_key),
-                AuthAgent(scan_id, target_url, cerebras_key),
-                LFIAgent(scan_id, target_url, cerebras_key),
-                LogicAgent(scan_id, target_url, cerebras_key),
-                SupplyChainAgent(scan_id, target_url, cerebras_key),
-            ]
+            print(
+                f"  {Colors.YELLOW}Launching adaptive attack groups via AgentOrchestrator...{Colors.RESET}\n"
+            )
 
-            agent_id_map = {
-                "InjectionAgent": ("injection", "Injection Agent (SQLi + CMDi)"),
-                "XSSAgent": ("xss", "XSS Agent"),
-                "AuthAgent": ("auth", "Auth Agent"),
-                "LFIAgent": ("lfi", "LFI Agent"),
-                "LogicAgent": ("logic", "Logic Agent"),
-                "SupplyChainAgent": ("supply_chain", "Supply Chain Agent"),
-            }
+            # Execute DeepAgents adaptively
+            context = await agent_orch.execute_agents(context)
 
-            # Emit agent_start for all attack agents
-            for agent in attack_agents:
-                cls_name = agent.__class__.__name__
-                aid, aname = agent_id_map.get(cls_name, (cls_name.lower(), cls_name))
-                await self._emit({
-                    "type": "agent_start",
-                    "agent_id": aid,
-                    "agent_name": aname,
-                    "task": f"Attacking {target_url}",
-                })
-
-            # Run all attack agents in parallel
-            tasks = [agent.run(context) for agent in attack_agents]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Merge results
-            total_attack_vulns = 0
-            for i, result in enumerate(results):
-                agent_name = attack_agents[i].__class__.__name__
-                aid, aname = agent_id_map.get(agent_name, (agent_name.lower(), agent_name))
-
-                if isinstance(result, Exception):
-                    print(
-                        f"  {Colors.RED}✗ {agent_name} failed: {result}{Colors.RESET}"
-                    )
-                    await self._emit({
-                        "type": "agent_error",
-                        "agent_id": aid,
-                        "agent_name": aname,
-                        "error": str(result),
-                    })
-                elif isinstance(result, AgentResult):
-                    context.confirmed_vulns.extend(result.vulns)
-                    context.terminal_logs.extend(result.terminal_logs)
-                    total_attack_vulns += len(result.vulns)
-
-                    # Emit vulns found by this agent
-                    for v in result.vulns:
-                        await self._emit({
-                            "type": "vuln_found",
-                            "agent_id": aid,
-                            "agent_name": aname,
-                            "vuln": v.to_dict(),
-                        })
-
-                    await self._emit({
-                        "type": "agent_complete",
-                        "agent_id": aid,
-                        "agent_name": aname,
-                        "vulns_found": len(result.vulns),
-                        "task": f"Found {len(result.vulns)} vulnerabilities" if result.vulns else "No vulnerabilities found",
-                    })
-
-                    await self._emit_terminal_logs(result.terminal_logs, aname)
-
+            # Finalize Stage 3
+            total_attack_vulns = len(context.confirmed_vulns)
+            
             self._print_stage_complete(
                 "ATTACKS", total_attack_vulns,
                 f"total_confirmed={len(context.confirmed_vulns)}"
@@ -390,14 +357,15 @@ class ScanOrchestrator:
         except Exception as e:
             if hasattr(self, 'live_log_task'):
                 self.live_log_task.cancel()
+            import traceback
+            err_str = traceback.format_exc()
             print(
                 f"\n  {Colors.RED}{Colors.BOLD}"
-                f"x SCAN FAILED: {e}"
+                f"x SCAN FAILED: {e}\n"
+                f"{err_str}"
                 f"{Colors.RESET}"
             )
-            import traceback
-            traceback.print_exc()
-            return {"error": str(e)}
+            return {"error": str(e), "traceback": err_str}
     async def _stream_live_logs(self):
         """Continuously pulls logs from the queue and emits to the UI."""
         

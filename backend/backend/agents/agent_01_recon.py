@@ -22,7 +22,7 @@ from models.agent_result import AgentResult
 class ReconAgent(BaseAgent):
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ RECONNAISSANCE PHASE ═══", "info")
+        await self.log("=== RECONNAISSANCE PHASE ===", "info")
         await self.log(f"Target: {context.target_url}", "info")
 
         target = context.target_url
@@ -30,7 +30,7 @@ class ReconAgent(BaseAgent):
         host = parsed.hostname or ""
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
-        # ─── 1. Grab HTTP headers ───
+        # --- 1. Grab HTTP headers ---
         await self.log("Fetching HTTP headers...", "info")
         out = await self.terminal.run(
             f'curl -sI -L --max-redirs 5 --max-time 10 {shlex.quote(target)}'
@@ -42,7 +42,7 @@ class ReconAgent(BaseAgent):
         else:
             await self.log(f"Header fetch failed: {out.stderr[:200]}", "warning")
 
-        # ─── 2. Grab full homepage for fingerprinting ───
+        # --- 2. Grab full homepage for fingerprinting ---
         await self.log("Fetching homepage for fingerprinting...", "info")
         out = await self.terminal.run(
             f'curl -sL --max-time 15 {shlex.quote(target)}'
@@ -50,7 +50,7 @@ class ReconAgent(BaseAgent):
         if out.success:
             self._fingerprint_from_html(out.stdout, context)
 
-        # ─── 3. Check sensitive files ───
+        # --- 3. Check sensitive files ---
         await self.log("Probing sensitive files...", "info")
         sensitive_paths = [
             "/.env", "/.git/HEAD", "/robots.txt", "/sitemap.xml",
@@ -70,7 +70,7 @@ class ReconAgent(BaseAgent):
             status = out.stdout.strip().replace("'", "")
             if status in ["200", "301", "302", "403"]:
                 if status in ["200", "301", "302"]:
-                    await self.log(f"  Found: {path} → HTTP {status}", "warning")
+                    await self.log(f"  Found: {path} -> HTTP {status}", "warning")
                     context.discovered_paths.append(path)
 
                     # Fetch content of sensitive files
@@ -84,9 +84,9 @@ class ReconAgent(BaseAgent):
                                 path, content_out.stdout, context
                             )
                 elif status == "403":
-                    await self.log(f"  Forbidden (exists): {path} → HTTP 403", "info")
+                    await self.log(f"  Forbidden (exists): {path} -> HTTP 403", "info")
 
-        # ─── 4. Check for nmap (if available) ───
+        # --- 4. Check for nmap (if available) ---
         has_nmap = await self.terminal.check_tool("nmap")
         if has_nmap:
             await self.log("Running nmap service scan...", "info")
@@ -100,7 +100,7 @@ class ReconAgent(BaseAgent):
         else:
             await self.log("nmap not available — skipping port scan", "info")
 
-        # ─── 5. Directory discovery ───
+        # --- 5. Directory discovery ---
         has_gobuster = await self.terminal.check_tool("gobuster")
         if has_gobuster:
             await self.log("Running directory brute-force...", "info")
@@ -119,7 +119,7 @@ class ReconAgent(BaseAgent):
         else:
             await self.log("gobuster not available — using curl-based discovery", "info")
 
-        # ─── Summary ───
+        # --- Summary ---
         await self.log(
             f"Recon complete: framework={context.framework}, "
             f"server={context.server}, "

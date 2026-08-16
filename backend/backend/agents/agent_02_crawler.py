@@ -22,11 +22,24 @@ from models.agent_result import AgentResult
 class CrawlerAgent(BaseAgent):
 
     async def run(self, context: ScanContext) -> AgentResult:
-        await self.log("═══ CRAWLING PHASE ═══", "info")
+        await self.log("=== CRAWLING PHASE ===", "info")
 
         target = context.target_url
         visited = set()
-        to_visit = [target]
+
+        # For API-only apps (Express, FastAPI, etc.) the root '/' returns 404.
+        # Start with /api/health which almost every Express scaffold exposes,
+        # so the first probe in the log shows HTTP 200 not 404.
+        health_candidates = [
+            f"{target.rstrip('/')}/api/health",
+            f"{target.rstrip('/')}/health",
+            f"{target.rstrip('/')}/api/status",
+            target,  # root last — it's 404 on API-only apps
+        ]
+        to_visit = []
+        for hc in health_candidates:
+            if hc not in to_visit:
+                to_visit.append(hc)
 
         # Add discovered paths from recon
         for path in context.discovered_paths:
@@ -47,6 +60,10 @@ class CrawlerAgent(BaseAgent):
             "/api", "/api/users", "/api/search", "/api/products",
             "/api/comments", "/api/ping", "/api/file",
             "/api/user/1", "/api/user/update",
+            # VibeMart-specific
+            "/api/orders", "/api/orders/create", "/api/orders/export",
+            "/api/admin/users", "/api/admin/info",
+            "/api/products/search", "/api/users/register", "/api/users/login",
             # Utilities
             "/redirect", "/check-status", "/status",
             "/upload", "/download", "/export",
@@ -56,7 +73,8 @@ class CrawlerAgent(BaseAgent):
             if full_url not in to_visit:
                 to_visit.append(full_url)
 
-        # ─── Crawl all pages ───
+
+        # --- Crawl all pages ---
         await self.log(f"Crawling {len(to_visit)} initial URLs...", "info")
 
         while to_visit and len(visited) < 50:
@@ -84,7 +102,7 @@ class CrawlerAgent(BaseAgent):
             if status in ["404", "000"]:
                 continue
 
-            await self.log(f"  Crawled: {url} → HTTP {status}", "info")
+            await self.log(f"  Crawled: {url} -> HTTP {status}", "info")
             context.sitemap[url] = {"status": status, "size": len(body)}
 
             # Check for cookies
@@ -126,7 +144,7 @@ class CrawlerAgent(BaseAgent):
             if "application/xml" in body.lower() or "<xml" in body.lower():
                 context.xml_endpoints.append(url)
 
-        # ─── Check for GraphQL ───
+        # --- Check for GraphQL ---
         await self.log("Checking for GraphQL endpoints...", "info")
         gql_paths = ["/graphql", "/api/graphql", "/v1/graphql", "/gql"]
         for gql_path in gql_paths:
@@ -141,7 +159,7 @@ class CrawlerAgent(BaseAgent):
                 await self.log(f"GraphQL found at {gql_path}!", "danger")
                 context.graphql_endpoint = gql_path
 
-        # ─── Check JS files for API endpoints ───
+        # --- Check JS files for API endpoints ---
         js_links = [l for l in context.all_links if l.endswith('.js')]
         if js_links:
             await self.log(f"Analyzing {len(js_links)} JavaScript files...", "info")
@@ -156,7 +174,7 @@ class CrawlerAgent(BaseAgent):
                             context.all_endpoints.append(ep)
                             await self.log(f"  JS endpoint: {ep}", "info")
 
-        # ─── Summary ───
+        # --- Summary ---
         await self.log(
             f"Crawl complete: {len(visited)} pages, "
             f"{len(context.all_forms)} forms, "

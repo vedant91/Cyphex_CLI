@@ -1,5 +1,5 @@
 """
-CYPHEX DeepAgent — Race Condition (CWE-362)
+CYPHEX DeepAgent ΓÇö Race Condition (CWE-362)
 
 Tests for Time-of-Check to Time-of-Use (TOCTOU) vulnerabilities by sending
 concurrent requests to state-changing endpoints (orders, coupons, discounts,
@@ -32,10 +32,10 @@ class DeepRaceConditionAgent(BaseDeepAgent):
     Sends N concurrent POST requests to the same state-changing endpoint
     within a tight time window. If the server doesn't use proper locking
     (DB transactions, Redis locks, SELECT FOR UPDATE), multiple requests
-    may succeed simultaneously — e.g., applying a discount N times.
+    may succeed simultaneously ΓÇö e.g., applying a discount N times.
     """
     PRIMARY_VULN_CLASS = "Race Condition / TOCTOU Business Logic Flaw"
-    # Use a smaller parallel batch — race attacks are inherently parallel
+    # Use a smaller parallel batch ΓÇö race attacks are inherently parallel
     PARALLEL_BATCH = 1
 
     async def run(self, context: ScanContext) -> AgentResult:
@@ -51,7 +51,7 @@ class DeepRaceConditionAgent(BaseDeepAgent):
                 await self._race_attack(endpoint, context)
         else:
             self.console.print(
-                "[cyan]DeepRaceConditionAgent[/cyan] No obvious race targets — "
+                "[cyan]DeepRaceConditionAgent[/cyan] No obvious race targets ΓÇö "
                 "probing generic POST endpoints..."
             )
             # Probe any POST endpoints. asi.endpoints maps path -> EndpointProfile
@@ -118,7 +118,7 @@ class DeepRaceConditionAgent(BaseDeepAgent):
             f"  Race result: {len(successes)}/{RACE_CONCURRENCY} requests returned 200/201"
         )
 
-        # If more than 1 request succeeded on a state-changing endpoint → race condition
+        # If more than 1 request succeeded on a state-changing endpoint ΓåÆ race condition
         if len(successes) > 1:
             self.console.print(
                 f"[red]  [DeepRace] RACE CONDITION CONFIRMED at {endpoint}![/red]\n"
