@@ -393,8 +393,61 @@ def compute_gate_exit_code(report: dict, min_durability: float = 70.0) -> int:
     return 0
 
 
+def _build_toolchain_impact(toolchain: dict, entries: list) -> list:
+    """Quantify what each missing dependency actually costs.
+
+    "tsc: not installed" is a fact; "tsc missing — 7 recorded TS/TSX patches
+    could not be build-checked" is a decision. The panel used to state the
+    former and leave the maintainer to guess whether it mattered on THIS
+    codebase, which is why a red cross next to an optional tool was easy to
+    ignore forever.
+    """
+    ext_of = lambda e: os.path.splitext(str(e.get("file", "")))[1].lower()
+    counts = Counter(ext_of(e) for e in entries)
+    gated = {
+        "tsc": ((".ts", ".tsx"), "build-checked"),
+        "node": ((".js", ".jsx"), "build-checked"),
+    }
+    impact = []
+    for name, (exts, verb) in gated.items():
+        info = toolchain.get(name) or {}
+        if info.get("ok"):
+            continue
+        affected = sum(counts.get(x, 0) for x in exts)
+        impact.append({
+            "tool": name,
+            "affected_patches": affected,
+            "extensions": list(exts),
+            "detail": (f"{affected} recorded {'/'.join(x.lstrip('.') for x in exts)} "
+                       f"patch(es) could not be {verb}") if affected else
+                      (f"no {'/'.join(x.lstrip('.') for x in exts)} patches recorded yet — "
+                       f"this becomes blocking the first time one is"),
+        })
+    return impact
+
+
+def _build_coverage(entries: list) -> dict:
+    """Which CWEs the gate has actually proven it can fix, and which it hasn't.
+
+    A CWE with attempts but zero PASSes is the interesting case: the pipeline
+    keeps trying and never durably succeeds, which a global 100%-durable
+    headline hides completely when those attempts all landed as UNVERIFIABLE.
+    """
+    by_cwe = {}
+    for e in entries:
+        by_cwe.setdefault(e.get("cwe") or "?", Counter())[e.get("verdict", "?")] += 1
+    proven, unproven = [], []
+    for cwe, c in sorted(by_cwe.items(), key=lambda kv: -sum(kv[1].values())):
+        (proven if c.get("PASS", 0) else unproven).append({
+            "cwe": cwe, "attempts": sum(c.values()), "passed": c.get("PASS", 0),
+        })
+    return {"proven": proven, "unproven": unproven,
+            "distinct_cwes": len(by_cwe)}
+
+
 def get_verify_health(target_dir: Optional[str] = None, limit: int = 8,
-                       include_selftest: bool = False) -> dict:
+                       include_selftest: bool = False,
+                       include_runs: bool = True, run_limit: int = 8) -> dict:
     """
     Build the full maintainer health report for the Verify Gate.
 
@@ -442,8 +495,59 @@ def get_verify_health(target_dir: Optional[str] = None, limit: int = 8,
         "cwe_breakdown": _build_cwe_breakdown(entries),
         "trend": _build_scan_trend(manifest_paths, entries),
         "recent": entries[:limit],
+        "toolchain_impact": _build_toolchain_impact(toolchain, entries),
+        "coverage": _build_coverage(entries),
         "next_steps": _build_next_steps(toolchain, reason_tally, len(manifest_paths), legacy_count),
     }
+
+    # Run history. Imported lazily and guarded: the registry walks the whole
+    # sandbox tree, and a panel that can't render because history is
+    # unavailable would be a worse failure than a panel with no history.
+    if include_runs and target_dir is None:
+        try:
+            from backend.observability.runs import history_summary
+            report["history"] = history_summary(limit=run_limit)
+        except Exception:
+            report["history"] = None
+    else:
+        report["history"] = None
+
+    # Fold the new modules into the guidance, so a maintainer reading only
+    # NEXT STEPS still learns what the modules found.
+    try:
+        hist = report.get("history") or {}
+        reg = hist.get("regression")
+        if reg and reg.get("regressed"):
+            report["next_steps"].insert(0, (
+                f"Score regressed {reg['previous']} → {reg['current']} "
+                f"({reg['delta']:+d}) between {reg['previous_id']} and "
+                f"{reg['current_id']} — compare those two runs with "
+                f"`cyphex verify {reg['current_id']}`."))
+        if hist.get("interrupted"):
+            report["next_steps"].append(
+                f"{hist['interrupted']} of {hist['total_runs']} recorded run(s) never reached "
+                "a scan_end — they were interrupted or crashed. Their numbers are "
+                "not comparable to completed runs.")
+        for imp in report["toolchain_impact"]:
+            if imp["affected_patches"]:
+                report["next_steps"].insert(0, f"{imp['tool']} missing — {imp['detail']}.")
+        unproven = report["coverage"]["unproven"]
+        if unproven:
+            worst = ", ".join(f"{u['cwe']} ({u['attempts']})" for u in unproven[:3])
+            report["next_steps"].append(
+                f"{len(unproven)} CWE(s) have patch attempts but zero durable PASSes: "
+                f"{worst}. The gate has never proven a fix for these.")
+        # _build_next_steps() emits an "all clear" placeholder when it finds
+        # nothing, but it only ever saw the toolchain and the verdict tally.
+        # Once the history/coverage modules contribute a real finding, that
+        # placeholder becomes a contradiction — "nothing to action" directly
+        # above an action. Drop it if anything else made the list.
+        allclear = "Verify Gate is fully operable and no failure pattern stands out — nothing to action."
+        if allclear in report["next_steps"] and len(report["next_steps"]) > 1:
+            report["next_steps"].remove(allclear)
+    except Exception:
+        pass
+
     if include_selftest:
         report["selftest"] = run_gate_selftest()
     return report

@@ -344,7 +344,7 @@ QUICK_HELP = f"""
 # ── Readline autocomplete ──────────────────────────────────────────────────────
 COMMANDS = [
     "/scan", "/deep", "/deepagents", "/full", "/net", "/netmap", "/netwatch",
-    "/netaudit", "/watch", "/setup", "/benchmark", "/bench", "/verify", "/status", "/doctor",
+    "/netaudit", "/watch", "/setup", "/benchmark", "/bench", "/verify", "/status", "/runs", "/doctor",
     "/models", "/version", "/history", "/clear", "/exit", "/quit", "/help",
 ]
 
@@ -696,6 +696,45 @@ def _cmd_verify(arg: str):
 
     from backend.patch.verify_health import get_verify_health, compute_gate_exit_code
 
+    # A positional that names a recorded run opens that run instead of being
+    # treated as a target directory. Checked before the path interpretation
+    # because a scan id (cli_5f055704, or just 5f055704) is never also a
+    # directory the user meant to scope to — and drilling into one run is
+    # the whole point of the run-history table listing them.
+    if path and not os.path.isdir(os.path.expanduser(path)):
+        try:
+            from backend.observability.runs import get_run
+            run = get_run(path)
+        except Exception:
+            run = None
+        if run is not None:
+            rendered = False
+            if BOOT_UI:
+                try:
+                    ui.render_run_detail(run); rendered = True
+                except Exception:
+                    rendered = False
+            if not rendered:
+                d = run.as_dict()
+                print(f"\n  RUN {d['scan_id']}  ({d['status']})")
+                print(f"    target   {d.get('target') or '—'}")
+                print(f"    duration {d.get('duration_s') or '—'}s")
+                print(f"    score    {d.get('score') if d.get('score') is not None else '—'}")
+                print(f"    verdicts {d.get('verdicts') or '—'}")
+                for wp in d.get("waypoints", []):
+                    print(f"    [{wp.get('status', '?')}] {wp.get('num')} {wp.get('title')}")
+            if json_out:
+                try:
+                    import json as _json
+                    with open(json_out, "w") as f:
+                        _json.dump(run.as_dict(), f, indent=2, default=str)
+                    _dim(f"Run written → {json_out}")
+                except Exception:
+                    pass
+            return None
+        _warn(f"No recorded run matches '{path}' — showing the full panel instead.")
+        path = None
+
     if watch:
         if not sys.stdout.isatty():
             _warn("--watch needs an interactive terminal; showing a single snapshot instead.")
@@ -737,6 +776,76 @@ def _cmd_verify(arg: str):
         print(f"\n  {color}{C.BOLD}[CI] Verify Gate: {label} (exit {code}){C.RST}")
         return code
     return None
+
+
+def _cmd_runs(arg: str):
+    """Recorded scan runs, newest first.
+
+    Usage:  /runs [N] [--json out.json]
+
+    The history table the Verify Gate panel summarises. Each row is one
+    recorded scan; pass a scan id to `/verify <id>` to open it in full.
+    """
+    import shlex
+    limit, json_out = 12, None
+    toks = shlex.split(arg) if arg else []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in ("--json", "-o") and i + 1 < len(toks):
+            json_out = toks[i + 1]; i += 2
+        elif t.isdigit():
+            limit = max(1, int(t)); i += 1
+        else:
+            i += 1
+
+    _spinner("Reading run history...")
+    try:
+        from backend.observability.runs import history_summary
+        hist = history_summary(limit=limit)
+    except Exception as e:
+        _err(f"Run history failed: {e}")
+        return
+
+    runs = hist.get("runs") or []
+    if not runs:
+        _warn("No recorded runs yet — run a scan first.")
+        return
+
+    print()
+    print(f"  {C.BOLD}{hist['total_runs']} run(s) recorded{C.RST}  "
+          f"{C.GREY}·{C.RST} {C.NEON}{hist['completed']} completed{C.RST}  "
+          f"{C.GREY}·{C.RST} {C.YEL}{hist['interrupted']} interrupted{C.RST}")
+    reg = hist.get("regression")
+    if reg:
+        arrow = "v" if reg["regressed"] else ("^" if reg["delta"] > 0 else "=")
+        col = C.RED if reg["regressed"] else (C.NEON if reg["delta"] > 0 else C.GREY)
+        print(f"  latest vs previous: {col}{arrow} {reg['previous']} -> {reg['current']} "
+              f"({reg['delta']:+d}){C.RST}")
+    print(f"  {C.GREY}{'-' * 66}{C.RST}")
+    print(f"  {C.GREY}{'scan':<12}{'took':<9}{'status':<14}{'score':<8}{'verified':<10}{C.RST}")
+    for r in runs:
+        sid = str(r.get("scan_id", "?")).replace("cli_", "")
+        dur = r.get("duration_s")
+        took = f"{dur:.0f}s" if isinstance(dur, (int, float)) else "-"
+        st = r.get("status", "unknown")
+        scol = C.NEON if st == "completed" else C.YEL
+        score = r.get("score")
+        vd = r.get("verdicts") or {}
+        ver = f"{vd.get('PASS', 0)}/{sum(vd.values())}" if vd else "-"
+        print(f"  {C.CYAN}{sid:<12}{C.RST}{C.GREY}{took:<9}{C.RST}"
+              f"{scol}{st:<14}{C.RST}{str(score if score is not None else '-'):<8}{ver:<10}")
+    print()
+    _dim(f"Open one in full:  /verify {str(runs[0].get('scan_id','')).replace('cli_','')}")
+
+    if json_out:
+        try:
+            import json as _json
+            with open(json_out, "w") as f:
+                _json.dump(hist, f, indent=2, default=str)
+            _dim(f"History written -> {json_out}")
+        except Exception:
+            pass
 
 
 def _cmd_status(arg: str):
@@ -958,6 +1067,9 @@ def _handle(line: str):
 
         case "/status":
             _cmd_status(arg)
+
+        case "/runs":
+            _cmd_runs(arg)
 
         case "/history":
             _cmd_history()
