@@ -967,7 +967,9 @@ def render_help(console=None):
         ("/benchmark", "[corpus]", "Score the Immune System — precision/recall/F1"),
         ("/verify", "[path]", "Verify Gate maintainability panel — config/status/health"),
         ("", "flags", "--selftest  --ci  --watch [s]  --json <file>"),
+        ("/verify", "<scan_id>", "Replay ONE run — score, verdicts, full waypoint trace"),
         ("/status", "[path]", "System Observability — event log, last scan, errors"),
+        ("/runs", "[N]", "Recorded runs, newest first — status, score, verified"),
         ("/models", "", "List available local Ollama models"),
         ("/history", "", "Recent intercepts this session"),
         ("/clear", "", "Repaint the canopy"),
@@ -980,7 +982,8 @@ def render_help(console=None):
     for cmd, arg, desc in rows:
         t.add_row(cmd, arg, desc)
     c.print(Panel(t, title=Text("◈ COMMAND DECK", style=f"bold {REF}"),
-                  subtitle=Text("type a path, URL, or plain English to acquire it", style=LABEL),
+                  subtitle=Text("type a path, URL, or plain English · every waypoint is traced",
+                                style=LABEL),
                   subtitle_align="left", title_align="left",
                   border_style=PHOS_DIM, box=_box(c), padding=(0, 2)))
 

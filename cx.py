@@ -328,14 +328,21 @@ QUICK_HELP = f"""
   {C.NEON}/benchmark{C.RST}         Score the Immune System (precision/recall/F1)
   {C.NEON}/verify [path]{C.RST}     Verify Gate maintainability panel (config/status/health)
      {C.GREY}flags:{C.RST} {C.DIM}--selftest  --ci  --watch [secs]  --json out.json{C.RST}
+  {C.NEON}/verify <scan_id>{C.RST}  Open ONE recorded run — score, verdicts, full waypoint trace
   {C.NEON}/status [path]{C.RST}     System Observability — event log, last scan, agent/cognee health
      {C.GREY}flags:{C.RST} {C.DIM}--watch [secs]  --json out.json{C.RST}
+  {C.NEON}/runs [N]{C.RST}          Recorded runs, newest first — status, score, verified
+     {C.GREY}flags:{C.RST} {C.DIM}--json out.json{C.RST}
   {C.NEON}/models{C.RST}            List available local Ollama models
   {C.NEON}/history{C.RST}           Show recent scans this session
   {C.NEON}/clear{C.RST}             Repaint the workspace
   {C.NEON}/exit{C.RST}  {C.NEON}/quit{C.RST}      Exit CYPHEX
 
 {C.DIM}─────────────────────────────────────────────────────────────
+  Traceability: every scan records a goal + sub-steps per waypoint. The
+  buddy beside the trace is a state indicator — its animation is bound to
+  what the pipeline is doing. Replay any past run with /verify <scan_id>.
+─────────────────────────────────────────────────────────────
   Tip: type a path, URL, or plain English — "scan my repo <link>",
        "run a full scan on ./app" — and press Enter{C.RST}
 """
