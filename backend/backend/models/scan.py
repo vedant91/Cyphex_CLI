@@ -144,6 +144,11 @@ class ScanContext:
     # Terminal audit log
     terminal_logs: list = field(default_factory=list)
 
+    # DeepAgents exploit-chain graph (backend.deepagents.attack_graph.AttackGraph),
+    # set post-hoc by the scan engine once the swarm finishes — kept as `Any` to
+    # avoid a circular import (attack_graph.py doesn't import this module).
+    attack_graph: Any = None
+
     def to_summary(self) -> dict:
         return {
             "target": self.target_url,

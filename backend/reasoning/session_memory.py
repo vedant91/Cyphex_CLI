@@ -80,6 +80,7 @@ class SessionMemory:
     target: dict = field(default_factory=dict)
     reasoning_history: list = field(default_factory=list)
     model_context: dict = field(default_factory=lambda: {
+        "patches_attempted": 0,
         "patches_applied": 0,
         "patches_verified": 0,
         "patches_failed": 0,
@@ -92,12 +93,19 @@ class SessionMemory:
         self.reasoning_history.append(asdict(entry))
         self.updated_at = datetime.now(timezone.utc).isoformat()
 
-        # Update aggregate stats
-        self.model_context["patches_applied"] += 1
-        if entry.verdict == "PASS":
-            self.model_context["patches_verified"] += 1
-        elif entry.verdict == "FAIL":
+        # Update aggregate stats. A FAIL entry is a patch that was rolled back,
+        # so it counts as an ATTEMPT, never as an applied patch — otherwise
+        # "patches applied" grew on every rejection and the panel showed more
+        # applied patches than survive in the tree.
+        self.model_context["patches_attempted"] = (
+            self.model_context.get("patches_attempted", 0) + 1
+        )
+        if entry.verdict == "FAIL":
             self.model_context["patches_failed"] += 1
+        else:
+            self.model_context["patches_applied"] += 1
+            if entry.verdict == "PASS":
+                self.model_context["patches_verified"] += 1
 
     def add_lesson(self, lesson: str):
         """Add a learned lesson (e.g., 'SQLi in this codebase uses db.query()')."""
@@ -137,9 +145,12 @@ class SessionMemory:
         ctx = self.model_context
         applied = ctx.get("patches_applied", 0)
         verified = ctx.get("patches_verified", 0)
-        if applied > 0:
-            parts.append(f"\nPRIOR RESULTS: {applied} patches applied, {verified} verified "
-                         f"({verified/applied*100:.0f}% success rate)")
+        # Success rate is verified / ATTEMPTED. Dividing by applied-only would
+        # hide every rolled-back patch and report a near-100% rate.
+        attempted = ctx.get("patches_attempted", applied + ctx.get("patches_failed", 0))
+        if attempted > 0:
+            parts.append(f"\nPRIOR RESULTS: {attempted} patches attempted, {applied} applied, "
+                         f"{verified} verified ({verified/attempted*100:.0f}% success rate)")
 
         # Recently fixed CWEs
         recent_cwes = set()
@@ -167,6 +178,7 @@ class SessionMemory:
         sm.target = data.get("target", {})
         sm.reasoning_history = data.get("reasoning_history", [])
         sm.model_context = data.get("model_context", {
+            "patches_attempted": 0,
             "patches_applied": 0,
             "patches_verified": 0,
             "patches_failed": 0,

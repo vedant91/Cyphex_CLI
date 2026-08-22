@@ -1,5 +1,6 @@
 import httpx
 import json
+import os
 import re
 import asyncio
 from typing import Optional
@@ -17,6 +18,25 @@ except ImportError:
 
 OLLAMA_BASE = "http://localhost:11434"
 console = Console()
+
+
+def _ollama_timeout() -> httpx.Timeout:
+    """
+    HTTP timeout for local Ollama generation calls.
+
+    Because the generation calls stream tokens, ``read`` here is the maximum
+    tolerated *stall between chunks* — not a cap on total generation time. It
+    must comfortably exceed a cold model load, during which Ollama sends no
+    bytes at all: loading a 7B model on CPU/unified memory can take well over a
+    minute before the first token appears. A too-tight read window is exactly
+    what surfaced as ``qwen2.5-coder:7b API error: ReadTimeout`` on the Oracle
+    plan() call. Override with CYPHEX_OLLAMA_TIMEOUT (seconds).
+    """
+    try:
+        read = float(os.getenv("CYPHEX_OLLAMA_TIMEOUT", "300"))
+    except ValueError:
+        read = 300.0
+    return httpx.Timeout(connect=10.0, read=read, write=10.0, pool=10.0)
 
 # Tier → context window size. Cached after first detection to avoid repeated
 # GPU probing. Small/low-end hardware stays at 4096 (also the cyphex-patch
@@ -234,11 +254,11 @@ class VRAMManager:
         self.loaded.pop(model, None)
 
     async def _raw_call(self, model: str, prompt: str, stream: bool = False) -> str:
-        # Bounded timeout (consistent with the main call path's ~90s budget) —
-        # an unbounded timeout here let a hung Ollama warm-up call block the
-        # entire pipeline indefinitely.
-        warmup_timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(timeout=warmup_timeout) as client:
+        # Bounded timeout (shared with the main call path) — an unbounded timeout
+        # here let a hung Ollama warm-up call block the entire pipeline
+        # indefinitely, while a too-tight one (old read=60s) failed the very cold
+        # load it is meant to cover. See _ollama_timeout() for the budget.
+        async with httpx.AsyncClient(timeout=_ollama_timeout()) as client:
             r = await client.post(
                 f"{OLLAMA_BASE}/api/generate",
                 json={
@@ -331,10 +351,19 @@ ANTI-HALLUCINATION RULES — apply on every response:
         for attempt in range(2):
             try:
 
-                # Use Live to show thinking process — 90s timeout prevents infinite hangs
+                # Stream tokens so the read-timeout is an inter-chunk stall budget
+                # rather than a hard cap on total generation time. With stream=False
+                # Ollama sends no bytes until the whole JSON is generated, so a slow
+                # local model (cold 7B, format=json) trivially blew the old 90s read
+                # window — surfacing as "<model> API error: ReadTimeout". Streaming
+                # keeps a working model alive indefinitely while still catching a
+                # genuinely hung one (no token for _ollama_timeout().read seconds).
+                raw = ""
                 with Live(Panel(f"[cyan bold]Evaluating[/cyan bold]\n[dim]Model: {model}[/dim]\n[yellow]Status: Thinking...[/yellow]", border_style="cyan"), refresh_per_second=2, console=console, transient=True) as live:
-                    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
-                        r = await client.post(
+                    parts: list[str] = []
+                    async with httpx.AsyncClient(timeout=_ollama_timeout()) as client:
+                        async with client.stream(
+                            "POST",
                             f"{OLLAMA_BASE}/api/chat",
                             json={
                                 "model": model,
@@ -342,7 +371,7 @@ ANTI-HALLUCINATION RULES — apply on every response:
                                     {"role": "system", "content": full_system},
                                     {"role": "user", "content": prompt},
                                 ],
-                                "stream": False,
+                                "stream": True,
                                 "format": "json",
                                 "keep_alive": "10m",
                                 "options": {
@@ -351,8 +380,21 @@ ANTI-HALLUCINATION RULES — apply on every response:
                                     **ctx_for_tier(),     # Tier-aware: 4096 (low) → 8192 (ultra)
                                 }
                             }
-                        )
-                    raw = r.json()["message"]["content"]
+                        ) as resp:
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line.strip():
+                                    continue
+                                try:
+                                    chunk = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue  # skip any partial/keep-alive line
+                                piece = chunk.get("message", {}).get("content", "")
+                                if piece:
+                                    parts.append(piece)
+                                if chunk.get("done"):
+                                    break
+                    raw = "".join(parts)
                     live.update(Panel(f"[green bold]✓ Done[/green bold] [dim]({model})[/dim]", border_style="green"))
 
                 # Strip markdown code fences just in case
@@ -361,10 +403,20 @@ ANTI-HALLUCINATION RULES — apply on every response:
                 try:
                     parsed = json.loads(clean)
                 except json.JSONDecodeError:
-                    # Fallback: bracket-balanced extraction (handles nested braces in strings)
+                    # Fallback 1: bracket-balanced extraction (nested braces in strings)
                     parsed = self._extract_json_robust(clean)
                     if parsed is None:
+                        # Fallback 2: salvage a truncated response. Small local models
+                        # routinely over-generate (e.g. an attack plan with 15+
+                        # hypotheses) and get cut off at num_predict mid-JSON, leaving
+                        # an unterminated object. Rather than discard everything and
+                        # regenerate — a second ~100s call that blows the per-agent
+                        # timeout — recover the complete elements already produced.
+                        parsed = self._salvage_truncated_json(clean)
+                    if parsed is None:
                         raise json.JSONDecodeError("No JSON structure found", clean, 0)
+                    else:
+                        console.print(f"[dim]  ⚠ {model} output was truncated/unbalanced — salvaged usable JSON[/dim]")
                 
                 # CYPHEX GLOBAL FIX: Recursively flatten lists of strings into multiline strings
                 # to prevent AttributeError: 'list' object has no attribute 'strip' downstream
@@ -438,4 +490,81 @@ ANTI-HALLUCINATION RULES — apply on every response:
                         except json.JSONDecodeError:
                             return None
             i += 1
+        return None
+
+    @staticmethod
+    def _salvage_truncated_json(text: str):
+        """
+        Recover a usable object from JSON that was cut off mid-generation
+        (num_predict limit), leaving unbalanced brackets / an unterminated
+        string. Strategy: walk to the last structural close ('}' or ']') that
+        sits outside a string, truncate there, re-append the closers implied by
+        the still-open bracket stack, and parse. Trailing incomplete elements
+        (a half-written final hypothesis) are dropped rather than guessed.
+
+        Returns a parsed dict, or None if nothing salvageable is found.
+        """
+        start = text.find('{')
+        if start == -1:
+            return None
+        s = text[start:]
+
+        # Collect the indices of every structural close that is not inside a string.
+        close_idxs = []
+        in_string = False
+        escape = False
+        for i, ch in enumerate(s):
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                if in_string:
+                    escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch in '}]':
+                close_idxs.append(i)
+
+        def _needed_closers(fragment: str) -> str:
+            stack = []
+            in_str = False
+            esc = False
+            for ch in fragment:
+                if esc:
+                    esc = False
+                    continue
+                if ch == '\\':
+                    if in_str:
+                        esc = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch in '{[':
+                    stack.append(ch)
+                elif ch == '}':
+                    if stack and stack[-1] == '{':
+                        stack.pop()
+                elif ch == ']':
+                    if stack and stack[-1] == '[':
+                        stack.pop()
+            return ''.join('}' if c == '{' else ']' for c in reversed(stack))
+
+        # Try each structural close from the end backwards: the last one that
+        # yields valid JSON once we re-append the open-bracket closers wins.
+        for pos in reversed(close_idxs):
+            candidate = s[:pos + 1].rstrip()
+            if candidate.endswith(','):
+                candidate = candidate[:-1].rstrip()
+            closers = _needed_closers(candidate)
+            try:
+                return json.loads(candidate + closers)
+            except json.JSONDecodeError:
+                continue
         return None

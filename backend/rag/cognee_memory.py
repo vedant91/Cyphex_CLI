@@ -28,6 +28,22 @@ from backend.reasoning.session_memory import _CYPHEX_ROOT, _repo_hash
 # defense-in-depth (cheap, no reason to delay it).
 os.environ.setdefault("TELEMETRY_DISABLED", "1")
 
+# cognee's structlog console renderer is extremely verbose at its default
+# INFO level: every ontology near-miss ("No close match found for 'x' in
+# category 'y'") and every instructor structured-output retry — including a
+# full ChatCompletion repr dumped as an unstructured multi-KB blob on each
+# failed attempt — gets written straight to stdout, drowning CYPHEX's own
+# rich-formatted scan output. cognee here is purely a best-effort background
+# enrichment step (remember_fix/recall_similar_fixes below are always called
+# through a timeout + try/except, and the patch loop already prints its own
+# "cognee memory: N/M persisted" summary) — a real failure surfaces through
+# that path, so none of cognee's internal retry mechanics need to reach the
+# terminal. setdefault, not set: an operator who explicitly exports LOG_LEVEL
+# for their own cognee debugging still wins. Read by cognee's own
+# setup_logging() at `import cognee` time, so — like TELEMETRY_DISABLED —
+# this must be set before that happens anywhere in the process.
+os.environ.setdefault("LOG_LEVEL", "ERROR")
+
 # Cheap check only — no actual import. cognee's dependency footprint (~39
 # packages incl. fastapi/sqlalchemy/lancedb) is heavy enough that eagerly
 # importing it would tax every CLI invocation, not just patch runs.
@@ -83,6 +99,40 @@ def _quiet_cognee_logging() -> None:
         with open(os.devnull, "w") as devnull, contextlib.redirect_stderr(devnull):
             from cognee.shared import logging_utils
             logging_utils.setup_logging(logging.CRITICAL)
+
+            # cognee's OWN modules call setup_logging() again on their own
+            # first import — cognee/__init__.py does it unconditionally at
+            # module scope, and submodules like the vector-embeddings utils
+            # do it lazily the first time cognee.add()/cognify() actually
+            # needs them, which is mid-pipeline, after this function has
+            # already returned. Every such call rebuilds the root logger's
+            # handler at its own INFO default (root_logger.handlers.clear()
+            # + a fresh handler leveled from its own log_level arg), silently
+            # undoing the CRITICAL setting above no matter how many times or
+            # how early we call this. Re-calling _quiet_cognee_logging() at
+            # each call site (see remember_fix/recall_similar_fixes) isn't
+            # enough because the undo can happen *during* that same call, so
+            # pin it at the source instead: wrap setup_logging so any future
+            # call — from anywhere, at any time, regardless of what level it
+            # was asked for — still lands on CRITICAL.
+            if not getattr(logging_utils.setup_logging, "_cyphex_pinned_critical", False):
+                _real_setup_logging = logging_utils.setup_logging
+
+                def _pinned_setup_logging(log_level=None, name=None):
+                    return _real_setup_logging(logging.CRITICAL, name)
+
+                _pinned_setup_logging._cyphex_pinned_critical = True
+                logging_utils.setup_logging = _pinned_setup_logging
+
+                # cognee/__init__.py binds `setup_logging` into its own
+                # namespace at import time (`from .shared.logging_utils
+                # import setup_logging`), so submodules that already did
+                # `from cognee.shared.logging_utils import setup_logging`
+                # hold their own reference to the unpinned original — patch
+                # the copy on the cognee package itself too, best-effort.
+                import cognee as _cognee_pkg
+                if hasattr(_cognee_pkg, "setup_logging"):
+                    _cognee_pkg.setup_logging = _pinned_setup_logging
     except Exception:
         # cognee's logging internals are beta and move around — the stdlib
         # levels below are the part that must not be skipped.
@@ -220,6 +270,15 @@ async def remember_fix(cwe: str, vulnerable_code: str, fixed_code: str, project_
 
     import cognee
 
+    # cognee's own submodules (e.g. cognee/__init__.py, the vector embeddings
+    # utils) call structlog's setup_logging() again on their own first
+    # import — usually triggered lazily by this very add()/cognify() call —
+    # which unconditionally replaces the root logger's handler at its INFO
+    # default and undoes _quiet_cognee_logging()'s CRITICAL setting from
+    # _ensure_configured(). Re-apply immediately before the actual pipeline
+    # call, not just once at config time, so the reset can't outlive it.
+    _quiet_cognee_logging()
+
     content = _format_content(cwe, vulnerable_code, fixed_code, project_id, framework)
 
     try:
@@ -253,6 +312,10 @@ async def recall_similar_fixes(cwe: str, vulnerable_code: str, limit: int = 3) -
 
     import cognee
     from cognee import SearchType
+
+    # See remember_fix() — a lazily-imported cognee submodule can reset the
+    # logging config back to its noisy INFO default before this call.
+    _quiet_cognee_logging()
 
     query = f"How was a {cwe} vulnerability fixed in code similar to:\n{vulnerable_code}"
 

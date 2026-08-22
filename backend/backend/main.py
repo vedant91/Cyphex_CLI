@@ -26,6 +26,10 @@ if os.name == "nt":
 
 # Add parent dir to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Repo root — needed so scan_orchestrator's `from scoring import ...` (the
+# single source of truth for the security posture score, shared with the
+# CLI's terminal_ui.py/cli_engine.py) resolves regardless of launch cwd.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from scan_orchestrator import ScanOrchestrator
 from agents.terminal import Colors

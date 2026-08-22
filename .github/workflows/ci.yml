@@ -57,6 +57,71 @@ jobs:
         run: |
           python -m cyphex.cli doctor || true
 
+      - name: Import the interactive workspace (cx.py)
+        # `cyphex doctor` above never touches cx.py — only the bare `cyphex`
+        # invocation (_launch_workspace() -> import cx) does, and that's the
+        # tool's documented default UX. Without this step the matrix already
+        # running windows-latest above would still never have caught cx.py's
+        # unguarded `import readline` (readline isn't in the Windows stdlib).
+        run: python -c "import cx; print('cx imports OK — readline guard is not a no-op:', cx.readline)"
+
+  # Every runner above uses a normal UTF-8 locale. Minimal Docker base images,
+  # most bare CI runners run from cron, and plenty of production servers use
+  # LANG=C/POSIX instead — terminal_ui.py's Unicode output used to crash
+  # there because its UTF-8-forcing fix was gated to win32 only. This job
+  # reproduces that exact failure mode.
+  linux-c-locale:
+    runs-on: ubuntu-latest
+    env:
+      LANG: C
+      LC_ALL: C
+      PYTHONIOENCODING: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Import + render under a C locale
+        run: |
+          python -c "
+          import sys
+          print('stdout encoding under LANG=C:', sys.stdout.encoding)
+          import terminal_ui as ui
+          ui.soc.print('unicode check: ✓ ▲ ● ◆ ┏┅┅┓ — must not crash')
+          "
+      - name: cyphex doctor under a C locale
+        run: python -m cyphex.cli doctor || true
+
+  # musl libc, minimal base image — the closest thing to a hostile
+  # environment this matrix can reach without owning actual Windows
+  # hardware. Deliberately does NOT run the full `pip install -e ".[dev]"`:
+  # numpy/scikit-learn have no musllinux wheel for every version this repo
+  # pins, which forces a from-source Meson build needing a C/Fortran
+  # toolchain this image doesn't have (confirmed by hand — a build-base
+  # install made it work but took well over 2 minutes, too slow/flaky for a
+  # smoke test). cx.py and terminal_ui.py import neither at module scope, so
+  # installing just their real runtime deps (rich, httpx) is enough to prove
+  # the readline/encoding fixes hold on musl.
+  alpine-smoke:
+    runs-on: ubuntu-latest
+    container: python:3.11-alpine
+    steps:
+      - name: Install git (actions/checkout needs it on Alpine)
+        run: apk add --no-cache git
+      - uses: actions/checkout@v4
+      - name: Install cx.py / terminal_ui.py's actual runtime deps
+        run: pip install --quiet rich httpx
+      - name: Import on Alpine (musl)
+        run: |
+          python -c "
+          import cx
+          import terminal_ui as ui
+          print('imports OK on Alpine, readline:', cx.readline)
+          ui.soc.print('unicode check: ✓ ▲ ● ◆ ┏┅┅┓')
+          "
+
   lint:
     runs-on: ubuntu-latest
     steps:

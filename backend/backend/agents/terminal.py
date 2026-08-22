@@ -171,12 +171,24 @@ class AgentTerminal:
                 # Use threaded subprocess.Popen as a reliable fallback.
                 return await self._run_windows(command, timeout, start_time)
             else:
+                # /bin/bash doesn't exist on every POSIX box this agent might
+                # run inside — minimal/Alpine (musl) containers commonly ship
+                # only /bin/sh, and this agent's whole job is running inside
+                # sandboxed target apps, where that's a realistic case, not
+                # an edge case. executable=None (bash not found) falls back
+                # to the platform's own shell default (/bin/sh) instead of
+                # a hardcoded path that may not exist.
+                try:
+                    from backend.platform_compat import resolve_shell
+                    bash_path = resolve_shell("bash")
+                except Exception:
+                    bash_path = "/bin/bash" if os.path.exists("/bin/bash") else None
                 proc = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=self.working_dir,
-                    executable="/bin/bash",
+                    executable=bash_path,
                 )
 
             # Stream stdout line by line

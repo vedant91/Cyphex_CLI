@@ -23,10 +23,30 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.27.0",
+    # Already required by the scanner/scoring path; also the runtime engine
+    # behind mascot_remaster's palette snap and mascot_anim's frame synthesis
+    # (both are imported defensively and degrade to a softer render without
+    # it, so this is not a NEW dependency — just a second consumer).
     "numpy>=1.26.0",
     "scikit-learn>=1.4.0",
     "joblib>=1.3.0",
     "rich>=13.0.0",
+    # mascot.py's real pixel-art rendering (frame compositing/brightness via
+    # ImageEnhance, plus the Tier 1-3 backends in mascot_backend_image.py /
+    # mascot_backend_halfblock.py) — always imported defensively, so a
+    # missing Pillow just degrades to the Tier 0 plain-glyph fallback rather
+    # than breaking anything, but it's a real declared dependency now.
+    "pillow>=10.0.0",
+    # stdlib readline is POSIX-only — Windows CPython ships without it, and
+    # cx.py's interactive workspace degrades to no-tab-completion/no-history
+    # without this shim (see cx.py's guarded import).
+    "pyreadline3; sys_platform == 'win32'",
+    # cyphex_cli.py's `class C` prints raw ANSI escape codes directly with
+    # no Rich fallback (unlike cx.py/terminal_ui.py) — on legacy Windows
+    # cmd.exe without native VT processing enabled, those render as literal
+    # escape-sequence garbage instead of color. colorama translates/strips
+    # them there and is close to a no-op everywhere else.
+    "colorama; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +63,26 @@ cyphex = "cyphex.cli:main"
 # Top-level engine modules that live at the repo root (outside the cyphex/
 # package) but are imported by cyphex.cli. Declared so an editable install
 # (`pip install -e .`) exposes them and `cyphex` can open the workspace.
-py-modules = ["cli_engine", "cx", "terminal_ui", "cyphex_cli", "cyphex_benchmark"]
+py-modules = [
+    "cli_engine", "cx", "terminal_ui", "cyphex_cli", "cyphex_benchmark", "mascot",
+    # mascot.py's tiered pixel-art rendering backends + the opt-in separate-
+    # terminal-window companion — sibling top-level modules it imports
+    # defensively at runtime, so an installed (not just in-repo) build can
+    # still resolve them.
+    #
+    #   mascot_anim            owns WHAT the mascot does: the per-state frame
+    #                          lists, and the fixed-canvas guarantee the
+    #                          redraw loop's cursor-up arithmetic depends on.
+    #   mascot_remaster        repairs the JPEG-damaged source PNGs (BOX
+    #                          downsample -> saturate -> snap to the designed
+    #                          six-colour palette) so the art renders crisp.
+    #   mascot_backend_subcell quadrant/sextant renderers — more subpixels per
+    #                          terminal cell than half-blocks, which is what
+    #                          makes a SMALLER mascot look FINER, not chunkier.
+    "mascot_anim", "mascot_remaster",
+    "mascot_backend_image", "mascot_backend_halfblock", "mascot_backend_subcell",
+    "mascot_companion", "mascot_companion_loop",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -29,6 +29,30 @@ try:
 except Exception:
     pass
 
+# `class C` below prints raw ANSI escape codes directly (this file has no
+# Rich fallback the way cx.py/terminal_ui.py do) — on legacy Windows cmd.exe
+# without native VT processing enabled, that renders as literal
+# escape-sequence garbage instead of color. colorama enables VT mode where
+# it can and transparently translates/strips the codes where it can't; it's
+# a no-op on any terminal that already handles ANSI natively.
+try:
+    import colorama
+    colorama.init(autoreset=False)
+except ImportError:
+    pass
+
+
+def _clear():
+    """cls/clear, but only when stdout is a real terminal. The ~10 call
+    sites below used to fire this unconditionally — harmless interactively,
+    but it spammed escape codes into anything piped/redirected (e.g.
+    `cyphex scan ... > out.log`, or CI), and did it 10 separate times
+    instead of once. Mirrors cx.py's own _clear(), which already got this
+    right."""
+    if sys.stdout.isatty():
+        os.system("cls" if os.name == "nt" else "clear")
+
+
 def load_env_file():
     """Lightweight, standard-library-only .env file loader."""
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -112,6 +136,12 @@ def main():
         action="store_true",
         help="Use the new experimental DeepAgents for adaptive Oracle-guided DAST",
     )
+    scan_p.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show full pipeline detail (per-payload DAST narration, per-file SAST hits, "
+             "patch-loop internals) — default is concise phase-summary output only",
+    )
 
     sub.add_parser("doctor", help="Check local runtime/tooling readiness")
     sub.add_parser("council-doctor", help="Check all 4 council models are available in Ollama")
@@ -154,13 +184,13 @@ def main():
 
     args = parser.parse_args()
     if not args.command:
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         parser.print_help()
         return
 
     if args.command == "onboard":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         if not args.repo and not args.path:
             print(f"{C.R}[ERR]{C.RST} Must provide either --repo or --path")
@@ -183,7 +213,7 @@ def main():
         sys.exit(0)
 
     if args.command == "doctor":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         CyphexEngine = _load_engine()
         engine = CyphexEngine()
@@ -191,22 +221,50 @@ def main():
         raise SystemExit(0 if ok else 1)
 
     if args.command == "council-doctor":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         import httpx
         from rich.console import Console
         console = Console()
 
-        REQUIRED_MODELS = [
-            ("deepseek-coder:1.3b",  "Detector",    "always-on",   1.0),
-            ("phi3:mini",             "Validator",   "always-on",   2.2),
-            ("llama3.2:1b",           "Narrator",    "phase-swap",  1.0),
-            ("cyphex-patch",          "Patch Agent", "patch-only",  4.5),
-        ]
-
+        # Was previously a hardcoded tag list (deepseek-coder:1.3b, phi3:mini,
+        # cyphex-patch, ...) that had drifted from what's actually pulled and
+        # in use — it reported those as NOT FOUND while the real pipeline ran
+        # fine on different, better models. ModelSelector.discover() is the
+        # SAME resource-aware brain the live scan/patch/debate pipeline uses
+        # (see backend/council/model_selector.py) — it dynamically picks the
+        # best installed model per role, quality-first — so this check now
+        # verifies what will actually run, not a stale wishlist.
         console.print("[bold cyan]CYPHEX Council Model Health Check[/bold cyan]\n")
+
+        from backend.council.model_selector import ModelSelector
+        import nl_router
+
+        selector = ModelSelector()
+        discovered = asyncio.run(selector.discover(quiet=True))
+
+        if not discovered:
+            console.print("[red]✗ Ollama unreachable, or no models installed at localhost:11434[/red]")
+            console.print("  → Start it: [bold]ollama serve[/bold]   then pull a model: [bold]ollama pull llama3.1:8b[/bold]")
+            raise SystemExit(1)
+
+        console.print(f"  [dim]{len(selector.models)} model(s) found · strategy: {selector.strategy} · "
+                       f"VRAM budget {selector.vram_budget:.1f}GB[/dim]\n")
+
+        # role -> (display name, schedule) — mirrors ModelSelector.ROLES plus
+        # the interpreter role nl_router.py adds on top for the NL router.
+        ROLE_META = {
+            "detector":  ("Detector",    "always-on"),
+            "validator": ("Validator",   "always-on"),
+            "patcher":   ("Patch Agent", "patch-only"),
+        }
+
+        checks = [(selector.assignments[role], *meta) for role, meta in ROLE_META.items()
+                  if role in selector.assignments]
+        checks.append((nl_router.ROUTER_MODEL, "Interpreter", "NL-router"))
+
         all_ok = True
-        for tag, role, schedule, vram in REQUIRED_MODELS:
+        for tag, role, schedule in checks:
             try:
                 r = httpx.post(
                     "http://localhost:11434/api/generate",
@@ -215,9 +273,9 @@ def main():
                 )
                 response = r.json().get("response", "")
                 if "ready" in response.lower():
-                    console.print(f"  [green]✓[/green] {role:12} {tag:30} {vram} GB  ({schedule})")
+                    console.print(f"  [green]✓[/green] {role:12} {tag:30} ({schedule})")
                 else:
-                    console.print(f"  [yellow]⚠[/yellow] {role:12} {tag:30} {vram} GB  ({schedule}) — unexpected response")
+                    console.print(f"  [yellow]⚠[/yellow] {role:12} {tag:30} ({schedule}) — unexpected response")
             except Exception:
                 console.print(f"  [red]✗[/red] {role:12} {tag:30} NOT FOUND")
                 console.print(f"       → Run: [bold]ollama pull {tag}[/bold]")
@@ -231,7 +289,7 @@ def main():
         raise SystemExit(0 if all_ok else 1)
 
     if args.command == "watch":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         print(f"  {C.BOLD}Starting CYPHEX Daemon (Auto-Healing Mode){C.RST}")
         print(f"  {C.DIM}Your app's RASP SDK will send attack telemetry here.{C.RST}")
@@ -241,7 +299,7 @@ def main():
         return
 
     if args.command == "github-hook":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         print(f"  {C.BOLD}Starting GitHub Webhook Receiver{C.RST}")
         print(f"  {C.DIM}Connect your GitHub repo's webhook to this endpoint.{C.RST}\n")
@@ -250,19 +308,19 @@ def main():
         return
 
     if args.command == "netmap":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         asyncio.run(_cmd_netmap(args))
         return
 
     if args.command == "netwatch":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         asyncio.run(_cmd_netwatch(args))
         return
 
     if args.command == "netaudit":
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         print(BANNER)
         asyncio.run(_cmd_netaudit(args))
         return
@@ -271,7 +329,7 @@ def main():
         if not args.repo and not args.path:
             print(f"{C.R}Error: Provide --repo or --path{C.RST}")
             return
-        os.system("cls" if os.name == "nt" else "clear")
+        _clear()
         # Engine prints its own full banner — don't double-print here
         CyphexEngine = _load_engine()
         engine = CyphexEngine()
@@ -286,6 +344,7 @@ def main():
             non_interactive=args.non_interactive,
             network_scan=args.network,
             use_deepagents=args.use_deepagents,
+            verbose=args.verbose,
         ))
 
 

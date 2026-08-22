@@ -87,6 +87,7 @@ export function ReportPage() {
       {/* ── Summary Cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '32px' }}>
         {[
+          { label: 'SCORE', value: `${summary.security_score}/100`, color: '#7dabff', bg: 'rgba(59,130,246,0.1)' },
           { label: 'TOTAL', value: summary.total_vulns, color: '#fff', bg: 'rgba(124,58,237,0.1)' },
           { label: 'CRITICAL', value: summary.critical, color: SEVERITY_COLORS.Critical, bg: SEVERITY_BG.Critical },
           { label: 'HIGH', value: summary.high, color: SEVERITY_COLORS.High, bg: SEVERITY_BG.High },

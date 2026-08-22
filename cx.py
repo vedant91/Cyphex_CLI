@@ -13,7 +13,18 @@ import os
 import sys
 import shutil
 import subprocess
-import readline
+try:
+    import readline
+except ImportError:
+    # readline is POSIX-only (GNU readline/libedit binding) — absent from
+    # Windows CPython entirely. pyreadline3 is the Windows-compatible shim
+    # (see pyproject.toml's win32-only dependency); if neither is available,
+    # tab-completion/history are simply disabled rather than crashing the
+    # whole interactive workspace at import time.
+    try:
+        import pyreadline3 as readline
+    except ImportError:
+        readline = None
 import glob
 import time
 import textwrap
@@ -32,7 +43,7 @@ except Exception:
 def _load_env():
     env = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if os.path.exists(env):
-        with open(env) as f:
+        with open(env, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -52,6 +63,14 @@ except ImportError:
     BOOT_UI = False
 
 CX_VERSION = ui.CX_VERSION if BOOT_UI else "4.3"
+
+# ── Terminal mascot (optional — _spinner() below just stays a plain line if
+#    unavailable; no-ops itself on non-tty/NO_COLOR either way) ──────────────
+try:
+    import mascot
+    MASCOT_UI = True
+except ImportError:
+    MASCOT_UI = False
 
 
 def _boot_animation():
@@ -92,6 +111,25 @@ def _repl_prompt():
     return f"{C.CYAN}cx{C.RST}{C.GREY}>{C.RST} "
 
 
+def _input_box_top():
+    """Open the bordered input field above the prompt (no-op in the plain
+    ANSI fallback, or if rendering fails — never blocks the REPL)."""
+    if BOOT_UI:
+        try:
+            ui.deck_input_box_top()
+        except Exception:
+            pass
+
+
+def _input_box_bottom():
+    """Close the bordered input field after a line is submitted."""
+    if BOOT_UI:
+        try:
+            ui.deck_input_box_bottom()
+        except Exception:
+            pass
+
+
 def _goodbye():
     if BOOT_UI:
         try:
@@ -116,6 +154,20 @@ def _print_help():
 # Only used when terminal_ui / rich is unavailable. Mirrors terminal_ui.py's
 # single-hue blue ramp so the degraded banner stays on-brand. RED/YEL are kept
 # as the alert channel for legible errors/warnings in the plain fallback path.
+#
+# These are raw 24-bit truecolor escapes with no Rich/colorama translation —
+# this class exists specifically for the case where rich itself failed to
+# import, so it can't lean on Console's own Windows-compat layer the way the
+# normal path does. On legacy Windows without native VT processing they'd
+# render as literal escape garbage; colorama enables VT mode where it can
+# and strips them where it can't, degrading to plain uncolored text instead.
+try:
+    import colorama
+    colorama.init(autoreset=False)
+except ImportError:
+    pass
+
+
 def _tc(hex_):
     r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
     return f"\033[38;2;{r};{g};{b}m"
@@ -155,27 +207,33 @@ QUICK_HELP = f"""
   {C.NEON}/scan <target>{C.RST}     Scan a path or GitHub URL  (Static + DAST)
   {C.NEON}/deep <target>{C.RST}     Add the full DeepAgents attack swarm
   {C.NEON}/full <target>{C.RST}     DeepAgents + network sweep (everything)
-     {C.GREY}flags:{C.RST} {C.DIM}--network  --deepagents  --full  --no-patch{C.RST}
+     {C.GREY}flags:{C.RST} {C.DIM}--network  --deepagents  --full  --no-patch  --verbose{C.RST}
      {C.GREY}e.g.  {C.RST}{C.DIM}/scan ./vibemart --network --deepagents{C.RST}
+     {C.GREY}      {C.RST}{C.DIM}--verbose shows full pipeline detail; default is concise phase summaries{C.RST}
   {C.NEON}/net [host]{C.RST}        Network discovery, or audit a specific host
   {C.NEON}/watch{C.RST}             Start the RASP auto-healing daemon
   {C.NEON}/setup{C.RST}             Install Semgrep, Nuclei; check Ollama & Docker
   {C.NEON}/doctor{C.RST}            Check all models, tools, and dependencies
   {C.NEON}/benchmark{C.RST}         Score the Immune System (precision/recall/F1)
+  {C.NEON}/verify [path]{C.RST}     Verify Gate maintainability panel (config/status/health)
+     {C.GREY}flags:{C.RST} {C.DIM}--selftest  --ci  --watch [secs]  --json out.json{C.RST}
+  {C.NEON}/status [path]{C.RST}     System Observability — event log, last scan, agent/cognee health
+     {C.GREY}flags:{C.RST} {C.DIM}--watch [secs]  --json out.json{C.RST}
   {C.NEON}/models{C.RST}            List available local Ollama models
   {C.NEON}/history{C.RST}           Show recent scans this session
   {C.NEON}/clear{C.RST}             Repaint the workspace
   {C.NEON}/exit{C.RST}  {C.NEON}/quit{C.RST}      Exit CYPHEX
 
 {C.DIM}─────────────────────────────────────────────────────────────
-  Tip: just type a path or URL and press Enter to scan it{C.RST}
+  Tip: type a path, URL, or plain English — "scan my repo <link>",
+       "run a full scan on ./app" — and press Enter{C.RST}
 """
 
 
 # ── Readline autocomplete ──────────────────────────────────────────────────────
 COMMANDS = [
     "/scan", "/deep", "/deepagents", "/full", "/net", "/netmap", "/netwatch",
-    "/netaudit", "/watch", "/setup", "/benchmark", "/bench", "/doctor",
+    "/netaudit", "/watch", "/setup", "/benchmark", "/bench", "/verify", "/status", "/doctor",
     "/models", "/version", "/history", "/clear", "/exit", "/quit", "/help",
 ]
 
@@ -190,9 +248,10 @@ def _completer(text, state):
         return options[state]
     return None
 
-readline.set_completer(_completer)
-readline.parse_and_bind("tab: complete")
-readline.set_completer_delims(" \t\n")
+if readline:
+    readline.set_completer(_completer)
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer_delims(" \t\n")
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -211,8 +270,15 @@ def _clear():
         os.system("cls" if os.name == "nt" else "clear")
 
 def _spinner(msg: str):
-    """Print a status line."""
+    """Print a status line, with a brief animated mascot flourish alongside
+    it — the mascot is fully stopped and erased again before this returns,
+    so it never races the subprocess that _run_cyphex() spawns right after."""
     print(f"\n  {C.CYAN}◆{C.RST} {msg}")
+    if MASCOT_UI:
+        try:
+            mascot.thinking(msg, flourish=True)
+        except Exception:
+            pass
 
 def _ok(msg: str):
     print(f"  {C.NEON}✓{C.RST} {msg}")
@@ -260,10 +326,14 @@ def _cmd_scan(arg: str, deep: bool = False, network: bool = False):
          --deep / --deepagents add the full DeepAgents attack swarm
          --full / --all        both of the above
          --no-patch            scan only, skip auto-patching
+         --verbose             show full pipeline detail (per-payload DAST
+                                narration, per-file SAST hits, patch-loop
+                                internals) instead of concise phase summaries
     So `/scan ./app --network --deepagents` == the long cyphex_cli invocation.
     """
     import shlex
     no_patch = False
+    verbose = False
     positional = []
     try:
         tokens = shlex.split(arg) if arg else []
@@ -279,6 +349,8 @@ def _cmd_scan(arg: str, deep: bool = False, network: bool = False):
             deep = network = True
         elif tl in ("--no-patch", "--nopatch", "--scan-only"):
             no_patch = True
+        elif tl in ("--verbose", "-v"):
+            verbose = True
         elif t.startswith("-"):
             _dim(f"(ignoring unknown flag {t})")
         else:
@@ -319,6 +391,8 @@ def _cmd_scan(arg: str, deep: bool = False, network: bool = False):
         scan_args += ["--use-deepagents"]
     if no_patch:
         scan_args += ["--no-patch"]
+    if verbose:
+        scan_args += ["--verbose"]
 
     scan_args += ["--non-interactive"]
 
@@ -327,6 +401,8 @@ def _cmd_scan(arg: str, deep: bool = False, network: bool = False):
         bits.append("Network")
     if no_patch:
         bits.append("scan-only")
+    if verbose:
+        bits.append("verbose")
     _dim(f"Mode: {' + '.join(bits)}")
     print()
 
@@ -441,6 +517,197 @@ def _cmd_benchmark(arg: str):
         pass
 
 
+def _render_verify_report(report):
+    rendered = False
+    if BOOT_UI:
+        try:
+            ui.render_verify_health(report); rendered = True
+        except Exception:
+            rendered = False
+    if not rendered:
+        from backend.patch.verify_health import print_plain
+        print_plain(report)
+
+
+def _cmd_verify(arg: str):
+    """Verify Gate maintainability panel — config, status, and next steps.
+
+    Usage:  /verify [path] [--json out.json] [--selftest] [--ci] [--watch [secs]]
+    No path: sweeps every scan manifest CYPHEX has ever written
+    (backend/sandboxes/*/.cyphex/patches.json). A path checks just that
+    one directory's .cyphex/patches.json.
+
+      --selftest   also live-drive each check (not just probe presence) —
+                   proves the build/rescan/replay checks actually work
+      --ci         print a machine-checkable PASS/DEGRADED/UNUSABLE verdict
+                   and return a process exit code (0/1/2) for CI gating
+      --watch [s]  keep re-reading and re-rendering every `s` seconds
+                   (default 5) until Ctrl+C — requires an interactive TTY
+
+    Returns the CI exit code (int) when --ci is passed, else None — callers
+    that need process exit semantics (main()'s bare-CLI dispatch) check for
+    an int return and sys.exit() on it themselves; the REPL ignores it.
+    """
+    import shlex
+    path = json_out = None
+    selftest = ci = watch = False
+    watch_interval = 5.0
+    toks = shlex.split(arg) if arg else []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in ("--json", "-o") and i + 1 < len(toks):
+            json_out = toks[i + 1]; i += 2
+        elif t == "--selftest":
+            selftest = True; i += 1
+        elif t == "--ci":
+            ci = True; i += 1
+        elif t == "--watch":
+            watch = True
+            if i + 1 < len(toks) and not toks[i + 1].startswith("-"):
+                try:
+                    watch_interval = max(1.0, float(toks[i + 1]))
+                    i += 1
+                except ValueError:
+                    pass
+            i += 1
+        elif not t.startswith("-") and path is None:
+            path = t; i += 1
+        else:
+            i += 1
+
+    from backend.patch.verify_health import get_verify_health, compute_gate_exit_code
+
+    if watch:
+        if not sys.stdout.isatty():
+            _warn("--watch needs an interactive terminal; showing a single snapshot instead.")
+            watch = False
+        else:
+            try:
+                while True:
+                    _clear()
+                    report = get_verify_health(path, include_selftest=selftest)
+                    _render_verify_report(report)
+                    _dim(f"Watching — refreshing every {watch_interval:g}s (Ctrl+C to stop)")
+                    time.sleep(watch_interval)
+            except KeyboardInterrupt:
+                print()
+                return None
+
+    _spinner("Reading Verify Gate history..." + (" (live self-test...)" if selftest else ""))
+    try:
+        report = get_verify_health(path, include_selftest=selftest)
+    except Exception as e:
+        _err(f"Verify Gate panel failed: {e}")
+        return 2 if ci else None
+
+    _render_verify_report(report)
+
+    if json_out:
+        try:
+            import json as _json
+            with open(json_out, "w") as f:
+                _json.dump(report, f, indent=2, default=str)
+            _dim(f"Report written → {json_out}")
+        except Exception:
+            pass
+
+    if ci:
+        code = compute_gate_exit_code(report)
+        label = {0: "PASS — gate healthy", 1: "DEGRADED", 2: "UNUSABLE"}[code]
+        color = C.NEON if code == 0 else (C.YEL if code == 1 else C.RED)
+        print(f"\n  {color}{C.BOLD}[CI] Verify Gate: {label} (exit {code}){C.RST}")
+        return code
+    return None
+
+
+def _cmd_status(arg: str):
+    """System Observability dashboard — event log, last scan, agent/cognee health, errors.
+
+    Usage:  /status [path] [--json out.json] [--watch [secs]]
+    No path: sweeps every scan CYPHEX has instrumented
+    (backend/sandboxes/*/.cyphex/events.jsonl). A path checks just that one
+    sandbox's event log.
+    """
+    import shlex
+    path = json_out = None
+    watch = False
+    watch_interval = 5.0
+    toks = shlex.split(arg) if arg else []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in ("--json", "-o") and i + 1 < len(toks):
+            json_out = toks[i + 1]; i += 2
+        elif t == "--watch":
+            watch = True
+            if i + 1 < len(toks) and not toks[i + 1].startswith("-"):
+                try:
+                    watch_interval = max(1.0, float(toks[i + 1]))
+                    i += 1
+                except ValueError:
+                    pass
+            i += 1
+        elif not t.startswith("-") and path is None:
+            path = t; i += 1
+        else:
+            i += 1
+
+    def _render(report):
+        rendered = False
+        if BOOT_UI:
+            try:
+                ui.render_observability(report); rendered = True
+            except Exception:
+                rendered = False
+        if not rendered:
+            print(f"\n  CYPHEX System Observability")
+            print(f"  {report['event_logs_found']} scan(s) instrumented, "
+                  f"{report['events_recorded']} event(s) recorded")
+            last = report.get("last_scan")
+            if last:
+                print(f"  last scan: {last['scan_id']}  completed={last['completed']}  "
+                      f"duration={last['duration_s']}s")
+            for step in report["next_steps"]:
+                print(f"    -> {step}")
+            print()
+
+    from backend.observability.health import get_system_health
+
+    if watch:
+        if not sys.stdout.isatty():
+            _warn("--watch needs an interactive terminal; showing a single snapshot instead.")
+            watch = False
+        else:
+            try:
+                while True:
+                    _clear()
+                    _render(get_system_health(path))
+                    _dim(f"Watching — refreshing every {watch_interval:g}s (Ctrl+C to stop)")
+                    time.sleep(watch_interval)
+            except KeyboardInterrupt:
+                print()
+                return
+
+    _spinner("Reading system observability...")
+    try:
+        report = get_system_health(path)
+    except Exception as e:
+        _err(f"Observability dashboard failed: {e}")
+        return
+
+    _render(report)
+
+    if json_out:
+        try:
+            import json as _json
+            with open(json_out, "w") as f:
+                _json.dump(report, f, indent=2, default=str)
+            _dim(f"Report written → {json_out}")
+        except Exception:
+            pass
+
+
 def _cmd_models():
     """List available Ollama models."""
     print()
@@ -476,7 +743,10 @@ def _cmd_history():
 def _auto_scan(raw: str):
     """
     User typed something that isn't a slash command.
-    If it looks like a path or URL, scan it.
+    If it looks like a path or URL, scan it directly. Otherwise hand it to
+    the natural-language router (nl_router.py, backed by local Ollama) —
+    "run my repo <link>" becomes "/scan <link> --full" — so the workspace
+    reads plain English the same way it always read slash commands.
     """
     raw = raw.strip()
     if not raw:
@@ -485,9 +755,29 @@ def _auto_scan(raw: str):
     is_path = os.path.exists(os.path.expanduser(raw)) or raw.startswith("./") or raw.startswith("~/")
     if is_url or is_path:
         _cmd_scan(raw)
-    else:
-        _err(f"Unknown command or path not found: {C.BOLD}{raw}{C.RST}")
-        _dim("Type /help to see available commands.")
+        return
+
+    routed = _nl_route(raw)
+    if routed:
+        _dim(f"→ {routed}")
+        _handle(routed)
+        return
+
+    _err(f"Unknown command or path not found: {C.BOLD}{raw}{C.RST}")
+    _dim("Type /help to see available commands, or plain English like \"scan my repo <link>\".")
+
+
+def _nl_route(raw: str) -> str | None:
+    """Ask the local Ollama router (nl_router.py) to translate free text
+    into a slash command. Fails silently (returns None) if Ollama isn't
+    installed, isn't running, or refuses — the REPL then just falls back
+    to the plain "unknown command" message, same as before this existed."""
+    try:
+        import nl_router
+    except ImportError:
+        return None
+    _dim("interpreting…")
+    return nl_router.translate(raw)
 
 
 # ── Main REPL ─────────────────────────────────────────────────────────────────
@@ -545,6 +835,12 @@ def _handle(line: str):
         case "/benchmark" | "/bench":
             _cmd_benchmark(arg)
 
+        case "/verify":
+            _cmd_verify(arg)
+
+        case "/status":
+            _cmd_status(arg)
+
         case "/history":
             _cmd_history()
 
@@ -576,17 +872,21 @@ def _repl():
         # is always honest. Static snapshot per turn — the animated deck only
         # runs inside rich.Live during operations, never against readline.
         _deck()
+        _input_box_top()
         try:
             line = input(_repl_prompt()).strip()
         except KeyboardInterrupt:
             # Ctrl+C → new line, don't quit
+            _input_box_bottom()
             print()
             continue
         except EOFError:
             # Ctrl+D → quit
+            _input_box_bottom()
             _goodbye()
             break
 
+        _input_box_bottom()
         _handle(line)
 
 
@@ -638,6 +938,20 @@ def main():
         if first in ("benchmark", "/benchmark", "bench", "/bench"):
             _show_header()
             _cmd_benchmark(" ".join(sys.argv[2:]))
+            return
+
+        # cx verify [path] [--json out.json] [--selftest] [--ci] [--watch [s]]
+        if first in ("verify", "/verify"):
+            _show_header()
+            code = _cmd_verify(" ".join(sys.argv[2:]))
+            if code is not None:
+                sys.exit(code)
+            return
+
+        # cx status [path] [--json out.json] [--watch [s]]
+        if first in ("status", "/status"):
+            _show_header()
+            _cmd_status(" ".join(sys.argv[2:]))
             return
 
         # cx <path/url> → auto-scan

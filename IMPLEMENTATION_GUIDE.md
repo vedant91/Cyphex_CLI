@@ -43,12 +43,22 @@ attack_agents = [
 
 ---
 
-#### **Day 3-4: Security Posture Score** ⭐⭐⭐
+#### **Day 3-4: Security Posture Score** ⭐⭐⭐ — SUPERSEDED, see note
+
+> **This plan was never carried out and is now obsolete.** `security_posture_score.py`
+> (the `SecurityPostureCalculator` referenced below) was dead code — never imported
+> anywhere — and has been deleted. The actual scoring integration lives in
+> [`scoring.py`](scoring.py) (single source of truth, imported by `terminal_ui.py`,
+> `cli_engine.py`, and `backend/backend/scan_orchestrator.py`, which puts the
+> authoritative score in `report["summary"]["security_score"]`). The dashboard widget
+> in step 3 below (`SecurityPostureScore.jsx`) was also never built; the score now
+> renders as a stat tile in `frontend/src/pages/Report.tsx` and drives the risk gauge
+> in `frontend/src/hooks/usePipeline.ts`. Steps below kept for history only.
 
 **Goal:** Make security tangible with a single number
 
 **Tasks:**
-1. ✅ Already created: `security_posture_score.py`
+1. ~~✅ Already created: `security_posture_score.py`~~ (deleted — dead code)
 2. Integrate into scan orchestrator:
 
 ```python

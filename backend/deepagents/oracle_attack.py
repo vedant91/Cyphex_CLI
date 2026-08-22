@@ -68,6 +68,11 @@ Rules:
 - Use ONLY CWE numbers: CWE-89 (SQLi), CWE-79 (XSS), CWE-78 (CMDi), CWE-22 (Path Traversal),
   CWE-918 (SSRF), CWE-94 (SSTI), CWE-611 (XXE), CWE-287 (Auth), CWE-639 (IDOR)
 - severity: Critical | High | Medium | Low
+- Output AT MOST 6 hypotheses. Never more than 6. Fewer is better — pick the
+  highest-value tests only. Extra hypotheses will be discarded.
+- Keep every string value short (under ~120 characters). Do not pad.
+- The JSON must be COMPLETE. Emit the full closing brackets. A truncated
+  response is a failed response.
 - Return ONLY valid JSON. No markdown. No preamble.
 
 JSON schema:
@@ -267,7 +272,8 @@ class AttackOracle:
             f"Target: {target}\n\n"
             f"Vulnerability class to test: {vuln_class}\n\n"
             f"Observed attack surface:\n{surface_summary}\n\n"
-            "Generate a prioritised, hypothesis-driven attack plan with 5-8 hypotheses."
+            "Generate a prioritised, hypothesis-driven attack plan with 4-6 "
+            "hypotheses (never more than 6). Return complete, compact JSON."
         )
         response = await self.orchestrator._call(
             model=model,

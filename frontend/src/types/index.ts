@@ -55,6 +55,12 @@ export interface ScanSummary {
   high: number;
   medium: number;
   low: number;
+  /** Authoritative 0-100 posture score (higher = safer), from the backend's
+   * scoring.py — the same formula the CLI's before/after panel uses. This
+   * is the ONLY authoritative score; usePipeline's live `riskScore` is a
+   * client-side approximation while a scan is in flight, reconciled
+   * against this value on `scan_complete`. */
+  security_score: number;
   pages_crawled: number;
   forms_found: number;
   endpoints_found: number;

@@ -96,7 +96,6 @@ CYPHEX is a **multi-agent autonomous security scanner** with an **adversarial co
 cyphex_v3/
 ├── cyphex_cli.py                  # CLI entrypoint (argparse, banner, launches engine)
 ├── cli_engine.py                  # Core 8-step pipeline (CyphexEngine class)
-├── run_cyphex.bat                 # Windows batch launcher
 │
 ├── backend/
 │   └── backend/
@@ -613,11 +612,23 @@ Regex patterns   → +0.5 to +0.8
 ```
 
 ### Security Score Formula
+Single source of truth: `scoring.py` (`score_from_counts()`), imported by both
+`terminal_ui.py` and `cli_engine.py` — never hand-copy this formula.
+
+Each severity's penalty is a finite geometric series: the first finding of a
+severity costs a flat weight, each further finding of that *same* severity
+costs a shrinking fraction of it (diminishing returns via the curve's shape,
+not an if-based clamp):
 ```python
-score = max(0, 100 - critical*25 - high*10 - medium*5 - low*1)
+weights = {"critical": 62, "high": 16, "medium": 6, "low": 2}
+decays  = {"critical": 0.25, "high": 0.30, "medium": 0.55, "low": 0.65}
+penalty_s(n) = weight_s * (1 - decay_s**n) / (1 - decay_s)   # n >= 1
+score = clamp(100 - sum(penalty_s(n_s) for s in severities), 0, 100)
 ```
 - 100 = no vulnerabilities
-- 0 = catastrophic (4+ critical vulns)
+- A single open Critical alone always scores below 40 (POOR or worse) — this
+  falls out of `CRIT_WEIGHT=62` by construction (`penalty(1) == 62` exactly),
+  not from a separate severity-band override. See `scoring.py` for the proof.
 
 ---
 

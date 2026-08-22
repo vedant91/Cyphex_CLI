@@ -131,20 +131,26 @@ def _parse_ss(output: str) -> list[FlowObservation]:
 
 
 async def _collect_via_netstat() -> list[FlowObservation]:
-    """macOS / Linux netstat fallback."""
+    """macOS / Linux / Windows netstat fallback."""
     try:
-        cmd = (
-            ["netstat", "-an", "-f", "inet"]
-            if sys.platform == "darwin"
-            else ["netstat", "-tunap"]
-        )
+        if sys.platform == "darwin":
+            cmd = ["netstat", "-an", "-f", "inet"]
+        elif sys.platform == "win32":
+            # -tunap is Linux/GNU-style combined short flags — Windows
+            # netstat.exe doesn't understand them and errors out. -ano is
+            # its own (unrelated) flag spelling: all connections + listening
+            # ports + numeric addresses + owning PID.
+            cmd = ["netstat", "-ano"]
+        else:
+            cmd = ["netstat", "-tunap"]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        return _parse_netstat(stdout.decode(errors="replace"))
+        text = stdout.decode(errors="replace")
+        return _parse_netstat_windows(text) if sys.platform == "win32" else _parse_netstat(text)
     except Exception:
         return []
 
@@ -183,6 +189,56 @@ def _parse_netstat(output: str) -> list[FlowObservation]:
             dst_port=peer_port,
             protocol=proto,
             state=state,
+            observed_at=now,
+        ))
+    return flows
+
+
+def _parse_netstat_windows(output: str) -> list[FlowObservation]:
+    """
+    Parse `netstat -ano` output — a different column layout from macOS/Linux
+    netstat, not just different flags: no Recv-Q/Send-Q columns, and PID is
+    its own trailing column instead of embedded in a Process name field.
+
+        Proto  Local Address          Foreign Address        State           PID
+        TCP    192.168.1.5:54321      192.168.1.10:22        ESTABLISHED     1234
+        UDP    0.0.0.0:68             *:*                                    812
+    """
+    flows = []
+    now = datetime.utcnow().isoformat()
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or parts[0].lower() not in ("tcp", "udp"):
+            continue
+        proto = parts[0].lower()
+        local_raw = parts[1]
+        peer_raw = parts[2]
+        # UDP rows have no State column (4 fields: Proto/Local/Foreign/PID);
+        # TCP rows have one (5 fields: Proto/Local/Foreign/State/PID).
+        if proto == "udp" and len(parts) == 4:
+            state, pid = "STATELESS", parts[3]
+        elif len(parts) >= 5:
+            state, pid = parts[3], parts[4]
+        else:
+            continue
+
+        if peer_raw in ("*:*", "0.0.0.0:0"):
+            continue
+
+        try:
+            local_ip, local_port = _split_addr(local_raw)
+            peer_ip, peer_port = _split_addr(peer_raw)
+        except Exception:
+            continue
+
+        flows.append(FlowObservation(
+            src_ip=local_ip,
+            dst_ip=peer_ip,
+            src_port=local_port,
+            dst_port=peer_port,
+            protocol=proto,
+            state=state,
+            pid=int(pid) if pid.isdigit() else 0,
             observed_at=now,
         ))
     return flows

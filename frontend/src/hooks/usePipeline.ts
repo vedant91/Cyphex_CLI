@@ -16,12 +16,28 @@ const initialAgents: Agent[] = [
   { id: 'patch', name: 'Patch Agent', task: 'Ready', status: 'idle' },
 ];
 
+// Live, client-side risk weighting used ONLY to animate the gauge while a
+// scan is still in flight (vuln_found events arrive one at a time, well
+// before the backend has a final count to score). These weights mirror the
+// RELATIVE severity ordering of the backend's authoritative formula
+// (scoring.py: Critical=62, High=16, Medium=6, Low=2 — roughly 31:8:3:1),
+// not its exact curve — this is deliberately an approximation, not a
+// second copy of the real formula. The authoritative 0-100 posture score
+// (backend scoring.py, higher = safer) arrives in `report.summary.security_score`
+// on `scan_complete` and OVERWRITES `riskScore` below (riskScore is the
+// inverse: higher = worse), so this live estimate can never permanently
+// disagree with the backend truth the way it used to.
 const SEVERITY_RISK: Record<string, number> = {
-  Critical: 25,
-  High: 15,
-  Medium: 8,
-  Low: 3,
+  Critical: 31,
+  High: 8,
+  Medium: 3,
+  Low: 1,
 };
+
+/** Convert the backend's authoritative posture score (0-100, higher =
+ * safer) to this dashboard's risk gauge scale (0-100, higher = worse). */
+const securityScoreToRiskScore = (securityScore: number): number =>
+  Math.max(0, Math.min(100, 100 - securityScore));
 
 const VULN_ICON_MAP: Record<string, string> = {
   injection: 'bug',
@@ -222,7 +238,19 @@ export function usePipeline() {
 
       case 'scan_complete': {
         const e = event as any;
-        setReport(e.report as ScanReport);
+        const finalReport = e.report as ScanReport;
+        setReport(finalReport);
+        // Reconcile the live client-side estimate with the backend's
+        // authoritative score — see securityScoreToRiskScore() above.
+        const authoritativeScore = finalReport?.summary?.security_score;
+        if (typeof authoritativeScore === 'number') {
+          const finalRisk = securityScoreToRiskScore(authoritativeScore);
+          setMetrics(prev => ({
+            ...prev,
+            riskScore: finalRisk,
+            riskHistory: [...prev.riskHistory, { time: new Date().toLocaleTimeString(), risk: finalRisk }],
+          }));
+        }
         setIsRunning(false);
         addLog('System', '✓ Scan completed successfully.', 'success');
         break;
@@ -278,6 +306,17 @@ export function usePipeline() {
             getScan(newScanId).then(meta => {
               if (meta.report) {
                 setReport(meta.report);
+                // Same reconciliation as the scan_complete WS event, for the
+                // case where the socket closed before that event arrived.
+                const authoritativeScore = meta.report.summary?.security_score;
+                if (typeof authoritativeScore === 'number') {
+                  const finalRisk = securityScoreToRiskScore(authoritativeScore);
+                  setMetrics(prev => ({
+                    ...prev,
+                    riskScore: finalRisk,
+                    riskHistory: [...prev.riskHistory, { time: new Date().toLocaleTimeString(), risk: finalRisk }],
+                  }));
+                }
               }
               setIsRunning(false);
             }).catch(() => setIsRunning(false));

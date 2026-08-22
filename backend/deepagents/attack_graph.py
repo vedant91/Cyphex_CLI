@@ -104,12 +104,20 @@ class AttackGraph:
 
         # ── IDOR → Mass assignment escalation ──────────────────────────────────
         if "IDOR" in finding.name:
-            chains.append(AttackEdge(
-                source=finding.endpoint,
-                target=finding.endpoint.rstrip("/0123456789"),
-                action="mass_assignment_attempt",
-                priority="high",
-            ))
+            # Strip a trailing numeric ID segment to get the parent collection
+            # endpoint (e.g. /api/orders/42 -> /api/orders). str.rstrip() only
+            # strips characters, not the segment, so on a path with no trailing
+            # digits (e.g. /api/orders/lookup) it silently did nothing and
+            # produced a source == target self-loop edge. Skip the edge
+            # entirely when there's no real collection endpoint to pivot to.
+            collection = re.sub(r'/\d+/?$', '', finding.endpoint)
+            if collection and collection != finding.endpoint:
+                chains.append(AttackEdge(
+                    source=finding.endpoint,
+                    target=collection,
+                    action="mass_assignment_attempt",
+                    priority="high",
+                ))
 
         # ── Auth bypass → Privilege escalation ─────────────────────────────────
         if "Default" in finding.name or "Auth" in finding.name:

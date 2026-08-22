@@ -19,14 +19,27 @@ Public render_* names + signatures are preserved for cli_engine.py / cx.py.
 """
 import sys, os, math, time, random, asyncio, base64, zlib
 
-# Force UTF-8 output on Windows to avoid encoding errors with Unicode chars
-if sys.platform == "win32":
-    try:
+from scoring import score_from_counts as _scoring_score_from_counts, score_band as _scoring_band
+
+# Force UTF-8 output whenever the terminal isn't already using it — this
+# module prints Unicode unconditionally (box-drawing panels, braille HUD
+# frames, severity glyphs) and Rich does NOT swallow the resulting
+# UnicodeEncodeError on a non-UTF-8 stdout; it re-raises after annotating the
+# message. Gating this to win32 only left every POSIX box with a non-UTF-8
+# locale (LANG=C, minimal Docker base images, most CI runners, cron/non-
+# interactive shells) with zero protection — the first Unicode render
+# crashed the whole scan there, not just on Windows.
+try:
+    if not (sys.stdout.encoding or "").lower().startswith("utf"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if not (sys.stderr.encoding or "").lower().startswith("utf"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+except Exception:
+    pass
+# Only affects a Python child process THIS process spawns later (it has no
+# effect on the current process — PYTHONIOENCODING is read at interpreter
+# bootstrap, which has already happened by the time this line runs).
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 from rich.console import Console
 from rich.panel import Panel
@@ -93,6 +106,32 @@ def _cols(console=None) -> int:
         return 80
 
 
+def _ascii_mode(console=None) -> bool:
+    """
+    True when this terminal can't reliably render the box-drawing/braille/
+    geometric glyph vocabulary the rest of this module uses by default.
+    Distinct from _tty(): a terminal can be interactive (isatty() True) and
+    still unable to render this — legacy Windows cmd.exe with no native VT
+    processing is exactly that case. Checked per render call rather than
+    cached once, since encoding/redirection can change mid-session (output
+    piped partway through, terminal swapped).
+
+    Three signals, any one is enough:
+      - Rich's own legacy_windows detection (no VT support found)
+      - the stream's encoding isn't UTF-8 (can't paint the glyphs at all)
+      - TERM=dumb (plain CI log viewers, some serial consoles)
+    """
+    c = console or soc
+    if getattr(c, "legacy_windows", False):
+        return True
+    enc = (getattr(c, "encoding", "") or "").lower()
+    if enc and not enc.startswith("utf"):
+        return True
+    if os.environ.get("TERM", "").lower() == "dumb":
+        return True
+    return False
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  COLOUR MATH — lerp + easing + score-band thermal colour
 # ══════════════════════════════════════════════════════════════════════════
@@ -112,12 +151,18 @@ def _ease_out(t):
     return 1 - (1 - t) ** 3
 
 
+_TIER_COLOR = {"warning": WARN, "caution": CAUT, "reference": REF, "phosphor": PHOS}
+
+
 def score_color(v):
-    """Thermal verdict colour — weapons-hot red cools to calm phosphor-green."""
-    if v < 40:  return WARN
-    if v < 60:  return CAUT
-    if v < 80:  return REF
-    return PHOS
+    """Thermal verdict colour — weapons-hot red cools to calm phosphor-green.
+
+    Band cutoffs come from scoring.score_band() (the single source of truth
+    for the 20/40/60/80 presentation thresholds) — this only maps that
+    band's tier key to this theme's colour constants.
+    """
+    _, tier = _scoring_band(v)
+    return _TIER_COLOR[tier]
 
 
 def _grad(text, stops):
@@ -142,8 +187,31 @@ SEV = {
     "Low":      (LABEL,    "○"),
     "Info":     (LABEL,    "·"),
 }
+# ASCII counterpart, same keys/colors — swapped in by sev() below whenever
+# _ascii_mode() is true, so every caller that reads severity pips through
+# sev() gets a safe glyph without needing its own ascii_mode check.
+SEV_ASCII = {
+    "Critical": (WARN,     "!"),
+    "High":     (WARN,     "*"),
+    "Medium":   (CAUT,     "+"),
+    "Low":      (LABEL,    "o"),
+    "Info":     (LABEL,    "."),
+}
+
+
 # BIT (built-in-test) states
 BIT_PENDING, BIT_TEST, BIT_GO, BIT_NOGO = "□", "◐", "✓", "✗"
+BIT_PENDING_ASCII, BIT_TEST_ASCII, BIT_GO_ASCII, BIT_NOGO_ASCII = "-", "~", "v", "x"
+
+
+def bit_state():
+    """(pending, test, go, nogo) glyph 4-tuple, ASCII-safe.
+    e.g. `p, t, g, n = bit_state()`."""
+    if _ascii_mode():
+        return BIT_PENDING_ASCII, BIT_TEST_ASCII, BIT_GO_ASCII, BIT_NOGO_ASCII
+    return BIT_PENDING, BIT_TEST, BIT_GO, BIT_NOGO
+
+
 # Waypoint / scan phases — geometric glyph + label (no emoji)
 STEP_META = {
     1: ("◹", "RECONNAISSANCE"),
@@ -155,6 +223,26 @@ STEP_META = {
     7: ("▤", "SECURITY REPORT"),
     8: ("✚", "PATCH & VERIFY"),
 }
+STEP_META_ASCII = {
+    1: ("[R]", "RECONNAISSANCE"),
+    2: ("[S]", "STATIC ANALYSIS"),
+    3: ("[D]", "SANDBOX DEPLOY"),
+    4: ("[X]", "DYNAMIC SCAN"),
+    5: ("[G]", "GENOME EVOLUTION"),
+    6: ("[A]", "ATTACK SIMULATION"),
+    7: ("[P]", "SECURITY REPORT"),
+    8: ("[V]", "PATCH & VERIFY"),
+}
+
+
+def step_meta(num):
+    """(glyph, title) for a waypoint number, ASCII-safe. Falls back to a
+    generic marker + None (caller supplies its own title) for an
+    out-of-range waypoint, same as the raw STEP_META.get(n, ...) pattern
+    every call site used before."""
+    table = STEP_META_ASCII if _ascii_mode() else STEP_META
+    fallback_glyph = "[?]" if _ascii_mode() else "◈"
+    return table.get(num, (fallback_glyph, None))
 _SWEEP_TRAIL = "⣿⣷⣶⣤⣄⡀⠄⠂⠁"          # braille head → tail decay
 _RAIN_POOL   = "0369ACEF⠁⠂⠄⡀⢀⠐⠈▓▒░"   # avionics crystallization noise
 
@@ -185,6 +273,30 @@ CANOPY = Box(
     "┋  ┋\n"
     "┗┅┅┛\n"
 )
+
+# ASCII-safe counterpart. CANOPY is a custom Box, so it's absent from Rich's
+# own LEGACY_WINDOWS_SUBSTITUTIONS table (that table only auto-downgrades
+# Rich's own built-in boxes) — Rich correctly detecting a legacy terminal
+# does nothing for a Panel/Table using CANOPY unless something here actually
+# swaps it. See _box().
+CANOPY_ASCII = Box(
+    "+--+\n"
+    "|  |\n"
+    "+--+\n"
+    "|  |\n"
+    "+--+\n"
+    "+--+\n"
+    "|  |\n"
+    "+--+\n",
+    ascii=True,
+)
+
+
+def _box(console=None):
+    """CANOPY, or CANOPY_ASCII on a terminal that can't render box-drawing
+    glyphs (see _ascii_mode()). Every Panel/Table in this module should
+    take its box= from here instead of hardcoding CANOPY directly."""
+    return CANOPY_ASCII if _ascii_mode(console) else CANOPY
 
 
 def _hairline(width, glyph="┅", style=PHOS_DIM):
@@ -655,17 +767,18 @@ def _logo_static(console=None, spaced=True):
 #  ANNUNCIATOR — reverse-video cockpit lamp tiles
 # ══════════════════════════════════════════════════════════════════════════
 def annunciator(text, level="phosphor", lit=True):
-    """A lamp tile like ▐ MASTER WARNING ▌. level: phosphor|reference|caution|
-    warning|target."""
+    """A lamp tile like ▐ MASTER WARNING ▌ (or [ MASTER WARNING ] in
+    _ascii_mode). level: phosphor|reference|caution|warning|target."""
     color = {"phosphor": PHOS, "reference": REF, "caution": CAUT,
              "warning": WARN, "target": TGT, "apex": APEX}.get(level, PHOS)
+    lwall, rwall = ("[", "]") if _ascii_mode() else ("▐", "▌")
     t = Text()
     if lit:
-        t.append("▐", style=color)
+        t.append(lwall, style=color)
         t.append(f" {text} ", style=f"bold reverse {color}")
-        t.append("▌", style=color)
+        t.append(rwall, style=color)
     else:
-        t.append(f"▐ {text} ▌", style=f"dim {LABEL}")
+        t.append(f"{lwall} {text} {rwall}", style=f"dim {LABEL}")
     return t
 
 
@@ -782,7 +895,7 @@ def render_masthead(console=None, hint=True):
     c.print(Panel(
         body,
         title=Text("◈ WORKSPACE", style=f"bold {REF}"),
-        subtitle=Text("type a path or URL directly to scan it", style=LABEL),
+        subtitle=Text("type a path, URL, or plain English to scan it", style=LABEL),
         title_align="left", subtitle_align="left",
         border_style=PHOS_DIM, box=ROUNDED, padding=(1, 2),
     ))
@@ -796,12 +909,15 @@ def render_help(console=None):
         ("/scan", "<path|url>", "Acquire & scan a target (local dir or GitHub repo)"),
         ("/deep", "<path>", "Add the full DeepAgents attack swarm"),
         ("/full", "<path>", "DeepAgents + network sweep (everything)"),
-        ("", "flags", "--network  --deepagents  --full  --no-patch"),
+        ("", "flags", "--network  --deepagents  --full  --no-patch  --verbose"),
         ("/net", "[host]", "Network discovery, or audit a specific host"),
         ("/watch", "", "Arm the RASP auto-healing daemon"),
         ("/setup", "", "Install Semgrep, Nuclei; check Ollama & Docker"),
         ("/doctor", "", "Built-In-Test — models, tools & dependencies"),
         ("/benchmark", "[corpus]", "Score the Immune System — precision/recall/F1"),
+        ("/verify", "[path]", "Verify Gate maintainability panel — config/status/health"),
+        ("", "flags", "--selftest  --ci  --watch [s]  --json <file>"),
+        ("/status", "[path]", "System Observability — event log, last scan, errors"),
         ("/models", "", "List available local Ollama models"),
         ("/history", "", "Recent intercepts this session"),
         ("/clear", "", "Repaint the canopy"),
@@ -814,9 +930,9 @@ def render_help(console=None):
     for cmd, arg, desc in rows:
         t.add_row(cmd, arg, desc)
     c.print(Panel(t, title=Text("◈ COMMAND DECK", style=f"bold {REF}"),
-                  subtitle=Text("type a path or URL directly to acquire it", style=LABEL),
+                  subtitle=Text("type a path, URL, or plain English to acquire it", style=LABEL),
                   subtitle_align="left", title_align="left",
-                  border_style=PHOS_DIM, box=CANOPY, padding=(0, 2)))
+                  border_style=PHOS_DIM, box=_box(c), padding=(0, 2)))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -874,6 +990,12 @@ def render_boot(console=None):
             body.append(TAGLINE, style=LABEL)
             screen.update(ctr(body))
             time.sleep(0.7)
+        # A brief mascot cameo on the MAIN screen as boot hands off to
+        # whatever normally follows (render_masthead). Imported lazily —
+        # mascot.py imports these colour constants from this module, so a
+        # top-level import here would be circular.
+        import mascot as _mascot
+        _mascot.success("systems armed")
     except Exception:
         # Never let eye-candy crash a launch
         pass
@@ -887,13 +1009,14 @@ def render_tools_live(tools, console=None, stagger=0.10, pulse_hold=0.10):
     c = console or soc
 
     def cell(name, state):
+        pending, test, go, nogo = bit_state()
         if state == "pending":
-            return Text.assemble((BIT_PENDING + " ", LABEL), (name, LABEL))
+            return Text.assemble((pending + " ", LABEL), (name, LABEL))
         if state == "test":
-            return Text.assemble((BIT_TEST + " ", REF), (name, READOUT))
+            return Text.assemble((test + " ", REF), (name, READOUT))
         if state == "go":
-            return Text.assemble((BIT_GO + " ", PHOS), (name, READOUT))
-        return Text.assemble((BIT_NOGO + " ", WARN), (name, WARN))
+            return Text.assemble((go + " ", PHOS), (name, READOUT))
+        return Text.assemble((nogo + " ", WARN), (name, WARN))
 
     def frame(states):
         grid = Table.grid(padding=(0, 2, 0, 0))
@@ -908,11 +1031,21 @@ def render_tools_live(tools, console=None, stagger=0.10, pulse_hold=0.10):
         title = Text.assemble(("BUILT-IN TEST ", f"bold {PHOS}"),
                                (f"{n_go}/{len(tools)} GO", LABEL))
         return Panel(grid, title=title, title_align="left",
-                     border_style=PHOS_DIM, box=CANOPY, padding=(0, 2))
+                     border_style=PHOS_DIM, box=_box(c), padding=(0, 2))
 
     if not _tty(c):
         c.print(frame(["go" if ok else "nogo" for _, ok, _ in tools]))
         return
+
+    # Lazy import — mascot.py imports this module's colour constants, so a
+    # top-level import here would be circular. Bracketed around (not run
+    # concurrently with) the Live loop below so the two redraw loops never
+    # fight over the same terminal lines. Never let eye-candy crash a launch.
+    try:
+        import mascot as _mascot
+        _mascot.searching("Running built-in test...", flourish=True)
+    except Exception:
+        _mascot = None
 
     states = ["pending"] * len(tools)
     any_nogo = False
@@ -924,7 +1057,17 @@ def render_tools_live(tools, console=None, stagger=0.10, pulse_hold=0.10):
             any_nogo = any_nogo or (not ok)
             live.update(frame(states)); time.sleep(stagger)
     if any_nogo:
+        if _mascot:
+            try:
+                _mascot.error("MASTER CAUTION")
+            except Exception:
+                pass
         render_annunciator("MASTER CAUTION", "caution", console=c)
+    elif _mascot:
+        try:
+            _mascot.success("all systems go")
+        except Exception:
+            pass
 
 
 # Legacy static variant (kept for API completeness)
@@ -952,6 +1095,15 @@ async def render_progress_task(awaitable, label, console=None, ease_target=92, t
     if not _tty(c):
         return await awaitable
 
+    # Lazy import — mascot.py imports this module's colour constants, so a
+    # top-level import here would be circular. A quick announcing beat before
+    # the SWEEP bar takes over (never let eye-candy crash real work).
+    try:
+        import mascot as _mascot
+        _mascot.thinking(label, flourish=True)
+    except Exception:
+        _mascot = None
+
     with Progress(
         TextColumn("  [bold]{task.fields[lab]}[/bold]", style=REF),
         BarColumn(bar_width=34, style=PHOS_DIM, complete_style=REF, finished_style=PHOS),
@@ -967,7 +1119,22 @@ async def render_progress_task(awaitable, label, console=None, ease_target=92, t
                 progress.update(tid, completed=min(pct, ease_target))
             await asyncio.sleep(tick)
         progress.update(tid, completed=100)
-        return work.result()
+        try:
+            result = work.result()
+        except Exception:
+            if _mascot:
+                try:
+                    _mascot.error(label)
+                except Exception:
+                    pass
+            raise
+
+    if _mascot:
+        try:
+            _mascot.success(label)
+        except Exception:
+            pass
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -984,7 +1151,7 @@ def render_hero(scan_id, target="", score=None):
     if target:
         body.append("\n  TARGET   ", style=LABEL)
         body.append(f"{target}", style=READOUT)
-    soc.print(Panel(body, border_style=PHOS_DIM, box=CANOPY, padding=(0, 2)))
+    soc.print(Panel(body, border_style=PHOS_DIM, box=_box(), padding=(0, 2)))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1007,13 +1174,20 @@ def _route_rail(active, total):
 
 def render_step(step_num, total, title, elapsed=0.0, mode="SCAN"):
     import re as _re
-    done = int(_re.sub(r"[^0-9]", "", str(step_num)) or "0")
+    # step_num may carry a sub-step letter (e.g. "3b" for the optional network
+    # scan slotted after step 3). Strip it only for the numeric lookups (glyph,
+    # rail position) — keep it in the printed label so "3b" reads distinctly
+    # from "3" instead of both collapsing to an identical "WAYPOINT 03/09".
+    m = _re.match(r"(\d+)([a-zA-Z]*)", str(step_num))
+    num_part, suffix = (m.group(1), m.group(2)) if m else (str(step_num), "")
+    done = int(num_part or "0")
     total = int(total)
-    glyph, _ = STEP_META.get(done, ("◈", title))
+    glyph, _ = step_meta(done)
+    display_num = f"{done:02d}{suffix}"
 
     header = Text()
     header.append(f" {glyph} ", style=f"bold {REF}")
-    header.append(f"WAYPOINT {done:02d}/{total:02d}", style=f"bold {PHOS}")
+    header.append(f"WAYPOINT {display_num}/{total:02d}", style=f"bold {PHOS}")
     header.append(f"  {title}", style=f"bold {READOUT}")
     header.append(f"   [{mode} t={elapsed:.1f}s]", style=LABEL)
     sub = Text()
@@ -1021,7 +1195,7 @@ def render_step(step_num, total, title, elapsed=0.0, mode="SCAN"):
 
     soc.print()
     soc.print(Panel(header, subtitle=sub, subtitle_align="left",
-                    border_style=REF if done else PHOS_DIM, box=CANOPY, padding=(0, 2)))
+                    border_style=REF if done else PHOS_DIM, box=_box(), padding=(0, 2)))
 
     # A single quick SWEEP raster across the incoming bezel (tty only, ≤300ms)
     if _tty():
@@ -1084,7 +1258,7 @@ def render_ppi_radar(sweep_deg=0.0, contacts=None, console=None, static=False):
     body.append("\n")
     body.append_text(read)
     c.print(Panel(body, title=Text("PPI · ACTIVE SWEEP", style=f"bold {REF}"),
-                  title_align="left", border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+                  title_align="left", border_style=PHOS_DIM, box=_box(c), padding=(0, 1)))
 
 
 def render_radar_scan(duration=1.6, contacts=None, console=None):
@@ -1117,7 +1291,7 @@ def render_radar_scan(duration=1.6, contacts=None, console=None):
                 bx, by = cx + r * rng * math.cos(a), cy + r * rng * math.sin(a)
                 cv.plot(bx, by, col); cv.plot(bx + 1, by, col)
             live.update(Panel(cv.to_text(), title=Text("PPI · ACTIVE SWEEP", style=f"bold {REF}"),
-                              title_align="left", border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+                              title_align="left", border_style=PHOS_DIM, box=_box(c), padding=(0, 1)))
             time.sleep(0.066)
 
 
@@ -1179,7 +1353,8 @@ _ANSI_RST = "\033[0m"
 
 def deck_prompt(session=None):
     """readline-safe armed-caret prompt (line 2). ANSI wrapped in \\001..\\002
-    so cursor/column math stays correct on long input."""
+    so cursor/column math stays correct on long input. Prefixed with the
+    left wall of the input field opened by deck_input_box_top()."""
     s = session or {}
     caret, ccol = {"idle": ("⊕", PHOS), "executing": ("⌖", REF),
                    "locked": ("◈", TGT)}.get(s.get("caret", "idle"), ("⊕", PHOS))
@@ -1187,10 +1362,44 @@ def deck_prompt(session=None):
     def rl(seq):
         return "\001" + seq + "\002"
 
-    if not _tty():
+    # _tty() alone only covers the non-interactive case (piped/redirected).
+    # This prompt is hand-built raw 24-bit-truecolor ANSI (bypassing Rich's
+    # own colorama-backed Windows-compat layer entirely, since it's fed
+    # straight to readline/input() rather than printed through a Console)
+    # — on an interactive but legacy Windows terminal (isatty() True, no
+    # native VT processing), those escapes render as literal garbage
+    # instead of a colored caret. _ascii_mode() catches that case too.
+    if not _tty() or _ascii_mode():
         return "cx > "
-    return (rl(_fg(ccol)) + caret + " " + rl(_fg(READOUT)) + "cx "
+    return (rl(_fg(PHOS_DIM)) + "│ " + rl(_ANSI_RST)
+            + rl(_fg(ccol)) + caret + " " + rl(_fg(READOUT)) + "cx "
             + rl(_fg(PHOS)) + "▸ " + rl(_ANSI_RST))
+
+
+def deck_input_box_top(console=None):
+    """Top wall of the boxed input field — printed just above the prompt so
+    typing happens visually 'inside' a field, not bare on the rail. Paired
+    with deck_input_box_bottom() after the line is submitted; the right
+    wall is intentionally not drawn on the input line itself since plain
+    readline can't keep a fixed-column border in sync with live typing."""
+    c = console or soc
+    if not _tty(c):
+        return
+    width = max(_cols(c), 20)
+    l, mid, r = ("+", "-", "+") if _ascii_mode(c) else ("╭", "─", "╮")
+    c.print(Text(l + mid * (width - 2) + r, style=PHOS_DIM))
+
+
+def deck_input_box_bottom(console=None):
+    """Bottom wall of the boxed input field — closes it once Enter (or
+    Ctrl+C/Ctrl+D) ends the line, so command output renders below the box
+    rather than inside it."""
+    c = console or soc
+    if not _tty(c):
+        return
+    width = max(_cols(c), 20)
+    l, mid, r = ("+", "-", "+") if _ascii_mode(c) else ("╰", "─", "╯")
+    c.print(Text(l + mid * (width - 2) + r, style=PHOS_DIM))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1202,7 +1411,7 @@ def render_agent_header(agent_id, name, objective):
     header.append(f"[{agent_id}] ", style=f"bold {PHOS}")
     header.append(name, style=f"bold {REF}")
     header.append(f"\n  {objective}", style=LABEL)
-    soc.print(Panel(header, border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+    soc.print(Panel(header, border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
 
 def render_agent_result(agent, status, detail=""):
@@ -1215,7 +1424,7 @@ def render_agent_result(agent, status, detail=""):
 #  ROUTE / ENDPOINT DISCOVERY
 # ══════════════════════════════════════════════════════════════════════════
 def render_routes(routes, count=None):
-    t = Table(box=CANOPY, border_style=PHOS_DIM, padding=(0, 1),
+    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
               title=Text.assemble(("SOURCE-ROUTE ACQUISITION ", f"bold {PHOS}"),
                                    (f"— {count or len(routes)} routes", LABEL)),
               title_justify="left")
@@ -1245,7 +1454,124 @@ def render_endpoint_tree(target_url, endpoints, vuln_paths=None):
             risk = Text("▲ ", style=WARN) if p in vuln_paths else Text("● ", style=PHOS)
             branch.add(risk + Text(sub, style=READOUT))
     soc.print(Panel(tree, title=Text("ENDPOINT INTELLIGENCE MAP", style=f"bold {PHOS}"),
-                    title_align="left", border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+                    title_align="left", border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ATTACK GRAPH — DeepAgents exploit-chain sequencing
+#  (backend.deepagents.attack_graph.AttackGraph — shared mutable state the
+#  swarm writes to in real time; edges are already in discovery order, i.e.
+#  the order one confirmed vuln unlocked the next.)
+# ══════════════════════════════════════════════════════════════════════════
+_CHAIN_PRIORITY = {
+    "critical": (WARN,  "▲"),
+    "high":     (WARN,  "●"),
+    "medium":   (CAUT,  "◆"),
+    "low":      (LABEL, "○"),
+}
+
+
+def render_attack_graph(attack_graph):
+    """Render the exploit chain as a numbered, priority-ranked sequence —
+    source ──action──▶ target — instead of a bare edge count."""
+    nodes = getattr(attack_graph, "nodes", {}) or {}
+    edges = getattr(attack_graph, "edges", []) or []
+    if not nodes and not edges:
+        return
+
+    if edges:
+        t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
+                  title=Text(f"⇋ ATTACK GRAPH — {len(edges)} chain(s) across {len(nodes)} node(s)",
+                             style=f"bold {REF}"),
+                  title_justify="left")
+        t.add_column("#", style=LABEL, width=3)
+        t.add_column("PRI", width=4, justify="center")
+        t.add_column("EXPLOIT CHAIN (discovery order)", min_width=40, overflow="fold")
+        for i, e in enumerate(edges, 1):
+            col, pip = _CHAIN_PRIORITY.get(e.priority, (LABEL, "·"))
+            chain = Text()
+            chain.append(e.source or "?", style=READOUT)
+            chain.append(f"  ──{(e.action or '').replace('_', ' ')}──▶  ", style=TGT)
+            chain.append(e.target or "?", style=f"bold {REF}")
+            t.add_row(str(i), Text(pip, style=col), chain)
+        soc.print(t)
+    else:
+        soc.print(Text(f"  ⇋ {len(nodes)} node(s) touched — no chained exploitation discovered",
+                       style=LABEL))
+
+    creds = getattr(attack_graph, "confirmed_creds", []) or []
+    tokens = getattr(attack_graph, "confirmed_tokens", []) or []
+    priv = getattr(attack_graph, "privilege_level", "none") or "none"
+    priv_color = WARN if priv == "admin" else CAUT if priv == "user" else PHOS
+    line = Text("  PRIVILEGE ", style=LABEL)
+    line.append(f"{priv.upper()}", style=f"bold {priv_color}")
+    line.append("   │   ", style=PHOS_DIM)
+    line.append("CREDS HARVESTED ", style=LABEL)
+    line.append(f"{len(creds)}", style=WARN if creds else PHOS)
+    line.append("   │   ", style=PHOS_DIM)
+    line.append("TOKENS HARVESTED ", style=LABEL)
+    line.append(f"{len(tokens)}", style=WARN if tokens else PHOS)
+    soc.print(line)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  KNOWLEDGE GRAPH — PageIndex-style Knowledge Tree, CWE-centered view
+#  (backend.rag.knowledge_tree.KnowledgeTreeBuilder — code_tree + knowledge_tree
+#  + cwe_index. The cwe_index IS the graph: each CWE hub links code sinks found
+#  in THIS repo to the security-knowledge sections and fix strategies for it.)
+# ══════════════════════════════════════════════════════════════════════════
+def render_knowledge_graph(tree, cwe_index=None, max_hubs=10):
+    """Render the CWE index as a hub-and-spoke graph: CWE ─▶ code location(s),
+    CWE ─▶ knowledge-base section(s), CWE ─▶ fix strategy. This is the actual
+    graph structure the patch prompt queries at CWE + file + line lookup time."""
+    if not tree:
+        return
+    cwe_index = cwe_index or tree.get("_cwe_index") or {}
+    children = tree.get("children", []) or []
+    code_tree = next((c for c in children if c.get("type") == "code_tree"), {}) or {}
+    knowledge_tree = next((c for c in children if c.get("type") == "knowledge_tree"), {}) or {}
+
+    routes = [n for n in code_tree.get("children", []) if n.get("type") == "route"]
+    sinks = [n for n in code_tree.get("children", []) if n.get("type") == "sink"]
+    docs = knowledge_tree.get("children", []) or []
+
+    head = Text()
+    head.append("  ROUTES ", style=LABEL); head.append(f"{len(routes)}   ", style=READOUT)
+    head.append("SINKS ", style=LABEL); head.append(f"{len(sinks)}   ", style=READOUT)
+    head.append("KB DOCS ", style=LABEL); head.append(f"{len(docs)}   ", style=READOUT)
+    head.append("│  ", style=PHOS_DIM)
+    head.append("CWE HUBS ", style=LABEL); head.append(f"{len(cwe_index)}", style=f"bold {PHOS}")
+    soc.print(Panel(head, title=Text("◈ KNOWLEDGE GRAPH — CWE ⟷ code ⟷ security KB", style=f"bold {PHOS}"),
+                    title_align="left", border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
+
+    if not cwe_index:
+        return
+
+    # Rank hubs by how connected they are (edges = code + knowledge + fix nodes)
+    # so the densest, most-actionable CWEs surface first — never a silent cap,
+    # the footer names how many were left out.
+    ranked = sorted(
+        cwe_index.items(),
+        key=lambda kv: len(kv[1].get("code_nodes", [])) + len(kv[1].get("knowledge_nodes", [])),
+        reverse=True,
+    )
+    tree_view = Tree(Text("Cyphex Knowledge Tree", style=f"bold {PHOS}"), guide_style=PHOS_DIM)
+    for cwe, idx in ranked[:max_hubs]:
+        c_nodes = idx.get("code_nodes", [])
+        k_nodes = idx.get("knowledge_nodes", [])
+        strategies = idx.get("fix_strategies", [])
+        hub = tree_view.add(Text(f"⊙ {cwe}", style=f"bold {REF}"))
+        for cn in c_nodes[:4]:
+            loc = f"{cn.get('file', '?')}:{cn.get('line', 0)}"
+            hub.add(Text(f"◈ code      ──▶  {loc}", style=READOUT))
+        for kn in k_nodes[:3]:
+            hub.add(Text(f"◈ knowledge ──▶  {kn.get('title', '')[:52]}", style=CAUT))
+        if strategies:
+            names = ", ".join(s.get("name", "fix") for s in strategies[:3])
+            hub.add(Text(f"◈ fix       ──▶  {names}", style=PHOS))
+    if len(ranked) > max_hubs:
+        tree_view.add(Text(f"… and {len(ranked) - max_hubs} more CWE hub(s)", style=LABEL))
+    soc.print(Panel(tree_view, border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1259,13 +1585,29 @@ def _tally(vulns):
     return crit, high, med, low
 
 
-def _score_from_counts(crit, high, med, low):
-    penalty = 0
-    if crit: penalty += 20 + 10 * math.log2(1 + crit)
-    if high: penalty += 10 + 8 * math.log2(1 + high)
-    if med:  penalty += 3 + 4 * math.log2(1 + med)
-    if low:  penalty += 1 + 2 * math.log2(1 + low)
-    return max(0, min(100, round(100 - penalty)))
+def score_from_counts(crit, high, med, low):
+    """Single source of truth for the 0-100 posture score.
+
+    Thin re-export of scoring.score_from_counts() — the real implementation,
+    constants, and the algebraic proof that an open Critical can't score
+    SECURE/FAIR live in scoring.py, importable with zero third-party deps so
+    every caller (report panel, before/after panel, final banner, and the
+    ANSI no-rich fallback in cli_engine.py) can share this exact function
+    instead of hand-copying the formula. That hand-copying is how the
+    before/after panel and the banner drifted apart previously: a severity
+    band cap (`if crit: score = min(score, 39)`) got bolted onto this
+    function only, so two different post-patch vuln counts that both still
+    had one open Critical collapsed to the identical displayed score,
+    hiding real remediation progress. scoring.score_from_counts() replaces
+    that clamp with weight constants that guarantee the same "no Critical
+    can look SECURE/FAIR" property by construction, with no min()/if-based
+    override and no plateau.
+    """
+    return _scoring_score_from_counts(crit, high, med, low)
+
+
+# Back-compat alias for existing internal callers.
+_score_from_counts = score_from_counts
 
 
 def render_vulns(vulns, duration=0):
@@ -1281,12 +1623,12 @@ def render_vulns(vulns, duration=0):
     head.append("◆ ", style=CAUT); head.append(f"MED {med:02d}   ", style=CAUT if med else LABEL)
     head.append("○ ", style=LABEL); head.append(f"LOW {low:02d}   ", style=LABEL)
     head.append("│  ", style=PHOS_DIM); head.append(f"TOTAL {total:02d}", style=READOUT)
-    soc.print(Panel(head, border_style=color, box=CANOPY, padding=(0, 1),
+    soc.print(Panel(head, border_style=color, box=_box(), padding=(0, 1),
                     title=Text("◈ TARGET ASSESSMENT", style=f"bold {color}"), title_align="left"))
 
     if not vulns:
         return score
-    t = Table(box=CANOPY, border_style=PHOS_DIM, padding=(0, 1),
+    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
               title=Text(f"CONFIRMED CONTACTS ({total})", style=f"bold {PHOS}"),
               title_justify="left")
     t.add_column("#", style=LABEL, width=3)
@@ -1295,7 +1637,7 @@ def render_vulns(vulns, duration=0):
     t.add_column("CWE", style=TGT, width=10)
     t.add_column("BEARING", style=LABEL)
     for i, v in enumerate(vulns, 1):
-        st, pip = SEV.get(v.severity, SEV["Low"])
+        st, pip = _sev_style(v.severity)
         t.add_row(str(i), Text(f"{pip} {v.severity}", style=st),
                   getattr(v, "title", None) or v.vuln_type, v.cwe or "—", v.endpoint or "")
     soc.print(t)
@@ -1312,7 +1654,7 @@ def render_council_vote(finding, votes, critical=False):
         short = (reason or "")[:58]
         card = Panel(Text(short, style=LABEL),
                      title=Text(model, style=f"bold {REF}"), subtitle=verdict,
-                     border_style=PHOS_DIM, box=CANOPY, width=26, padding=(0, 1))
+                     border_style=PHOS_DIM, box=_box(), width=26, padding=(0, 1))
         cards.append(card)
     confirmed = sum(1 for _, a, _ in votes if a)
     total = len(votes)
@@ -1407,14 +1749,14 @@ def render_genome(gen_count, block_history, endpoints=0, converged=False):
             else:           ch, col = "▂", WARN
             content.append(ch, style=col)
     soc.print(Panel(content, title=Text("⟳ BEHAVIORAL GENOME", style=f"bold {PHOS}"),
-                    title_align="left", border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+                    title_align="left", border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
 
 # ══════════════════════════════════════════════════════════════════════════
 #  ATTACK SIMULATION ARENA
 # ══════════════════════════════════════════════════════════════════════════
 def render_attacks(attacks_data, blocked=0, total_mal=0, fp=0):
-    t = Table(box=CANOPY, border_style=PHOS_DIM, padding=(0, 1),
+    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
               title=Text("✦ ATTACK SIMULATION ARENA", style=f"bold {REF}"),
               title_justify="left")
     t.add_column("ATTACK", style=READOUT, min_width=16)
@@ -1449,13 +1791,13 @@ def render_patch_pipeline(generated, reviewed, approved, applied, verified):
     for name, count in stages:
         col = PHOS if count > 0 else LABEL
         cards.append(Panel(Text.assemble((name + "\n", col), (str(count), f"bold {col}")),
-                           border_style=PHOS_DIM, box=CANOPY, width=15))
+                           border_style=PHOS_DIM, box=_box(), width=15))
     soc.print(Panel(Columns(cards), title=Text("✚ PATCH PIPELINE", style=f"bold {PHOS}"),
-                    title_align="left", border_style=PHOS_DIM, box=CANOPY, padding=(0, 1)))
+                    title_align="left", border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
 
 def render_patch_table(patches):
-    t = Table(box=CANOPY, border_style=PHOS_DIM, padding=(0, 1),
+    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
               title=Text("PATCH RESULTS", style=f"bold {PHOS}"), title_justify="left")
     t.add_column("#", width=3, style=LABEL)
     t.add_column("VULNERABILITY", min_width=24, style=READOUT)
@@ -1480,6 +1822,16 @@ def _rate_bar(rate, width=16):
     t = Text()
     t.append("█" * filled, style=col)
     t.append("─" * (width - filled), style=PHOS_DIM)
+    return t
+
+
+def _sparkline(rates, width_per_point=4):
+    """Inline trend line: one colored block per value (0-100), score-tiered."""
+    t = Text()
+    for i, r in enumerate(rates):
+        if i:
+            t.append(" ", style=LABEL)
+        t.append(f"{r:>3.0f}", style=f"bold {score_color(r)}")
     return t
 
 
@@ -1552,7 +1904,213 @@ def render_benchmark(report, console=None):
                 f"FPR ≤ {report['gates']['max_fpr']*100:.0f}%", style=LABEL)
 
     c.print(Panel(body, title=Text("◈ IMMUNE SYSTEM BENCHMARK", style=f"bold {v_col}"),
-                  title_align="left", border_style=v_col, box=CANOPY, padding=(0, 2)))
+                  title_align="left", border_style=v_col, box=_box(c), padding=(0, 2)))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  VERIFY GATE — maintainer health panel for backend/patch/verifier.py
+#  Consumes the report dict from backend.patch.verify_health.get_verify_health().
+#  Shows config (what it checks + what tooling that needs), status (how it has
+#  performed durably, across every scan), and next steps — the three things a
+#  maintainer needs to trust or fix the single most load-bearing guarantee in
+#  the codebase: a patch only counts as "fixed" if it was actually proven.
+# ══════════════════════════════════════════════════════════════════════════
+def render_verify_health(report, console=None):
+    c = console or soc
+    verdicts = report["verdicts"]
+    total = report["total_patches"]
+    rate = report["durability_rate"]
+    healthy = rate >= 70 and total > 0
+    v_col = PHOS if healthy else (WARN if total else LABEL)
+    v_lamp = "phosphor" if healthy else ("warning" if total else "reference")
+
+    body = Text()
+
+    # ── configuration ──
+    body.append("  CONFIGURATION\n", style=f"bold {PHOS}")
+    caps = report["config"]["blast_radius_caps"]
+    body.append("    blast-radius cap   ", style=LABEL)
+    body.append("  ".join(f"{sev} {n}" for sev, n in caps.items()), style=READOUT)
+    body.append("\n    suppression guards ", style=LABEL)
+    body.append(f"{report['config']['suppression_patterns_tracked']} patterns tracked "
+                 "(nosemgrep, eslint-disable, # noqa, @ts-ignore, ...)", style=READOUT)
+    body.append("\n\n    toolchain readiness — what each check depends on to run at all\n", style=LABEL)
+    for name, info in report["config"]["toolchain"].items():
+        lamp = PHOS if info["ok"] else WARN
+        mark = "✓" if info["ok"] else "✗"
+        body.append(f"      {mark} ", style=f"bold {lamp}")
+        body.append(f"{name:<15}", style=READOUT)
+        body.append(f"{info['version'][:40]:<42}", style=LABEL)
+        body.append(f"gates: {info['gates']}\n", style=LABEL)
+
+    if report.get("selftest"):
+        body.append("\n    live self-test — actually drove each check, not just presence\n", style=LABEL)
+        for name, info in report["selftest"].items():
+            if info["ok"] is None:
+                lamp, mark = LABEL, "·"
+            else:
+                lamp, mark = (PHOS, "✓") if info["ok"] else (WARN, "✗")
+            body.append(f"      {mark} ", style=f"bold {lamp}")
+            body.append(f"{name:<15}", style=READOUT)
+            body.append(f"{info['detail'][:52]:<54}", style=LABEL)
+            body.append(f"{info['duration_ms']}ms\n", style=LABEL)
+
+    # ── status / health ──
+    body.append("\n  STATUS\n", style=f"bold {PHOS}")
+    body.append(f"    {report['manifests_found']} scan manifest(s)  ·  ", style=LABEL)
+    body.append(f"{total} patch attempt(s) recorded\n", style=READOUT)
+    if total:
+        body.append("    ")
+        body.append_text(_rate_bar(rate / 100, width=32))
+        body.append(f"  {rate:5.1f}% durable-verified\n\n", style=f"bold {score_color(rate)}")
+
+        body.append("    PASS ", style=f"bold {PHOS}")
+        body.append(f"{verdicts.get('PASS', 0):>4}   ", style=READOUT)
+        body.append("FAIL ", style=f"bold {WARN}")
+        body.append(f"{verdicts.get('FAIL', 0):>4}   ", style=READOUT)
+        body.append("UNVERIFIABLE ", style=f"bold {CAUT}")
+        body.append(f"{verdicts.get('UNVERIFIABLE', 0):>4}\n", style=READOUT)
+
+        reasons = report["reason_tally"]
+        if reasons:
+            body.append("\n    why (evidence key → count)\n", style=LABEL)
+            for reason, n in sorted(reasons.items(), key=lambda kv: -kv[1])[:8]:
+                body.append(f"      {reason:<22}{n}\n", style=READOUT)
+
+        if report.get("cwe_breakdown"):
+            body.append("\n    by CWE\n", style=LABEL)
+            for row in report["cwe_breakdown"]:
+                body.append(f"      {row['cwe']:<10}", style=TGT)
+                body.append_text(_rate_bar(row["durability_rate"] / 100, width=16))
+                body.append(f"  {row['durability_rate']:5.1f}%  ", style=f"bold {score_color(row['durability_rate'])}")
+                body.append(f"(PASS {row['pass']} / FAIL {row['fail']} / UNVERIFIABLE {row['unverifiable']})\n",
+                             style=LABEL)
+
+        if report.get("trend") and len(report["trend"]) > 1:
+            body.append("\n    trend — durability rate, oldest → newest scan\n", style=LABEL)
+            body.append("      ")
+            body.append_text(_sparkline([r["durability_rate"] for r in report["trend"]]))
+            body.append("\n")
+
+        if report["recent"]:
+            body.append("\n    recent verifications\n", style=LABEL)
+            for e in report["recent"][:6]:
+                vd = e.get("verdict", "?")
+                vcol = PHOS if vd == "PASS" else (WARN if vd == "FAIL" else CAUT)
+                body.append(f"      {vd:<13}", style=f"bold {vcol}")
+                body.append(f"{e.get('cwe', '?'):<9}", style=TGT)
+                body.append(f"{e.get('file', '?')}:{e.get('line', '?')}\n", style=LABEL)
+    else:
+        body.append("    no patch history yet — run a scan with patching enabled\n", style=LABEL)
+
+    # ── next steps ──
+    body.append("\n  NEXT STEPS\n", style=f"bold {PHOS}")
+    for step in report["next_steps"]:
+        body.append("    → ", style=CAUT)
+        body.append(f"{step}\n", style=READOUT)
+
+    # ── verdict lamp ──
+    body.append("\n  ")
+    verdict_label = "GATE HEALTHY" if healthy else ("GATE DEGRADED" if total else "GATE UNUSED")
+    body.append_text(annunciator(verdict_label, v_lamp))
+
+    c.print(Panel(body, title=Text("⛨ VERIFY GATE — MAINTAINABILITY PANEL", style=f"bold {v_col}"),
+                  title_align="left", border_style=v_col, box=_box(c), padding=(0, 2)))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  SYSTEM OBSERVABILITY — unifies the event log (backend.observability) with
+#  the Verify Gate report into one "is the pipeline healthy right now, and
+#  what happened on the last scan" dashboard. Consumes the report dict from
+#  backend.observability.health.get_system_health().
+# ══════════════════════════════════════════════════════════════════════════
+def render_observability(report, console=None):
+    c = console or soc
+    last = report.get("last_scan")
+    errors = report.get("recent_errors") or []
+    has_history = report["event_logs_found"] > 0
+    healthy = has_history and last and last["completed"] and not errors
+    v_col = PHOS if healthy else (WARN if (has_history and (not last or not last["completed"] or errors)) else LABEL)
+    v_lamp = "phosphor" if healthy else ("warning" if has_history else "reference")
+
+    body = Text()
+
+    # ── event log ──
+    body.append("  EVENT LOG\n", style=f"bold {PHOS}")
+    body.append(f"    {report['event_logs_found']} scan(s) instrumented  ·  ", style=LABEL)
+    body.append(f"{report['events_recorded']} event(s) recorded\n", style=READOUT)
+
+    # ── last scan ──
+    body.append("\n  LAST SCAN\n", style=f"bold {PHOS}")
+    if last:
+        body.append("    scan_id  ", style=LABEL)
+        body.append(f"{last['scan_id']}\n", style=READOUT)
+        state_col = PHOS if last["completed"] else WARN
+        state = "COMPLETED" if last["completed"] else ("STARTED — no scan_end seen" if last["started"] else "UNKNOWN")
+        body.append("    status   ", style=LABEL)
+        body.append(f"{state}", style=f"bold {state_col}")
+        if last["duration_s"] is not None:
+            body.append(f"   ({last['duration_s']:.1f}s)", style=LABEL)
+        body.append("\n")
+
+        if last["phase_timings"]:
+            body.append("\n    phase timings\n", style=LABEL)
+            for p in last["phase_timings"]:
+                body.append(f"      {str(p['title'])[:38]:<40}", style=READOUT)
+                body.append(f"{p['duration_s']:>6.1f}s\n", style=LABEL)
+
+        ag = last["agents"]
+        ag_total = ag["succeeded"] + ag["timed_out"] + ag["errored"]
+        if ag_total:
+            body.append("\n    DeepAgents swarm   ", style=LABEL)
+            body.append(f"{ag['succeeded']} ok", style=f"bold {PHOS}")
+            body.append("  ·  ", style=LABEL)
+            body.append(f"{ag['timed_out']} timed out", style=f"bold {CAUT}" if ag["timed_out"] else LABEL)
+            body.append("  ·  ", style=LABEL)
+            body.append(f"{ag['errored']} errored\n", style=f"bold {WARN}" if ag["errored"] else LABEL)
+
+        cg = last["cognee"]
+        if cg["recall_total"] or cg["persist_total"]:
+            body.append("    cognee memory      ", style=LABEL)
+            body.append(f"recall {cg['recall_ok']}/{cg['recall_total']}", style=READOUT)
+            body.append("  ·  ", style=LABEL)
+            body.append(f"persist {cg['persist_ok']}/{cg['persist_total']}\n", style=READOUT)
+
+        if last["patch_verdicts"]:
+            body.append("    patch verdicts     ", style=LABEL)
+            body.append("  ".join(f"{k} {v}" for k, v in last["patch_verdicts"].items()), style=READOUT)
+            body.append("\n")
+    else:
+        body.append("    no scan has been instrumented yet\n", style=LABEL)
+
+    # ── recent errors ──
+    if errors:
+        body.append("\n  RECENT ERRORS\n", style=f"bold {WARN}")
+        for e in errors[:6]:
+            body.append(f"      {e.get('event', '?'):<24}", style=f"bold {WARN}")
+            detail = e.get("error") or e.get("reason") or e.get("agent") or ""
+            body.append(f"{str(detail)[:50]}\n", style=LABEL)
+
+    # ── verify gate summary (embedded, one line) ──
+    vg = report.get("verify_gate") or {}
+    if vg.get("total_patches"):
+        body.append("\n  VERIFY GATE   ", style=f"bold {PHOS}")
+        body.append(f"{vg['durability_rate']:.1f}% durable-verified across {vg['total_patches']} patch attempt(s) "
+                     "— see /verify for the full panel\n", style=READOUT)
+
+    # ── next steps ──
+    body.append("\n  NEXT STEPS\n", style=f"bold {PHOS}")
+    for step in report["next_steps"]:
+        body.append("    → ", style=CAUT)
+        body.append(f"{step}\n", style=READOUT)
+
+    # ── verdict lamp ──
+    body.append("\n  ")
+    verdict_label = "SYSTEM NOMINAL" if healthy else ("SYSTEM DEGRADED" if has_history else "NO TELEMETRY YET")
+    body.append_text(annunciator(verdict_label, v_lamp))
+
+    c.print(Panel(body, title=Text("◈ SYSTEM OBSERVABILITY", style=f"bold {v_col}"),
+                  title_align="left", border_style=v_col, box=_box(c), padding=(0, 2)))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1574,15 +2132,16 @@ def _score_tape(value, width=40):
 
 
 def _verdict(score):
-    if score >= 80:   return "SECURE", PHOS, "phosphor"
-    if score >= 60:   return "FAIR", REF, "reference"
-    if score >= 40:   return "AT RISK", CAUT, "caution"
-    if score >= 20:   return "POOR", WARN, "warning"
-    return "CRITICAL", WARN, "warning"
+    """Label + colour + tier for a score. Bands come from scoring.score_band()
+    (the single source of truth for the 20/40/60/80 cutoffs) — this only
+    attaches this theme's colour constant to the returned tier key."""
+    label, tier = _scoring_band(score)
+    return label, _TIER_COLOR[tier], tier
 
 
 def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
-                        patches_applied=0, patches_total=0, endpoints=0, console=None):
+                        patches_applied=0, patches_total=0, endpoints=0,
+                        killed=None, unpatchable=0, console=None):
     c = console or soc
     label, color, lamp = _verdict(score)
     total = crit + high + med + low
@@ -1603,7 +2162,7 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
     if not _tty(c):
         c.print(Panel(Align.center(board(score, score)),
                       title=Text("◈ INTERCEPT COMPLETE", style=f"bold {color}"),
-                      border_style=color, box=CANOPY, padding=(0, 2)))
+                      border_style=color, box=_box(c), padding=(0, 2)))
     else:
         # dim / compute → odometer roll-up with thermal cool-down
         ticks = 26
@@ -1613,7 +2172,7 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
                 shown = int(score * p)
                 live.update(Panel(Align.center(board(shown, shown)),
                                   title=Text("◈ COMPUTING INTERCEPT", style=f"bold {REF}"),
-                                  border_style=score_color(shown), box=CANOPY, padding=(0, 2)))
+                                  border_style=score_color(shown), box=_box(c), padding=(0, 2)))
                 time.sleep(0.03)
             # LOCK — one-time xenon apex flash
             flash = Text("\n  ")
@@ -1621,23 +2180,36 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
             flash.append(f"   {label}\n\n  ", style=f"bold {APEX}")
             flash.append_text(_score_tape(score))
             live.update(Panel(Align.center(flash), title=Text("◈ SOLUTION LOCKED", style=f"bold {APEX}"),
-                              border_style=APEX, box=CANOPY, padding=(0, 2)))
+                              border_style=APEX, box=_box(c), padding=(0, 2)))
             time.sleep(0.12)
         c.print(Panel(Align.center(board(score, score)),
                       title=Text("◈ INTERCEPT COMPLETE", style=f"bold {color}"),
-                      border_style=color, box=CANOPY, padding=(0, 2)))
+                      border_style=color, box=_box(c), padding=(0, 2)))
 
     # verdict annunciator
     render_annunciator(label, lamp, console=c)
 
     # KILL BOARD
-    t = Table(box=CANOPY, border_style=PHOS_DIM, show_header=False, padding=(0, 2))
+    t = Table(box=_box(c), border_style=PHOS_DIM, show_header=False, padding=(0, 2))
     t.add_column(style=LABEL, width=14)
     t.add_column(style=READOUT)
-    t.add_row("KILLS", Text.assemble(("▲", WARN), (f"{crit:02d} ", WARN), ("●", WARN),
+    # crit/high/med/low are the findings STILL OPEN after remediation. Printing
+    # them under a "KILLS" label claimed the scan had killed them — the exact
+    # opposite. Kills are the verified-remediated tally, reported separately.
+    kc, kh, km, kl = killed or (0, 0, 0, 0)
+    t.add_row("KILLS", Text.assemble(("▲", PHOS if kc else LABEL), (f"{kc:02d} ", PHOS if kc else LABEL),
+              ("●", PHOS if kh else LABEL), (f"{kh:02d} ", PHOS if kh else LABEL),
+              ("◆", PHOS if km else LABEL), (f"{km:02d} ", PHOS if km else LABEL),
+              ("○", PHOS if kl else LABEL), (f"{kl:02d}", PHOS if kl else LABEL)))
+    t.add_row("REMAINING", Text.assemble(("▲", WARN), (f"{crit:02d} ", WARN if crit else LABEL), ("●", WARN),
               (f"{high:02d} ", WARN if high else LABEL), ("◆", CAUT), (f"{med:02d} ", CAUT if med else LABEL),
               ("○", LABEL), (f"{low:02d}", LABEL)))
-    t.add_row("PATCHES", Text.assemble((f"{patches_applied}", PHOS), (f"/{patches_total} APPLIED", LABEL)))
+    _patches = Text.assemble((f"{patches_applied}", PHOS), (f"/{patches_total} APPLIED", LABEL))
+    if unpatchable:
+        # Runtime-only findings never reach the patch loop; leaving them out of
+        # the denominator made "2/3 APPLIED" look like full coverage of 7 vulns.
+        _patches.append(f"  ·  {unpatchable} NO SOURCE", style=CAUT)
+    t.add_row("PATCHES", _patches)
     t.add_row("ENDPOINTS", Text(str(endpoints), style=READOUT))
     t.add_row("INTERCEPT", Text(f"{elapsed:.1f}s", style=REF))
     t.add_row("SCAN ID", Text(scan_id, style=PHOS))
@@ -1648,9 +2220,11 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
 
 
 def render_final_banner(score, crit, high, med, low, elapsed, scan_id,
-                        patches_applied=0, patches_total=0, endpoints=0):
+                        patches_applied=0, patches_total=0, endpoints=0,
+                        killed=None, unpatchable=0):
     render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
-                        patches_applied, patches_total, endpoints)
+                        patches_applied, patches_total, endpoints,
+                        killed=killed, unpatchable=unpatchable)
 
 
 # gradient bar kept for any legacy internal caller
@@ -1665,4 +2239,8 @@ def _gradient_bar(value, max_val, width=30):
 
 
 def _sev_style(sev):
-    return SEV.get(sev, SEV["Low"])
+    """(color, glyph) for a severity name — ASCII-safe. The one place both
+    SEV read sites in this module should go through, so a legacy Windows /
+    dumb-terminal / non-UTF-8 stream never sees the geometric pips."""
+    table = SEV_ASCII if _ascii_mode() else SEV
+    return table.get(sev, table["Low"])

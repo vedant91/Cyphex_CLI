@@ -72,6 +72,24 @@ class PatchMemory:
         }
         self._save()
 
+    def invalidate(self, cwe: str, function_code: str) -> bool:
+        """
+        Purge a poisoned entry: a patch that was stored as "verified" but
+        later turned out to break the target (e.g. the structural-integrity
+        check catches it on reuse, after it already slipped past an earlier
+        scan's gate). Without this, a bad fix stored once is replayed
+        verbatim on every future scan forever — recall() only re-verifies
+        the REUSED patch, it never corrects the cache. Returns True if an
+        entry was actually removed.
+        """
+        sem_hash = self.semantic_hash(function_code)
+        key = f"{cwe}:{sem_hash}"
+        if key in self.memory:
+            del self.memory[key]
+            self._save()
+            return True
+        return False
+
     def get_preferred_strategy(self, cwe: str) -> Optional[str]:
         """Get the strategy that has worked most for this CWE."""
         strategies = {}

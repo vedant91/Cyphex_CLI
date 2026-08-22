@@ -29,6 +29,8 @@ try:
 except ImportError:
     HAS_HTTPX = False
 
+from backend.patch.structure import check_structure_preserved
+
 
 # ═══════════════════════════════════════════════════════════════
 # Verification Result Contract
@@ -43,27 +45,29 @@ class VerifyResult:
     endpoint_alive: bool    # Benign request still works (True if n/a)
     no_suppression: bool    # No scanner suppression comments added
     blast_ok: bool          # Diff within size cap
-    verdict: str            # "PASS" | "FAIL" | "UNVERIFIABLE"
+    structure_ok: bool = True  # No route/function/class silently deleted (True if n/a)
+    verdict: str = "FAIL"   # "PASS" | "FAIL" | "UNVERIFIABLE"
     evidence: dict = field(default_factory=dict)  # Concrete failure details
 
     @staticmethod
-    def compute_verdict(finding_gone, builds, endpoint_alive, no_suppression, blast_ok) -> str:
+    def compute_verdict(finding_gone, builds, endpoint_alive, no_suppression, blast_ok,
+                         structure_ok=True) -> str:
         """
         finding_gone and builds are tri-state (True / False / None). None means
         "this check could not be run" and must NEVER be silently treated as a
         pass — that's exactly how a scanner error or an unsupported language
         used to produce a false PASS.
 
-        endpoint_alive / no_suppression / blast_ok are plain booleans (already
-        True when not applicable) — an observed False there is a real,
-        measured failure, not an "couldn't check" state.
+        endpoint_alive / no_suppression / blast_ok / structure_ok are plain
+        booleans (already True when not applicable) — an observed False there
+        is a real, measured failure, not an "couldn't check" state.
         """
         tri_state_checks = (finding_gone, builds)
 
         # Any check that actually ran and failed → FAIL, no ambiguity.
         if any(c is False for c in tri_state_checks):
             return "FAIL"
-        if not (endpoint_alive and no_suppression and blast_ok):
+        if not (endpoint_alive and no_suppression and blast_ok and structure_ok):
             return "FAIL"
 
         # Nothing failed, but at least one check couldn't be run at all →
@@ -120,6 +124,19 @@ def verify_static(
     if not blast_ok:
         evidence["blast_radius"] = f"Diff exceeds {blast_radius_cap} lines"
 
+    # Structural integrity check — defense-in-depth alongside the same check
+    # in applier.apply_patch. Runs on the FULL file (not just the patched
+    # range), so it also catches the legacy (non-V2) apply path, which writes
+    # directly and never goes through applier.py at all. A patch can pass
+    # both the syntax check (node --check just proves the file parses) and
+    # the rescan (the vulnerable pattern really is gone) while having quietly
+    # deleted the route/function that gave the body its scope — see
+    # backend/patch/structure.py for the exact failure mode.
+    structure_error = check_structure_preserved(original_content, patched_content)
+    structure_ok = structure_error is None
+    if not structure_ok:
+        evidence["structure"] = f"Patch deleted a declaration: {structure_error}"
+
     # Re-scan the patched file. finding_gone is tri-state: True (confirmed
     # gone), False (still present), or None (scanner unavailable/errored —
     # never treated as "fixed").
@@ -130,7 +147,7 @@ def verify_static(
         evidence["rescan_unverifiable"] = "Static scanner unavailable — could not confirm the finding is gone"
 
     verdict = VerifyResult.compute_verdict(
-        finding_gone, builds, True, no_suppression, blast_ok
+        finding_gone, builds, True, no_suppression, blast_ok, structure_ok
     )
 
     return VerifyResult(
@@ -140,6 +157,7 @@ def verify_static(
         endpoint_alive=True,  # N/A for static
         no_suppression=no_suppression,
         blast_ok=blast_ok,
+        structure_ok=structure_ok,
         verdict=verdict,
         evidence=evidence,
     )
@@ -187,12 +205,16 @@ async def verify_dynamic(
     # 2. Liveness check — benign request must still work
     endpoint_alive = await _check_liveness(url, evidence)
 
-    # 3. Suppression + blast radius (if file content provided)
+    # 3. Suppression + blast radius + structure (if file content provided)
     no_suppression = _check_no_suppression(original_content, patched_content) if original_content else True
     blast_ok = _check_blast_radius(original_content, patched_content, blast_radius_cap) if original_content else True
+    structure_error = check_structure_preserved(original_content, patched_content) if original_content else None
+    structure_ok = structure_error is None
+    if not structure_ok:
+        evidence["structure"] = f"Patch deleted a declaration: {structure_error}"
 
     verdict = VerifyResult.compute_verdict(
-        finding_gone, True, endpoint_alive, no_suppression, blast_ok
+        finding_gone, True, endpoint_alive, no_suppression, blast_ok, structure_ok
     )
 
     return VerifyResult(
@@ -202,6 +224,7 @@ async def verify_dynamic(
         endpoint_alive=endpoint_alive,
         no_suppression=no_suppression,
         blast_ok=blast_ok,
+        structure_ok=structure_ok,
         verdict=verdict,
         evidence=evidence,
     )

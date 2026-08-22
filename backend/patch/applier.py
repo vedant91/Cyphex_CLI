@@ -17,6 +17,8 @@ import tempfile
 from dataclasses import dataclass
 from typing import Optional
 
+from backend.patch.structure import check_structure_preserved
+
 
 @dataclass
 class ApplyResult:
@@ -26,6 +28,7 @@ class ApplyResult:
     backup_content: str       # Original file content for rollback
     error: Optional[str] = None
     parse_valid: Optional[bool] = None  # True if syntax check passed
+    structure_error: Optional[str] = None  # Set when a route/fn/class got deleted
 
 
 def _check_path_containment(file_path: str, source_dir: Optional[str]) -> Optional[str]:
@@ -150,6 +153,25 @@ def apply_patch(
     start_idx = start_line - 1
     end_idx = end_line
 
+    # Structural-integrity check, BEFORE any write: does the replacement still
+    # declare every route/handler/function/class the original range declared?
+    # node --check / py_compile only prove the file parses — they are blind to
+    # a patch that stays syntactically valid but hoists a handler's body out
+    # from under its `router.post(...) => { ... }` wrapper, leaving req/res
+    # references that resolve fine to the eye and explode at runtime. Fail
+    # closed here rather than write-then-rollback: nothing about this failure
+    # mode requires the file to exist to detect.
+    original_range = "\n".join(lines[start_idx:end_idx])
+    structure_error = check_structure_preserved(original_range, fixed_code)
+    if structure_error:
+        return ApplyResult(
+            success=False,
+            file_path=file_path,
+            backup_content=backup_content,
+            error=f"Structural integrity check failed: {structure_error}",
+            structure_error=structure_error,
+        )
+
     # Split fixed code into lines, preserving structure
     fixed_lines = fixed_code.split("\n")
 
@@ -253,8 +275,15 @@ def _validate_syntax(file_path: str) -> Optional[bool]:
     if ext in (".ts", ".tsx"):
         if shutil.which("tsc"):
             try:
+                # tsc resolves to a tsc.cmd shim on Windows (npm-installed
+                # CLIs commonly are); non-shell subprocess can't launch a
+                # bare "tsc" there even though shutil.which() above already
+                # confirmed it's on PATH. Same resolution this codebase
+                # already uses for npm.
+                from backend.platform_compat import resolve_binary_cmd
+                tsc_cmd = resolve_binary_cmd("tsc")
                 result = subprocess.run(
-                    ["tsc", "--noEmit", file_path],
+                    [tsc_cmd, "--noEmit", file_path],
                     capture_output=True, text=True, timeout=15
                 )
                 return result.returncode == 0

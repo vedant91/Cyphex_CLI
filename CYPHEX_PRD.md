@@ -10,7 +10,6 @@
 | **Status** | Living document — reflects the code on branch `updates_p1` |
 | **Runtime** | Python ≥ 3.11, local [Ollama](https://ollama.com) models only |
 | **License** | MIT |
-| **Context** | Submission for HACK4HUMANITY 2026 — Threat Modelling / Cyber Resilience pillar |
 
 ---
 
@@ -131,7 +130,7 @@ CYPHEX fuses five security paradigms into one CLI:
 | **Priya, the security-conscious startup engineer** | Full-stack dev at a small team, no budget for enterprise scanners. | A free, local, no-API-key scanner that produces real patches and a SARIF report for CI. |
 | **Ravi, the privacy-bound engineer** | Works on proprietary/regulated code that legally cannot leave the machine. | 100% offline scanning and patching; nothing uploaded. |
 | **The CI pipeline** | Automated build/test system. | Non-interactive scanning, deterministic JSON/SARIF artifacts, and a benchmark gate that fails the build on regressions. |
-| **The hackathon jury / evaluator** | Judges assessing innovation and measurable results. | A visible before/after story, reproducible metrics, and clear ethics posture. |
+| **The maintainer/reviewer** | Owns the repo's security posture over time. | A visible before/after story, reproducible metrics, and clear ethics posture. |
 
 ---
 
@@ -245,13 +244,29 @@ CYPHEX is a pipeline. A target (folder or GitHub URL) flows through a series of 
 | **`/setup`** | Installs Semgrep & Nuclei; checks Ollama & Docker. |
 | **`/doctor`** | Health check: models, tools, dependencies. |
 | **`/benchmark`** (`cx benchmark`) | Scores the immune system (precision/recall/F1) over a labelled corpus. |
+| **`/verify [path]`** (`cx verify`) | **Verify Gate maintainability panel** — config (blast-radius caps, toolchain readiness), status (durability rate, per-CWE breakdown, scan-over-scan trend), and next steps. `--selftest` live-drives each check against a synthetic fixture instead of just probing tool presence; `--ci` prints a PASS/DEGRADED/UNUSABLE verdict and returns a CI-gateable exit code (0/1/2); `--watch [s]` live-refreshes; `--json <file>` writes the report. |
+| **`/status [path]`** (`cx status`) | **System Observability dashboard** — reads the append-only event log a scan writes (`backend/observability`) and shows the last scan's phase timings, DeepAgents swarm outcomes, cognee recall/persist rates, and a recent-errors tail, alongside a one-line Verify Gate summary. Same `--watch [s]` / `--json <file>` flags as `/verify`. |
 | **`/models`, `/history`, `/version`, `/clear`, `/help`, `/exit`** | Utility commands. |
 
-**Scan flags:** `--network`/`-n` (network sweep), `--deepagents` (attack swarm), `--full`/`--all` (both), `--no-patch`/`--scan-only` (skip patching). These map to `cyphex_cli.py scan` flags `--network`, `--use-deepagents`, `--no-patch`.
+**Scan flags:** `--network`/`-n` (network sweep), `--deepagents` (attack swarm), `--full`/`--all` (both), `--no-patch`/`--scan-only` (skip patching), `--verbose`/`-v` (show full pipeline detail — per-payload DAST narration, per-file SAST hits, patch-loop internals — instead of the concise phase-summary default). These map to `cyphex_cli.py scan` flags `--network`, `--use-deepagents`, `--no-patch`, `--verbose`.
 
 **Scan intensity differences.** `scan` = static + standard DAST + immune + patch. `deep` = + DeepAgents (+ network). `full` = deep + network. All three run the same waypoint pipeline; the flags just toggle the network step and swap the DAST implementation for DeepAgents.
 
-**`cyphex_cli.py scan` (engine driver).** The real argparse command: `--repo`/`--path` (one required), `--branch` (default `main`), `--generations` (default `10`), `--no-patch`, `--judge`, `--non-interactive`, `--network`, `--use-deepagents`. Runs `asyncio.run(engine.run(...))`.
+**`cyphex_cli.py scan` (engine driver).** The real argparse command: `--repo`/`--path` (one required), `--branch` (default `main`), `--generations` (default `10`), `--no-patch`, `--judge`, `--non-interactive`, `--network`, `--use-deepagents`, `--verbose`. Runs `asyncio.run(engine.run(...))`.
+
+### 11.2b Observability
+
+- **What:** a structured, best-effort JSONL event log (`backend/observability/events.py`) written during every scan, plus a maintainer health aggregator (`backend/observability/health.py`) that reads it back. Fixes the prior state where scan telemetry was three uncoordinated, ephemeral surfaces: Rich console prints that vanish on scroll, a cumulative session-memory JSON with no phase timings, and a cognee-recall failure path that produced zero signal at all.
+- **How:** `CyphexEngine._emit(event, **fields)` appends one JSON line per event (`scan_start`, `phase_start`, `deepagent_result`/`_timeout`/`_error`, `cognee_recall_result`, `cognee_persist_result`, `patch_verdict`, `scan_end`) to `<scan sandbox>/.cyphex/events.jsonl` — same storage convention as `PatchManifest`'s `patches.json`, discoverable with the same `backend/sandboxes/*/.cyphex/*` glob. `emit()` never raises; a full disk or bad field degrades to a silent no-op, never a scan-breaking crash.
+- **Why:** a maintainer needs to answer "is the pipeline healthy right now, and what happened on the last scan" without re-reading scrollback — phase durations, DeepAgents swarm success/timeout/error counts, and cognee's actual persist rate.
+- **Where:** `backend/observability/events.py`, `backend/observability/health.py`; surfaced via `/status` (`terminal_ui.render_observability`).
+
+### 11.2c Verbosity (`--verbose`)
+
+- **What:** `CyphexEngine.verbose` (default `False`) gates the pipeline's highest-volume chatter — per-payload DAST attack narration, per-file SAST match dumps, raw docker-retry/log-tail noise, and per-vulnerability patch-loop internals — behind `self._vprint()`/`self._vconsole()`.
+- **How:** phase-boundary banners (`_step`), one-shot phase-completion summaries ("SAST: N files scanned", "SANDBOX LIVE AT ...", the final APPLIED/REJECTED line per patch), and `_final_banner()` always print regardless of `--verbose` — only the per-item chatter inside the two largest loops (`_dynamic_scan()`'s attack-agent loop, `_patch_workflow()`'s per-vuln loop) is gated.
+- **Why:** the default scan output had grown to ~325 print/console.print call sites, the bulk of them inside per-payload/per-file/per-vuln loops rather than firing once per phase — a single scan could print hundreds of lines. Gating keeps the CLI focused on phase banners and final results by default, with the full trace still one flag away.
+- **Where:** `cli_engine.py` (`CyphexEngine._vprint`/`_vconsole`), wired through `cyphex_cli.py --verbose` and `cx.py`'s `/scan --verbose`.
 
 ### 11.3 Configuration
 
@@ -525,9 +540,9 @@ CYPHEX has three complementary memories so it gets smarter over time:
 ### 11.23 Security Posture Score
 
 - **What:** the 0–100 headline number (higher = safer), computed before *and* after patching.
-- **How:** `penalty = Σ (severity: base + coeff·log₂(1+count))` with coefficients Critical 20/10, High 10/8, Medium 3/4, Low 1/2; `score = clamp(100 − penalty, 0, 100)`. The **after** score recomputes over only the vulnerabilities whose *verified* patches passed (matched by object identity, so fixing one finding never clears others in the same file, and `UNVERIFIABLE` never counts).
-- **Why:** one trackable number; the log curve gives diminishing returns (50 duplicate lows don't collapse the score), and only verified fixes move it.
-- **Where:** inline in `cli_engine.py`. *(A separate, richer `SecurityPostureCalculator` with letter grades/percentile exists in `backend/backend/security_posture_score.py` but is **not** the one used for the CLI banner.)*
+- **How:** `penalty = Σ weight_s·(1−decay_s**n_s)/(1−decay_s)` — a finite geometric series per severity (weights Critical 62, High 16, Medium 6, Low 2; decays 0.25/0.30/0.55/0.65) — `score = clamp(100 − penalty, 0, 100)`. The first finding of a severity always costs exactly that severity's weight (the series identity `P(1)=weight`), which is what guarantees a single open Critical always scores <40 — by construction, with no severity-band clamp layered on top. (An earlier version *did* clamp to a flat 39/59/79 whenever a Critical/High/Medium was open; that clamp collapsed genuinely different post-patch states to the same displayed score and was removed.) The **after** score recomputes over only the vulnerabilities whose *verified* patches passed (matched by object identity, so fixing one finding never clears others in the same file, and `UNVERIFIABLE` never counts).
+- **Why:** one trackable number; diminishing returns per severity (50 duplicate lows don't collapse the score) without an external clamp that could re-introduce the collapse bug; only verified fixes move it.
+- **Where:** `scoring.py` — the single source of truth, imported by both `terminal_ui.py` and `cli_engine.py` (never hand-copied). *(A separate, unrelated, unused `SecurityPostureCalculator` with letter grades/percentile exists in `backend/backend/security_posture_score.py` — dead code, not imported anywhere, and **not** the one used for the CLI banner.)*
 
 ### 11.24 Reporting Council & Judge Artifacts
 
@@ -629,7 +644,7 @@ A `/full` scan proceeds through these waypoints (as shown in the UI):
 
 ## 17. Ethics, Safety & Compliance
 
-- **Sandbox-only offense.** All attack activity runs against the user's own app inside an isolated sandbox — **never against live external networks**. This is a hard constraint (and a hackathon disqualifier if violated).
+- **Sandbox-only offense.** All attack activity runs against the user's own app inside an isolated sandbox — **never against live external networks**. This is a hard constraint.
 - **No data exfiltration.** Offline-first by design; nothing is uploaded.
 - **File containment.** Patching and auto-heal only ever write inside the scanned repository, with symlink/traversal guards.
 - **Dataset ethics.** The bundled benchmark corpus is fully synthetic and CC0; external datasets (e.g. CSE-CIC-IDS2018) must be cited with their license and a real-vs-synthetic disclosure.
@@ -667,7 +682,7 @@ A `/full` scan proceeds through these waypoints (as shown in the UI):
 ## 20. Roadmap / Future Scope
 
 - **Wire the intended paths:** enable dynamic exploit-replay verification, the Oracle reasoning step, the autonomy ladder, and the regression-test generator.
-- **Federated genome sharing:** privacy-preserving cross-org sharing of hardened genomes / zero-day patterns (a candidate on-site hackathon-finale module).
+- **Federated genome sharing:** privacy-preserving cross-org sharing of hardened genomes / zero-day patterns.
 - **Network genome from real flows:** validate `NetworkBehavioralGenome` against approved intrusion datasets (CSE-CIC-IDS2018).
 - **More languages & frameworks** for template fixes and route tracing.
 - **Richer live posture:** drive the DEFCON/genome HUD from real computed state.
@@ -693,7 +708,7 @@ CWE-89 (SQLi), CWE-79 (XSS), CWE-78 (Command Injection), CWE-22 (Path Traversal)
 ### C. Command Cheat-Sheet
 
 ```
-/scan <target> [--network] [--deepagents] [--full] [--no-patch]
+/scan <target> [--network] [--deepagents] [--full] [--no-patch] [--verbose]
 /deep <target>          # + DeepAgents swarm
 /full <target>          # DeepAgents + network
 /net [host]             # network discovery / audit
@@ -702,6 +717,8 @@ CWE-89 (SQLi), CWE-79 (XSS), CWE-78 (Command Injection), CWE-22 (Path Traversal)
 /setup                  # install Semgrep, Nuclei; check Ollama/Docker
 /doctor                 # health check
 /benchmark [corpus]     # score the immune system (precision/recall/F1)
+/verify [path] [--selftest] [--ci] [--watch [s]] [--json f]   # Verify Gate maintainability panel
+/status [path] [--watch [s]] [--json f]                       # System Observability dashboard
 /models /history /version /clear /help /exit
 ```
 
@@ -719,6 +736,8 @@ CWE-89 (SQLi), CWE-79 (XSS), CWE-78 (Command Injection), CWE-22 (Path Traversal)
 | Immune system | `backend/backend/immune/*`, `backend/network/network_genome.py` |
 | RASP / daemon | `sdks/node/cyphex-rasp.js`, `cyphex/daemon.py`, `cyphex/onboarder.py` |
 | Patch pipeline | `backend/patch/*`, `backend/council/*` |
+| Verify Gate health | `backend/patch/verify_health.py` (`/verify`) |
+| Observability | `backend/observability/*` (`/status`) |
 | Memory | `backend/rag/patch_memory.py`, `backend/rag/cognee_memory.py`, `backend/reasoning/session_memory.py` |
 | Benchmark | `cyphex_benchmark.py`, `benchmarks/immune_corpus.json` |
 | UI | `terminal_ui.py` |

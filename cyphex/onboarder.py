@@ -228,10 +228,19 @@ def onboard_project(repo_url: str = None, local_path: str = None) -> str:
         print(f"  {C.DIM}node_modules already exists, skipping npm install.{C.RST}")
     else:
         print(f"  {C.DIM}$ npm install (in {os.path.relpath(app_dir, workspace_dir)}){C.RST}")
-        subprocess.run(
-            ["npm", "install", "--ignore-scripts"],
-            cwd=app_dir, capture_output=True
-        )
+        # npm resolves to npm.cmd on Windows — a bare "npm" with shell=False
+        # (Win32 CreateProcess only auto-appends .exe, never .cmd/.bat) raises
+        # FileNotFoundError. Same resolution pattern already used correctly
+        # elsewhere in this codebase (cli_engine.py, sandbox_manager.py).
+        npm_cmd = shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
+        try:
+            subprocess.run(
+                [npm_cmd, "install", "--ignore-scripts"],
+                cwd=app_dir, capture_output=True
+            )
+        except FileNotFoundError:
+            print(f"  {C.Y}[!] npm not found on PATH — install dependencies manually with "
+                  f"'npm install --ignore-scripts' in {os.path.relpath(app_dir, workspace_dir)}.{C.RST}")
     print(f"  {C.G}[OK] Dependencies ready.{C.RST}\n")
 
     # ── Summary ──

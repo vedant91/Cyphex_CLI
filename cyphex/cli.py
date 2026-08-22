@@ -18,13 +18,18 @@ import shutil
 import subprocess
 import platform
 
-# Fix Windows terminal encoding for rich characters like ✓
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+# Fix terminal encoding for rich characters like ✓ whenever it isn't already
+# UTF-8 — not just on Windows. A win32-only gate here left any POSIX box with
+# a non-UTF-8 locale (LANG=C, minimal Docker images, most CI runners) with no
+# protection at all against the Unicode this CLI and its render_* dependents
+# print unconditionally.
+try:
+    if not (sys.stdout.encoding or "").lower().startswith("utf"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if not (sys.stderr.encoding or "").lower().startswith("utf"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 # Ensure project root is in path so existing modules resolve
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -67,10 +72,26 @@ def _setup_tools():
     installed = []
     skipped = []
 
-    # 1. Semgrep (Python package — cross-platform)
+    # 1. Semgrep (Python package — NOT actually cross-platform: upstream
+    #    doesn't support native Windows, only Linux/macOS/WSL. doctor.py's
+    #    _check_binary() already special-cases Windows via `wsl semgrep
+    #    --version`; mirror that here instead of a plain `pip install` that
+    #    just fails with a generic error on native Windows.
     if shutil.which("semgrep"):
         print(f"  {NE}✓{RS} {SL}Semgrep already installed{RS}")
         skipped.append("semgrep")
+    elif os.name == "nt":
+        print(f"  {CY}⏳{RS} {SL}Installing Semgrep inside WSL (no native Windows support upstream)...{RS}")
+        try:
+            subprocess.run(
+                ["wsl", "pip", "install", "semgrep", "--quiet"],
+                check=True, timeout=120
+            )
+            print(f"  {NE}✓{RS} {SL}Semgrep installed inside WSL{RS}")
+            installed.append("semgrep")
+        except Exception as e:
+            print(f"  {FL}✗{RS} Semgrep needs WSL on Windows and it isn't available here: {e}")
+            print(f"  {SL}  Install WSL (wsl --install), then re-run `cyphex setup`.{RS}")
     else:
         print(f"  {CY}⏳{RS} {SL}Installing Semgrep (5000+ SAST rules)...{RS}")
         try:
@@ -108,11 +129,19 @@ def _setup_tools():
                 _install_nuclei_binary(system, machine, installed)
 
         elif system == "linux":
-            # Linux — try apt, then binary
-            if shutil.which("apt-get"):
+            # Linux — try apt, then binary. Already running as root (common
+            # inside a container) or sudo simply not installed (minimal
+            # containers) both need to skip straight to the binary fallback
+            # instead of invoking sudo — it can hang waiting for a password
+            # prompt with nowhere to go when this runs non-interactively
+            # (e.g. via cx.py's /setup, with no guaranteed controlling tty).
+            already_root = hasattr(os, "geteuid") and os.geteuid() == 0
+            apt_cmd = ["apt-get", "install", "-y", "nuclei"] if already_root \
+                else (["sudo", "apt-get", "install", "-y", "nuclei"] if shutil.which("sudo") else None)
+            if shutil.which("apt-get") and apt_cmd:
                 try:
                     subprocess.run(
-                        ["sudo", "apt-get", "install", "-y", "nuclei"],
+                        apt_cmd,
                         check=True, timeout=120, capture_output=True
                     )
                     print(f"  {NE}✓{RS} {SL}Nuclei installed via apt{RS}")
