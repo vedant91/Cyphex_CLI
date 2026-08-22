@@ -34,12 +34,14 @@
 > |---|---|
 > | **[▸ The Verify Gate](#the-verify-gate)** | **The guarantee.** Five independent checks, one tri-state verdict. `UNVERIFIABLE` is never rounded up to `PASS`, and a failed patch is rolled back to the original bytes. |
 > | **[▸ The Maintainability Panel](#the-maintainability-panel)** | **Proof the guarantee still holds.** A gate can rot silently — `cyphex verify` shows whether every check can still actually run, and `--ci` turns that into an exit code. |
+> | **[▸ Waypoint Tracing](#waypoint-tracing--and-the-cyphex-buddy)** | **What it was trying to do.** Every phase carries an explicit goal and records its sub-steps. Recorded even with no terminal attached, so a past run stays inspectable. |
 >
 > Everything below — the attack swarm, the immune system, the council — exists to **feed** that
 > gate or to **verify** it. See it in 60 seconds: [the demo](#see-it-in-60-seconds).
 
 <p align="center">
   <b><a href="#the-verify-gate">◈ Verify Gate</a></b> · <b><a href="#the-maintainability-panel">◈ Maintainability Panel</a></b> ·
+  <b><a href="#waypoint-tracing--and-the-cyphex-buddy">◈ Waypoint Tracing</a></b> ·
   <a href="#see-it-in-60-seconds">60-Second Demo</a> ·
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
   <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
@@ -56,6 +58,7 @@
 | **[Why CYPHEX exists](#why-cyphex-exists)** | The gap it fills |
 | ◈ **[THE VERIFY GATE](#the-verify-gate)** | ★ **The honesty guarantee — the reason this project exists** |
 | ◈ **[THE MAINTAINABILITY PANEL](#the-maintainability-panel)** · [full docs](docs/VERIFICATION_MAINTAINABILITY_PANEL.md) | ★ **Proof that guarantee is still working** |
+| ◈ **[WAYPOINT TRACING](#waypoint-tracing--and-the-cyphex-buddy)** | ★ **What each phase was trying to do — and the buddy that shows it** |
 | **[See it in 60 seconds](#see-it-in-60-seconds)** | Run the guarantee yourself |
 | **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
 | **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
@@ -181,6 +184,74 @@ cyphex status              # what actually happened on the last scan
 Both panels are read-only, degrade to plain text without Rich, and degrade again to pure ASCII on terminals that can't render box-drawing glyphs.
 
 → **[Full documentation: docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)**
+
+---
+
+## Waypoint Tracing — and the CYPHEX Buddy
+
+The panel above answers *"is the gate healthy?"*. Tracing answers the question underneath it: **"what was the pipeline trying to do at each step, and how far did it get?"**
+
+A scan is nine phases and can run twenty minutes. A phase banner tells you *where* it is; it does not tell you what that phase is *for*, which sub-operation it is stuck in, or whether the thing it just did actually worked. Every phase now opens a **waypoint** carrying an explicit **goal** — a plain sentence naming what it is trying to establish — and records its sub-steps beneath it.
+
+```
+╭─ ◈ CYPHEX  5/9  IMMUNE SYSTEM - BUILD GENOME ──────────────────── 143s ─╮
+│  ▛▀▀▀▀▜   goal · Learn this app's normal behaviour well enough to      │
+│  ▌▪▪▪ ▐   ✓ genome source     fresh genome                      0.0s   │
+│  ▙▄▄▄▄▟   ▲ generation 0      blocked 22/30 · 73.3% · red: url_e 0.5s  │
+│   ▀  ▀    ✓ generation 1      blocked 18/20 · 90.0%             0.1s   │
+╰────────────────────────────────────────────────────────────────────────╯
+```
+
+### The buddy is a state indicator, not decoration
+
+The mascot exists **for traceability**. It is 8 columns wide, lives *inside* the trace box next to the thing it is reacting to, and its animation is **bound to trace state** — not to a timer. Its frame advances on real trace transitions, so it visibly works harder when the pipeline is doing more, and a glance at it tells you the same thing the text does.
+
+That binding is observable. Below is the buddy's face at each waypoint, taken verbatim from one real scan's output — the eyes genuinely differ by phase because the animation is selected by what the pipeline is doing:
+
+| Waypoint | Buddy | Animation |
+|---|---|---|
+| `1/9` GETTING SOURCE CODE | `▌▘  ▘▐` | `uploading` — fetching |
+| `2/9` STATIC CODE ANALYSIS | `▌▘▸  ▐` | `searching` — scanning |
+| `3/9` DEPLOYING SANDBOX | `▌▘  ▘▐` | `working` |
+| `4/9` DYNAMIC VULNERABILITY SCAN | `▌▘▸▸ ▐` | `searching` — attacking |
+| `5/9` IMMUNE SYSTEM - BUILD GENOME | `▌▪▪▪ ▐` | `thinking` — the highlighted phase |
+| `6/9` AI ATTACK SIMULATION | `▌▘  ▘▐` | `working` |
+| `7/9` SECURITY REPORT | `▌▪▪  ▐` | `thinking` |
+
+On failure it switches to `error`; on a clean finish, `success`. The genome build is the one phase flagged `highlight`, because it is the only one whose internals *evolve measurably while you watch* rather than being a single long opaque wait.
+
+> **Why this matters and a spinner wouldn't.** A spinner tells you the process is alive. The buddy tells you *which kind of work* is alive — and because the same state drives the trace text, the durable event log, and `/status`, the picture can never drift from the record.
+
+### The genome build, traced
+
+`run_evolution()` had always accepted an `on_generation_complete` callback and nothing ever passed one, so the adversarial co-evolution loop — the most interesting thing CYPHEX does — ran as an opaque wait behind a few emoji prints. Each generation is now a traced step carrying the real measured numbers, so the climb from a leaky first generation to a converged one is visible live:
+
+```
+▲ 5/9  IMMUNE SYSTEM - BUILD GENOME                     2.6s
+      goal · Learn this app's normal behaviour well enough to spot an attack
+      ✓ genome source      fresh genome
+      ✓ profile endpoints  20 endpoints
+      ▲ generation 0       blocked 22/30 · 73.3% · red: url_encode   0.5s
+      ✓ generation 1       blocked 18/20 · 90.0% · red: entropy      0.1s
+      ✓ generation 2       blocked 20/20 · 100.0%                    0.1s
+      ✓ co-evolution       converged at generation 2
+```
+
+Generation 0 is marked `▲` because it blocked under 75% — and that one warn propagates up to mark the whole waypoint, since **a waypoint is as bad as its worst step**.
+
+### Traceability outlives the terminal
+
+Recording is **decoupled from rendering**. The deck is one *view*; the record is an append-only JSONL event log. A scan running in CI with no TTY records exactly the same trace an interactive one does — which is the whole difference between traceability and terminal scrollback.
+
+```bash
+cyphex runs                # every recorded run: status, score, verified, duration
+cyphex verify <scan_id>    # one run in full — score movement, verdicts, complete trace
+cyphex status              # last scan's phases, agents, errors
+```
+
+That is what makes a *past* run inspectable. `cyphex verify 5f055704` replays that scan's entire goal/step tree — including that two DeepAgents timed out in it — long after its output scrolled away.
+
+The buddy degrades in three levels, like every other surface here: animated beside the trace (TTY + Pillow) → text-only box (no mascot assets) → one static line per completed step (no TTY, e.g. CI logs). It is never load-bearing for the record.
 
 ---
 
