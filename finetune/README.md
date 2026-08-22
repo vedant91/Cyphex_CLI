@@ -1,5 +1,10 @@
 # CYPHEX Fine-Tuning Guide — qwen2.5-coder:7b for Cybersecurity Patching
 
+> **Status: optional and experimental.** CYPHEX runs fully on stock Ollama
+> models; nothing in the scan pipeline requires a fine-tuned model. This is a
+> path to a *better* patcher, not a prerequisite. See
+> [`../README.md`](../README.md) to run CYPHEX.
+
 ## Overview
 
 Fine-tune `qwen2.5-coder:7b` to become a cybersecurity specialist using QLoRA.
@@ -9,8 +14,8 @@ After fine-tuning, the model generates better vulnerability patches and attack p
 
 ## Step 1: Generate Training Data (DONE ✅)
 
-```powershell
-cd c:\Users\Vedant\OneDrive\Desktop\veloro1\cyphex_v3
+```bash
+cd /path/to/Cyphex_CLI            # the repo root
 python finetune/training_data.py
 # Output: cyphex_training_data.jsonl (12 examples covering 9 vulnerability categories)
 ```
@@ -37,7 +42,7 @@ pip install --no-deps "trl<0.9.0" peft accelerate bitsandbytes
 ## Step 3: Run Fine-Tuning
 
 ```powershell
-cd c:\Users\Vedant\OneDrive\Desktop\veloro1\cyphex_v3
+cd /path/to/Cyphex_CLI            # the repo root
 python finetune/train.py
 ```
 

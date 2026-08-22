@@ -1,0 +1,4 @@
+[submodule "demo/vibemart"]
+	path = demo/vibemart
+	url = https://github.com/Punya23/cyphex-vibemart-demo.git
+	branch = main

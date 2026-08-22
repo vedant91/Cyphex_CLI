@@ -91,6 +91,36 @@ SCORE_MIN = 0    # posture floor: generic numeric-range guard, symmetric with
                   # severities produced the total (see score_from_counts()).
 
 # ---------------------------------------------------------------------------
+# Penalty -> score transform.
+#
+# The per-severity curves above are individually unclamped and strictly
+# monotonic — but summing them and then doing `100 - penalty` clamped to
+# [0, 100] reintroduces exactly the kind of information-destroying flatness
+# this module's docstring says it exists to eliminate: once total penalty
+# reaches 100 (easily hit by, say, 4 Criticals + 3 Highs — nothing exotic),
+# EVERY worse combination floor-clips to the identical displayed 0. A scan
+# that verifies 5 patches and clears 7 of 16 findings, but still has that
+# many severe findings left, showed "0 -> 0, zero improvement" — the exact
+# regression class this file exists to prevent, just at the opposite end of
+# the range from the original bug (which collapsed a MID-range state; this
+# collapsed every FAR-range state onto one point).
+#
+# SCORE_DECAY_K replaces the linear subtraction with an exponential
+# saturation: score = 100 * e^(-penalty / K). This is strictly monotonically
+# decreasing in penalty over its ENTIRE domain [0, inf) — two different
+# penalty totals can never produce the same score before rounding, no
+# matter how severe either one is — while still satisfying score(0) == 100
+# exactly and score(penalty) -> 0 (never reaching it) as penalty grows.
+# Boundedness again falls out of the curve's own shape (e^x is never
+# negative, never exceeds 1 for x<=0), not a clamp bolted onto a linear
+# formula. K is picked so a single open Critical alone (penalty==62,
+# nothing else open) lands at 38 — the same POOR-band placement the
+# original linear design intended — everything else follows from that one
+# calibration point.
+# ---------------------------------------------------------------------------
+SCORE_DECAY_K = 64.0
+
+# ---------------------------------------------------------------------------
 # Presentation bands. Purely a function OF the already-computed score --
 # these thresholds must never leak back into the scoring formula itself
 # (that leak, `if crit: score = min(score, 39)` bolted onto the weighted
@@ -130,34 +160,36 @@ def _severity_penalty(weight: float, decay: float, count: int) -> float:
 def score_from_counts(crit: int, high: int, med: int, low: int) -> int:
     """Pure, deterministic 0-100 security posture score from raw vuln counts.
 
-    score = 100 - (P_crit(crit) + P_high(high) + P_med(med) + P_low(low)),
-    rounded to the nearest int and range-clamped to [0, 100].
+    penalty = P_crit(crit) + P_high(high) + P_med(med) + P_low(low)
+    score   = 100 * e^(-penalty / SCORE_DECAY_K), rounded to the nearest int.
 
     No severity-conditional branch, min(), or band-override appears anywhere
-    in this function. The guarantee that an open Critical can never look
-    SECURE/FAIR falls out of CRIT_WEIGHT alone: P_crit(1) == CRIT_WEIGHT ==
-    62 exactly (see module docstring), and the other three severity terms
-    are never negative (each is a non-negative weight times a value in
-    [0,1)), so:
+    in this function, and — unlike a linear `100 - penalty` — this transform
+    needs no post-hoc range clamp either: e^x is bounded to (0, 1] for every
+    x <= 0 by construction, so the output is already inside (0, 100] before
+    rounding, for every possible penalty from 0 to infinity. Two DIFFERENT
+    penalty totals can never collapse onto the same pre-rounding score, no
+    matter how severe either one is — the failure mode a linear-then-clamp
+    formula has once penalty crosses 100 (see SCORE_DECAY_K's comment above
+    for the regression this replaced: real, verified remediation reading as
+    "zero improvement" because both the before- and after-patch states had
+    enough open severe findings to floor-clip to the identical 0).
 
-        score(crit>=1, high, med, low) <= 100 - 62 = 38
+    The guarantee that an open Critical can never look SECURE/FAIR still
+    falls out of CRIT_WEIGHT alone, exactly as before: P_crit(1) ==
+    CRIT_WEIGHT == 62 exactly (see module docstring), the other three
+    severity terms are never negative, and e^(-x/K) is strictly decreasing
+    in x, so:
 
-    for every possible high/med/low >= 0 -- a theorem about the additive
-    weighted sum, not a runtime override layered on top of it. The single
-    max(SCORE_MIN, min(SCORE_MAX, ...)) below is a generic numeric-range
-    guard required by the int-in-[0,100] output contract (identical in
-    spirit to clamping any bounded metric to its valid range) -- it never
-    references which severity produced the total and never references the
-    20/40/60/80 presentation bands in BANDS/score_band() below.
+        score(crit>=1, high, med, low) <= 100 * e^(-62/SCORE_DECAY_K) ~= 38
 
-    Known, disclosed limit: because every severity's contribution is
-    bounded (the pigeonhole principle any bounded score must obey), enough
-    simultaneous high-severity findings (e.g. 2 Criticals + 3 Highs) can
-    drive the sum past 100 and floor-clip to 0 same as any other bounded
-    metric maxing out. That is a floor at the worst possible end of the
-    range (many severe findings all correctly read as "as bad as it gets"),
-    not the original bug -- which collapsed a MID-range, genuinely-improved
-    state onto an unrelated worse one via an unrelated hardcoded cutoff.
+    for every possible high/med/low >= 0 -- a theorem about the transform's
+    monotonicity, not a runtime override layered on top of it. The single
+    max(SCORE_MIN, min(SCORE_MAX, ...)) below is a defensive numeric-range
+    guard for the rounded output (e.g. floating-point edge cases), not a
+    clamp the formula relies on to stay in range -- it never references
+    which severity produced the total and never references the 20/40/60/80
+    presentation bands in BANDS/score_band() below.
     """
     crit = max(0, int(crit))
     high = max(0, int(high))
@@ -171,7 +203,7 @@ def score_from_counts(crit: int, high: int, med: int, low: int) -> int:
         + _severity_penalty(LOW_WEIGHT, LOW_DECAY, low)
     )
 
-    raw_score = SCORE_MAX - penalty
+    raw_score = SCORE_MAX * math.exp(-penalty / SCORE_DECAY_K)
     return max(SCORE_MIN, min(SCORE_MAX, round(raw_score)))
 
 

@@ -4,7 +4,11 @@ from rich.console import Console
 from backend.council.council_orchestrator import CouncilOrchestrator, is_approved_vote
 from backend.council.model_selector import get_selector
 
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 VALIDATION_SYSTEM = """
 You are a security vulnerability validator on a review council.

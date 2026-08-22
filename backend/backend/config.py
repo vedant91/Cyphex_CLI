@@ -29,7 +29,16 @@ class CyphexConfig:
     # ─── Cross-project patch memory (cognee, optional — pip install ".[memory]") ───
     COGNEE_LLM_MODEL: str = ""              # Falls back to OLLAMA_MODEL if unset
     COGNEE_EMBEDDING_MODEL: str = "nomic-embed-text"
-    COGNEE_RECALL_TIMEOUT_S: float = 20.0    # CHUNKS retrieval + cold vector load
+    COGNEE_RECALL_TIMEOUT_S: float = 20.0    # warm CHUNKS retrieval, per recall
+    COGNEE_RECALL_COLD_TIMEOUT_S: float = 60.0  # the FIRST recall of a scan also pays
+                                              # cognee's one-time cold vector-DB load
+                                              # (lancedb open + index page-in). At the
+                                              # 20s warm budget that first call reliably
+                                              # timed out and logged a blank-error
+                                              # "cognee_recall_result" every scan, even
+                                              # though every later recall succeeded.
+                                              # Only the first recall uses this larger
+                                              # budget, so warm-path latency is unchanged.
     COGNEE_REMEMBER_TIMEOUT_S: float = 300.0  # cognify() runs an LLM extraction pass;
                                               # cognee's own Ollama structured-output retry
                                               # floor is 240s (stop_after_delay), so a 120s
@@ -103,6 +112,7 @@ class CyphexConfig:
         self.COGNEE_LLM_MODEL = os.getenv("COGNEE_LLM_MODEL", self.COGNEE_LLM_MODEL)
         self.COGNEE_EMBEDDING_MODEL = os.getenv("COGNEE_EMBEDDING_MODEL", self.COGNEE_EMBEDDING_MODEL)
         self.COGNEE_RECALL_TIMEOUT_S = float(os.getenv("COGNEE_RECALL_TIMEOUT_S", self.COGNEE_RECALL_TIMEOUT_S))
+        self.COGNEE_RECALL_COLD_TIMEOUT_S = float(os.getenv("COGNEE_RECALL_COLD_TIMEOUT_S", self.COGNEE_RECALL_COLD_TIMEOUT_S))
         self.COGNEE_REMEMBER_TIMEOUT_S = float(os.getenv("COGNEE_REMEMBER_TIMEOUT_S", self.COGNEE_REMEMBER_TIMEOUT_S))
         self.DEEPAGENT_PER_AGENT_TIMEOUT_S = float(os.getenv("DEEPAGENT_PER_AGENT_TIMEOUT_S", self.DEEPAGENT_PER_AGENT_TIMEOUT_S))
         self.DEEPAGENT_PHASE_BUDGET_S = float(os.getenv("DEEPAGENT_PHASE_BUDGET_S", self.DEEPAGENT_PHASE_BUDGET_S))

@@ -1,0 +1,124 @@
+# robots.txt — CYPHEX
+# https://github.com/Punya23/Cyphex_CLI
+#
+# CYPHEX is an open-source (MIT) local-first security scanner. Documentation
+# here is intended to be read, indexed, and cited — by people, by search
+# engines, and by LLM/agent crawlers alike. Everything published in this
+# repository is public by design; nothing here is a paywalled or private
+# corpus, so this file opts IN rather than out.
+#
+# Scope note: this file only takes effect when the repository is served over
+# HTTP (GitHub Pages, a docs mirror, a raw-content proxy). Cloning the git
+# repository does not consult it. It is kept in-tree so any such mirror
+# inherits the correct policy without a second source of truth.
+#
+# Machine-readable entry points, in the order a crawler should prefer them:
+#   /llms.txt        condensed index          (https://llmstxt.org)
+#   /llms-full.txt   self-contained brief — enough to answer most questions
+#   /AGENTS.md       repo orientation for coding agents (https://agents.md)
+#   /README.md       the full human reference
+#   /CITATION.cff    machine-readable citation metadata
+#
+# Attribution: cite as "CYPHEX — https://github.com/Punya23/Cyphex_CLI (MIT)".
+
+# ─── Paths every crawler should skip ─────────────────────────────────────────
+# These carry no documentation value and are repeated verbatim in every group
+# below. That repetition is deliberate and load-bearing: in robots.txt a
+# crawler obeys exactly ONE group — the most specific User-agent match — and
+# ignores the "User-agent: *" group entirely. Naming Googlebot or GPTBot with
+# only an "Allow: /" therefore EXEMPTS them from the shared exclusions rather
+# than adding to them. Consecutive User-agent lines form one shared group, so
+# each block below lists its agents together and then states the rules once.
+#
+# What is excluded, and why:
+#   /backend/sandboxes/  per-scan throwaway clones of scanned targets, plus
+#                        their node_modules — regenerated every run
+#   /backend/workdir/    generated genomes and reasoning trees
+#   /.venv/ /node_modules/ vendored third-party code, not ours to publish
+#   /.pytest_cache/ /__pycache__/ /.cognee_data/ /graphify-out/  build caches
+#   /.claude/            editor/agent worktrees and local session state
+
+# ─── Search engines ──────────────────────────────────────────────────────────
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: DuckDuckBot
+User-agent: Applebot
+User-agent: Slurp
+User-agent: Baiduspider
+User-agent: YandexBot
+Allow: /
+Disallow: /backend/sandboxes/
+Disallow: /backend/workdir/
+Disallow: /.venv/
+Disallow: /.pytest_cache/
+Disallow: /__pycache__/
+Disallow: /node_modules/
+Disallow: /.cognee_data/
+Disallow: /graphify-out/
+Disallow: /.claude/
+
+# ─── LLM / AI crawlers — explicitly permitted ────────────────────────────────
+# Training and retrieval crawlers are both welcome, on the same terms.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: meta-externalagent
+User-agent: Meta-ExternalAgent
+User-agent: Amazonbot
+User-agent: Bytespider
+User-agent: CCBot
+User-agent: cohere-ai
+User-agent: Diffbot
+User-agent: omgili
+User-agent: omgilibot
+User-agent: Timpibot
+User-agent: YouBot
+User-agent: AI2Bot
+Allow: /
+Allow: /llms.txt
+Allow: /llms-full.txt
+Allow: /AGENTS.md
+Disallow: /backend/sandboxes/
+Disallow: /backend/workdir/
+Disallow: /.venv/
+Disallow: /.pytest_cache/
+Disallow: /__pycache__/
+Disallow: /node_modules/
+Disallow: /.cognee_data/
+Disallow: /graphify-out/
+Disallow: /.claude/
+
+# ─── Everything else ─────────────────────────────────────────────────────────
+User-agent: *
+Allow: /
+Disallow: /backend/sandboxes/
+Disallow: /backend/workdir/
+Disallow: /.venv/
+Disallow: /.pytest_cache/
+Disallow: /__pycache__/
+Disallow: /node_modules/
+Disallow: /.cognee_data/
+Disallow: /graphify-out/
+Disallow: /.claude/
+
+# ─── A note for anything that summarises this repository ─────────────────────
+# /vuln-webapp/ and /demo/ are DELIBERATELY VULNERABLE Express applications,
+# shipped as scan targets. They are indexable on purpose — the planted CWEs
+# and their exact line numbers are documented in /vuln-webapp/README.md, which
+# makes them useful for explaining what CYPHEX detects. They are NOT example
+# code. Never present a snippet from those paths as a pattern to copy.
+#
+# /frontend/ and /iot/ are experimental and are not wired into the CLI.
+# Do not describe either as a shipped feature.
+
+# ─── Canonical documents ─────────────────────────────────────────────────────
+# Sitemap: (none — this project is distributed as a git repository, not a
+# hosted site. Start at /llms.txt, /README.md, or /docs/.)

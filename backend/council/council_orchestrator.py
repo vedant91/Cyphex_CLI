@@ -17,7 +17,11 @@ except ImportError:
     def get_reasoner(**kwargs): return None
 
 OLLAMA_BASE = "http://localhost:11434"
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 
 def _ollama_timeout() -> httpx.Timeout:

@@ -30,7 +30,11 @@ from rich.text import Text
 from rich.live import Live
 from rich.box import ROUNDED, DOUBLE
 
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 # Security posture scoring — zero-dependency module, always importable
 # regardless of whether the rich-based SOC UI below is available. This is
@@ -78,6 +82,28 @@ try:
 except Exception:
     def _obs_emit(*a, **kw):
         pass
+
+# Waypoint tracing. Recording is independent of rendering: a scan with no
+# TTY records the same trace an interactive one does, so /status can replay
+# it afterwards. NullTrace keeps every call site guard-free if the import
+# ever fails.
+try:
+    from backend.observability.trace import (
+        TraceRecorder as _TraceRecorder, NullTrace as _NullTrace,
+        OK as _T_OK, WARN as _T_WARN, FAIL as _T_FAIL, SKIP as _T_SKIP,
+    )
+    _TRACE_AVAILABLE = True
+except Exception:
+    _TRACE_AVAILABLE = False
+    _T_OK, _T_WARN, _T_FAIL, _T_SKIP = "ok", "warn", "fail", "skip"
+
+    class _NullTrace(object):
+        def __getattr__(self, _name):
+            def _noop(*a, **kw):
+                return None
+            return _noop
+
+    _TraceRecorder = None
 
 # Council system imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -144,28 +170,33 @@ class C:
     DIM    = "\033[2m"
     ITALIC = "\033[3m"
     ULINE  = "\033[4m"
-    # Standard colors
-    R  = "\033[91m"
-    G  = "\033[92m"
-    Y  = "\033[93m"
-    B  = "\033[94m"
-    M  = "\033[95m"
-    CY = "\033[96m"
-    W  = "\033[97m"
-    # ── True-color cyber palette ──
-    CYAN   = "\033[38;2;0;255;255m"      # Turquoise/cyan primary
-    CYAN2  = "\033[38;2;72;209;204m"     # Muted teal
-    PURPLE = "\033[38;2;138;43;226m"     # Vivid purple
-    PURP2  = "\033[38;2;161;100;255m"    # Soft purple
-    NEON   = "\033[38;2;57;255;20m"      # Neon green (success)
-    FLAME  = "\033[38;2;255;69;0m"       # Orange-red (critical)
-    GHOST  = "\033[38;2;100;100;120m"    # Ghost gray (dim text)
-    SLATE  = "\033[38;2;140;150;170m"    # Slate (secondary text)
+    # ── MONO SIGNAL RED — names kept, values mirror terminal_ui.py's ramp ──
+    # One hue; severity/hierarchy carried by BRIGHTNESS, never by a second hue.
+    R  = "\033[38;2;225;142;145m"   # bright — error / high
+    G  = "\033[38;2;217;94;98m"     # PRIMARY — success / engaged
+    Y  = "\033[38;2;193;78;91m"     # mid — warning / medium
+    B  = "\033[38;2;142;113;116m"   # muted — info / low
+    M  = "\033[38;2;225;142;145m"   # bright (legacy alias)
+    CY = "\033[38;2;217;94;98m"     # PRIMARY (legacy alias)
+    W  = "\033[38;2;225;208;210m"   # readout — primary prose
+    # ── True-color ramp ──
+    CYAN   = "\033[38;2;217;94;98m"      # PRIMARY — wordmark / structure
+    CYAN2  = "\033[38;2;193;78;91m"      # mid — caution / secondary
+    PURPLE = "\033[38;2;109;44;49m"      # dim — borders, rails, low emphasis
+    PURP2  = "\033[38;2;225;142;145m"    # bright — high emphasis / active
+    NEON   = "\033[38;2;217;94;98m"      # PRIMARY — success
+    FLAME  = "\033[38;2;234;188;184m"    # peak — critical (brightest = urgent)
+    GHOST  = "\033[38;2;142;113;116m"    # muted — captions / dim text
+    SLATE  = "\033[38;2;225;208;210m"    # readout — secondary prose
     # Backgrounds
-    BG_DARK   = "\033[48;2;15;15;25m"    # Near-black bg
-    BG_PURPLE = "\033[48;2;30;20;50m"    # Dark purple bg
-    BG_CYAN   = "\033[48;2;0;50;60m"     # Dark cyan bg
-    BG_RED    = "\033[48;2;60;10;10m"    # Dark red bg
+    BG_DARK   = "\033[48;2;10;8;9m"      # VOID — negative space
+    BG_PURPLE = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
+    BG_CYAN   = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
+    BG_RED    = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
+    # Gradient endpoints for the brand rules/dividers below. Kept as RGB
+    # triples (not escapes) because C.gradient() interpolates on the numbers.
+    RAMP_HI = (217, 94, 98)               # PRIMARY
+    RAMP_LO = (109, 44, 49)               # dim
 
     @staticmethod
     def gradient(text, r1, g1, b1, r2, g2, b2):
@@ -187,6 +218,11 @@ os.makedirs(WORK_DIR, exist_ok=True)
 class CyphexEngine:
     def __init__(self):
         self.scan_id = f"cli_{uuid.uuid4().hex[:8]}"
+        # Replaced with a real recorder at the top of run(), once scan_id
+        # has a sandbox directory to write into. NullTrace until then so
+        # any early call site is still safe.
+        self.trace = _NullTrace()
+        self._deck = None
         self.source_dir = None
         self.sandbox_info = None
         self.context = None
@@ -211,6 +247,11 @@ class CyphexEngine:
                   network_scan=False, use_deepagents=False, verbose: bool = False):
         self.start_ts = time.time()
         self._emit("scan_start", repo_url=repo_url, local_path=local_path, judge_mode=judge_mode or judge)
+        if _TRACE_AVAILABLE:
+            try:
+                self.trace = _TraceRecorder(os.path.join(WORK_DIR, self.scan_id), self.scan_id)
+            except Exception:
+                self.trace = _NullTrace()
         self.repo_url = repo_url
         self.local_path = local_path
         self.judge_mode = judge_mode or judge
@@ -297,7 +338,7 @@ class CyphexEngine:
                             confirmed=False,
                             cwe=ef.cwe,
                         ))
-                        c = "red" if sev == "Critical" else "magenta" if sev == "High" else "yellow"
+                        c = "#eabcb8" if sev == "Critical" else "#e18e91" if sev == "High" else "#c14e5b"
                         console.print(f"  [[{c}]{sev}[/{c}]] {ef.name} ({ef.cwe})")
                         console.print(f"       {ef.file_path}:{ef.line_number}")
                         console.print(f"       [dim]{ef.code_snippet[:100]}[/dim]")
@@ -467,8 +508,38 @@ class CyphexEngine:
         except Exception:
             pass
 
+    def _trace_begin(self, num, title):
+        """Open a trace waypoint for this phase.
+
+        The genome build is flagged `highlight` because it is the one phase
+        whose internals evolve measurably while you watch (per-generation
+        block rate climbing as the blue team retrains) rather than being a
+        single long opaque wait — so the deck surfaces its interior live
+        instead of summarising it after the fact.
+        """
+        try:
+            key = str(num).split("/")[0].strip()
+            self.trace.begin_waypoint(num, title, highlight=(key == "5"))
+        except Exception:
+            return
+        # Paint the compact deck under the phase banner: small buddy, the
+        # waypoint's goal, and the steps as they land. Rendered once per
+        # waypoint rather than held open as a live region, because the
+        # pipeline prints continuously between waypoints and a persistent
+        # Live area would fight it for the same rows.
+        try:
+            import trace_deck
+            if self._deck is None:
+                self._deck = trace_deck.TraceDeck(self.trace, animate=True)
+                self._deck.tty = False  # static repaint; no Live takeover
+            self._deck._frame_idx += 1
+            console.print(self._deck._renderable())
+        except Exception:
+            pass
+
     def _step(self, num, title):
         self._emit("phase_start", num=str(num), title=str(title))
+        self._trace_begin(num, title)
         elapsed = time.time() - self.start_ts if self.start_ts else 0.0
         mode = "JUDGE" if self.judge_mode else "SCAN"
         step_num, step_total = num.split("/")
@@ -494,7 +565,7 @@ class CyphexEngine:
         icon = step_icons.get(step_num, "◆")
         filled = int(done / total * 20)
         progress = f"{'█' * filled}{'░' * (20 - filled)}"
-        border = C.gradient("━" * 72, 0, 255, 255, 138, 43, 226)
+        border = C.gradient("━" * 72, *C.RAMP_HI, *C.RAMP_LO)
         print(f"\n{border}")
         pill = f"{C.BG_CYAN}{C.BOLD} {icon} STEP {step_num}/{step_total} {C.RST}"
         title_text = f"{C.CYAN}{C.BOLD}{title}{C.RST}"
@@ -513,14 +584,14 @@ class CyphexEngine:
 
         # Fallback: original ANSI rendering
         banner = f"""
-{C.CYAN}  ██████╗██╗   ██╗██████╗ ██╗  ██╗███████╗██╗  ██╗{C.RST}
-{C.CYAN}  ██╔════╝╚██╗ ██╔╝██╔══██╗██║  ██║██╔════╝╚██╗██╔╝{C.RST}
-{C.CYAN2}  ██║      ╚████╔╝ ██████╔╝███████║█████╗   ╚███╔╝{C.RST}
-{C.PURP2}  ██║       ╚██╔╝  ██╔═══╝ ██╔══██║██╔══╝   ██╔██╗{C.RST}
-{C.PURPLE}  ╚██████╗   ██║   ██║     ██║  ██║███████╗██╔╝ ██╗{C.RST}
-{C.PURPLE}   ╚═════╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝{C.RST}
+{C.FLAME}  ██████╗██╗   ██╗██████╗ ██╗  ██╗███████╗██╗  ██╗{C.RST}
+{C.PURP2}  ██╔════╝╚██╗ ██╔╝██╔══██╗██║  ██║██╔════╝╚██╗██╔╝{C.RST}
+{C.CYAN}  ██║      ╚████╔╝ ██████╔╝███████║█████╗   ╚███╔╝{C.RST}
+{C.CYAN}  ██║       ╚██╔╝  ██╔═══╝ ██╔══██║██╔══╝   ██╔██╗{C.RST}
+{C.CYAN2}  ╚██████╗   ██║   ██║     ██║  ██║███████╗██╔╝ ██╗{C.RST}
+{C.CYAN2}   ╚═════╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝{C.RST}
 """
-        divider = C.gradient("━" * 60, 0, 255, 255, 138, 43, 226)
+        divider = C.gradient("━" * 60, *C.RAMP_HI, *C.RAMP_LO)
         print(banner)
         print(f"  {divider}")
         print(f"  {C.SLATE}Multi-Agent Security Pipeline{C.RST}  {C.GHOST}│{C.RST}  {C.CYAN}v2.0{C.RST}  {C.GHOST}│{C.RST}  {C.PURP2}AI-Powered  │  OFFLINE-FIRST{C.RST}")
@@ -755,6 +826,8 @@ class CyphexEngine:
 
         # Detect framework
         fw = self._detect_framework(dest)
+        self.trace.note("detect framework", f"{fw['name']} · {fw['file_count']} files", _T_OK,
+                        {"framework": fw["name"], "files": fw["file_count"]})
         print(f"  {C.GHOST}Framework{C.RST}   {C.CYAN}{fw['name']}{C.RST}")
         print(f"  {C.GHOST}Entry{C.RST}       {C.SLATE}{fw['entry'] or 'auto-detect'}{C.RST}")
         print(f"  {C.GHOST}Files{C.RST}       {C.SLATE}{fw['file_count']} code files{C.RST}")
@@ -881,6 +954,8 @@ class CyphexEngine:
                                 self._vprint(f"       {C.GHOST}{line.strip()[:100]}{C.RST}")
                                 break  # One per pattern per file
 
+        self.trace.note("scan source files", f"{scanned} files · {len(vulns)} issues", _T_OK,
+                        {"files_scanned": scanned, "issues": len(vulns)})
         print(f"\n  {C.CYAN}SAST:{C.RST} {C.SLATE}{scanned} files scanned, {C.BOLD}{C.CYAN}{len(vulns)} issues{C.RST}")
         return vulns
 
@@ -997,7 +1072,7 @@ class CyphexEngine:
                                     if MASCOT:
                                         mascot.success(f"Docker stack ready (attempt {attempt + 1})")
                                     print(f"  {C.NEON}✓{C.RST} {C.SLATE}Docker stack ready (attempt {attempt + 1}){C.RST}")
-                                    sb = C.gradient("━" * 58, 0, 255, 255, 138, 43, 226)
+                                    sb = C.gradient("━" * 58, *C.RAMP_HI, *C.RAMP_LO)
                                     print(f"  {sb}")
                                     print(f"  {C.CYAN}▸{C.RST} {C.BOLD}SANDBOX LIVE AT:{C.RST}  {C.NEON}{url}{C.RST}")
                                     print(f"  {C.GHOST}  Full stack: app + database + all services{C.RST}")
@@ -1037,7 +1112,7 @@ class CyphexEngine:
                     url = result["url"]
                     _gen = " (auto-generated Dockerfile)" if result.get("generated_dockerfile") else ""
                     print(f"  {C.NEON}✓{C.RST} {C.SLATE}Docker container running{_gen}{C.RST}")
-                    sb = C.gradient("━" * 58, 0, 255, 255, 138, 43, 226)
+                    sb = C.gradient("━" * 58, *C.RAMP_HI, *C.RAMP_LO)
                     print(f"  {sb}")
                     print(f"  {C.CYAN}▸{C.RST} {C.BOLD}SANDBOX LIVE AT:{C.RST}  {C.NEON}{url}{C.RST}")
                     print(f"  {C.GHOST}  Container: {result.get('container_name')}  ·  {result.get('log_cmd','')}{C.RST}")
@@ -1152,7 +1227,7 @@ class CyphexEngine:
             for _ln in _nlogs.splitlines()[-15:]:
                 self._vprint(f"  {C.GHOST}│ {_ln[:200]}{C.RST}")
         print()
-        sb = C.gradient("━" * 58, 0, 255, 255, 138, 43, 226)
+        sb = C.gradient("━" * 58, *C.RAMP_HI, *C.RAMP_LO)
         print(f"  {sb}")
         print(f"  {C.CYAN}▸{C.RST} {C.BOLD}SANDBOX LIVE AT:{C.RST}  {C.NEON}{url}{C.RST}")
         print(f"  {C.GHOST}  Open in browser to see the target app{C.RST}")
@@ -1288,9 +1363,9 @@ class CyphexEngine:
             if SOC_UI:
                 ui.render_agent_header(agent_id, name, objective)
                 return
-            border = C.gradient("─" * 68, 0, 200, 200, 100, 50, 180)
+            border = C.gradient("─" * 68, *C.RAMP_HI, *C.RAMP_LO)
             print(f"\n  {border}")
-            print(f"  {C.CYAN}▸{C.RST} {C.BOLD}{C.CYAN}[{agent_id}]{C.RST} {C.PURP2}{name}{C.RST}")
+            print(f"  {C.PURPLE}▸{C.RST} {C.CYAN2}[{agent_id}]{C.RST} {C.BOLD}{C.CYAN}{name}{C.RST}")
             print(f"  {C.GHOST}{objective}{C.RST}")
             print(f"  {border}")
 
@@ -1316,7 +1391,7 @@ class CyphexEngine:
             if SOC_UI:
                 ui.render_agent_header(agent_id, name, objective)
                 return
-            border = C.gradient("─" * 68, 0, 200, 200, 100, 50, 180)
+            border = C.gradient("─" * 68, *C.RAMP_HI, *C.RAMP_LO)
             print(f"\n  {border}")
             print(f"  {C.CYAN}▸{C.RST} {C.BOLD}{C.CYAN}[{agent_id}]{C.RST} {C.PURP2}{name}{C.RST}")
             print(f"  {C.GHOST}{objective}{C.RST}")
@@ -1367,6 +1442,8 @@ class CyphexEngine:
                     self._vprint(f"  {C.Y}[Crawler][FORM]{C.RST} {method.upper()} {full} inputs={inputs}")
 
             context.all_forms = forms_found
+            self.trace.note("crawl surface", f"{len(context.all_endpoints)} pages · {len(forms_found)} forms", _T_OK,
+                            {"pages": len(context.all_endpoints), "forms": len(forms_found)})
             print(f"\n  {C.G}[Crawler][OK]{C.RST} pages={len(context.all_endpoints)} forms={len(forms_found)}")
 
             # ── API Endpoint Probe (for SPAs with no HTML forms) ──────────
@@ -1469,6 +1546,8 @@ class CyphexEngine:
                     else:
                         self._vprint(f"  {C.DIM}[API] {method} {path} => {resp.status_code}{C.RST}")
                 context.all_forms = forms_found
+                self.trace.note("discover APIs", f"{len(api_endpoints_found)} live endpoints", _T_OK,
+                                {"live_apis": len(api_endpoints_found)})
                 print(f"\n  {C.G}[API Discovery][OK]{C.RST} live_apis={len(api_endpoints_found)} synthetic_forms={len(forms_found)}")
 
                 # ── Prune dead routes ──────────────────────────────────────
@@ -1594,6 +1673,9 @@ class CyphexEngine:
                             timeout=cyphex_config.DEEPAGENT_PER_AGENT_TIMEOUT_S,
                         )
                         self._emit("deepagent_result", agent=agent.__class__.__name__, vulns_found=len(res.vulns))
+                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
+                                        f"{len(res.vulns)} confirmed" if res.vulns else "clean",
+                                        _T_OK, {"vulns": len(res.vulns)})
                         context.confirmed_vulns.extend(res.vulns)
                         if res.vulns:
                             print(
@@ -1604,15 +1686,35 @@ class CyphexEngine:
                         if attack_graph.edges:
                             print(f"  {C.CYAN}▸ Attack chains: {len(attack_graph.edges)} discovered{C.RST}")
                     except (asyncio.TimeoutError, TimeoutError):
-                        self._emit("deepagent_timeout", agent=agent.__class__.__name__)
+                        # wait_for cancels agent.run() mid-flight, so its return
+                        # value (and any attack-graph edges it was about to emit)
+                        # are lost. But an agent's confirmed findings accumulate
+                        # live on agent.vulns — including anything its fast
+                        # preflight already nailed down before the slow oracle
+                        # loop hung. Salvage those instead of discarding a real,
+                        # confirmed vuln just because the deeper phase ran long.
+                        salvaged = list(getattr(agent, "vulns", []) or [])
+                        if salvaged:
+                            context.confirmed_vulns.extend(salvaged)
+                        self._emit("deepagent_timeout", agent=agent.__class__.__name__,
+                                   salvaged=len(salvaged))
+                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
+                                        f"timed out ({len(salvaged)} salvaged)" if salvaged else "timed out",
+                                        _T_WARN, {"salvaged": len(salvaged)})
+                        salvage_note = (
+                            f" (kept {len(salvaged)} confirmed vuln(s) found before the hang)"
+                            if salvaged else ""
+                        )
                         print(
                             f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} timed out after "
                             f"{cyphex_config.DEEPAGENT_PER_AGENT_TIMEOUT_S:.0f}s (oracle-guided "
-                            f"loop too slow on this hardware) — skipping to the next agent."
+                            f"loop too slow on this hardware) — skipping to the next agent{salvage_note}."
                         )
                         continue
                     except Exception as e:
                         self._emit("deepagent_error", agent=agent.__class__.__name__, error=str(e)[:200])
+                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
+                                        f"error: {str(e)[:40]}", _T_FAIL)
                         print(f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} failed: {str(e)[:100]}")
                         continue
 
@@ -2127,6 +2229,8 @@ class CyphexEngine:
             except ImportError:
                 pass  # cyphex package not installed — skip DAST tools
 
+            self.trace.note("confirm exploitable", f"{len(context.confirmed_vulns)} confirmed", _T_OK,
+                            {"endpoints": len(context.all_endpoints), "confirmed": len(context.confirmed_vulns)})
             print(f"\n  {C.G}[SCAN][OK]{C.RST} endpoints={len(context.all_endpoints)} forms={len(forms_found)} vulns={len(context.confirmed_vulns)}")
 
         return context
@@ -2174,7 +2278,7 @@ class CyphexEngine:
 
             # ── Print summary table ─────────────────────────────────────────────
             _SEV_COL = {
-                "Critical": C.R, "High": "\033[91m", "Medium": C.Y,
+                "Critical": C.FLAME, "High": C.R, "Medium": C.Y,
                 "Low": C.B, "Info": C.DIM,
             }
             print(f"\n  {'HOST':<18} {'HOSTNAME':<20} {'RISK':<8} PORTS")
@@ -2241,12 +2345,20 @@ class CyphexEngine:
         # ── Try loading existing genome for this target ──
         target_hash = hashlib.md5(context.target_url.encode()).hexdigest()[:12]
         genome_path = os.path.join(cyphex_config.GENOME_STORAGE_DIR, f"genome_{target_hash}")
+        _loaded_prior = False
         if os.path.exists(genome_path + ".pkl"):
             try:
                 genome = BehavioralGenome.load(genome_path)
+                _loaded_prior = True
                 print(f"  {C.G}[OK]{C.RST} Loaded existing genome for this target (continuing evolution)")
             except Exception:
                 genome = BehavioralGenome()
+        self.trace.note(
+            "genome source",
+            "resumed from prior scan" if _loaded_prior else "fresh genome",
+            _T_OK,
+            {"resumed": _loaded_prior},
+        )
 
         # Only build when the genome has no profiles yet. A freshly loaded genome
         # already carries its profiles/models/attack-history, so re-building here
@@ -2255,10 +2367,74 @@ class CyphexEngine:
         if not genome.endpoint_profiles:
             genome.build_from_scan(context)
         print(f"  {C.G}[OK]{C.RST} Genome built: {len(genome.endpoint_profiles)} endpoints")
+        self.trace.note("profile endpoints", f"{len(genome.endpoint_profiles)} endpoints",
+                        _T_OK, {"endpoints": len(genome.endpoint_profiles)})
 
         controller = EvolutionController()
         controller.genome = genome  # Use loaded/built genome
-        results = await controller.run_evolution(context, generations=generations, payloads_per_gen=30)
+
+        # Per-generation trace. run_evolution() has always accepted this
+        # callback; nothing passed one, so the adversarial loop — the single
+        # most interesting thing CYPHEX does — ran as an opaque wait with a
+        # few emoji prints. Each generation now becomes a traced step
+        # carrying the real measured numbers, so the climb from a leaky
+        # first generation to a converged one is visible live AND survives
+        # into the durable event log for /status.
+        async def _on_generation(result):
+            try:
+                gen = getattr(result, "generation", 0)
+                blocked = getattr(result, "payloads_blocked", 0)
+                total = getattr(result, "payloads_generated", 0)
+                rate = getattr(result, "block_rate", 0.0) or 0.0
+                bypassed = getattr(result, "payloads_bypassed", 0)
+                tactics = list(getattr(result, "red_mutations_applied", []) or [])[:3]
+                learned = list(getattr(result, "new_features_learned", []) or [])
+                # A generation that blocks everything is converged; one that
+                # leaks is the interesting case a maintainer wants flagged.
+                status = _T_OK if rate >= 0.99 else (_T_WARN if rate < 0.75 else _T_OK)
+                detail = f"blocked {blocked}/{total} · {rate * 100:.1f}%"
+                if tactics:
+                    detail += f" · red: {', '.join(tactics)}"
+                self.trace.note(
+                    f"generation {gen}", detail, status,
+                    {
+                        "generation": gen,
+                        "block_rate": round(float(rate), 4),
+                        "blocked": blocked,
+                        "bypassed": bypassed,
+                        "payloads": total,
+                        "red_tactics": tactics,
+                        "blue_retrained": len(learned),
+                        "duration_s": round(float(getattr(result, "duration_seconds", 0.0) or 0.0), 2),
+                    },
+                )
+            except Exception:
+                pass
+
+        results = await controller.run_evolution(
+            context, generations=generations, payloads_per_gen=30,
+            on_generation_complete=_on_generation,
+            # The controller's own per-generation narration duplicates the
+            # traced steps the callback above already produces, so quiet it
+            # unless --verbose. Default stays True for other callers
+            # (demo_immune_system.py exists to show exactly that output).
+            verbose=self.verbose,
+        )
+
+        try:
+            rates = [getattr(r, "block_rate", 0.0) or 0.0 for r in (results or [])]
+            if rates:
+                converged = next((i for i, r in enumerate(rates) if r >= 0.99), None)
+                self.trace.note(
+                    "co-evolution",
+                    (f"converged at generation {converged}" if converged is not None
+                     else f"final block rate {rates[-1] * 100:.1f}%"),
+                    _T_OK if rates[-1] >= 0.9 else _T_WARN,
+                    {"block_rates": [round(float(r), 4) for r in rates],
+                     "converged_at": converged, "generations": len(rates)},
+                )
+        except Exception:
+            pass
 
         # ── Save genome for next scan ──
         try:
@@ -3038,6 +3214,10 @@ class CyphexEngine:
         if patch_council and len(patchable) > 0:
             try:
                 vuln_inputs = []
+                # The first cognee recall of a scan also pays the one-time cold
+                # vector-DB load; give only that call the larger cold budget so
+                # it stops timing out and logging a spurious error every scan.
+                _cognee_cold = True
                 for p in patchable:
                     # The applier overwrites EXACTLY the window [start_l+1, end_l]
                     # (== p["snippet"]), so the model must rewrite that window and
@@ -3092,16 +3272,37 @@ class CyphexEngine:
 
                     memory_hint = ""
                     if COGNEE_AVAILABLE:
+                        # Only the first recall of the scan gets the cold budget;
+                        # flip the flag before the await so exactly one call pays it.
+                        _recall_budget = (cyphex_config.COGNEE_RECALL_COLD_TIMEOUT_S
+                                          if _cognee_cold
+                                          else cyphex_config.COGNEE_RECALL_TIMEOUT_S)
+                        _was_cold = _cognee_cold
+                        _cognee_cold = False
                         try:
                             hits = await asyncio.wait_for(
                                 cognee_memory.recall_similar_fixes(p["cwe"], p.get("snippet_fn", p["snippet"])),
-                                timeout=cyphex_config.COGNEE_RECALL_TIMEOUT_S,
+                                timeout=_recall_budget,
                             )
                             memory_hint = cognee_memory.format_hint(hits)
                             self._emit("cognee_recall_result", ok=True, hits=len(hits))
                         except Exception as _e:
                             memory_hint = ""
-                            self._emit("cognee_recall_result", ok=False, error=str(_e)[:200])
+                            # recall_similar_fixes() never raises — it returns []
+                            # on any internal failure — so the only exception that
+                            # reaches here is asyncio.TimeoutError from wait_for,
+                            # whose str() is empty and rendered a blank line in the
+                            # health panel's RECENT ERRORS. Record the exception
+                            # TYPE and which budget was hit so a maintainer can
+                            # tell a (now rare) cold-start timeout apart from a
+                            # real warm-path failure.
+                            if isinstance(_e, (asyncio.TimeoutError, TimeoutError)):
+                                detail = (f"TimeoutError: recall exceeded "
+                                          f"{_recall_budget:.0f}s "
+                                          f"({'cold' if _was_cold else 'warm'} vector-load budget)")
+                            else:
+                                detail = f"{type(_e).__name__}: {str(_e)[:180]}"
+                            self._emit("cognee_recall_result", ok=False, error=detail)
 
                     vuln_inputs.append({
                         "vuln_name": p["vuln_type"], "cwe": p["cwe"],
@@ -3418,6 +3619,17 @@ class CyphexEngine:
                 )
                 verify_verdict = vr.verdict
                 self._emit("patch_verdict", cwe=p["cwe"], file=p["rel_path"], verdict=vr.verdict)
+                # The Verify Gate verdict is the single most important
+                # traceable event in the pipeline — it is what decides
+                # whether a "fix" counts. Status maps so a maintainer
+                # scanning the trace sees rollbacks and unverifiables
+                # without reading detail text.
+                self.trace.note(
+                    f"verify {p['cwe']}",
+                    f"{vr.verdict} · {os.path.basename(p['rel_path'])}",
+                    {"PASS": _T_OK, "FAIL": _T_FAIL}.get(vr.verdict, _T_WARN),
+                    {"cwe": p["cwe"], "file": p["rel_path"], "verdict": vr.verdict},
+                )
 
                 verdict_color = "green" if vr.verdict == "PASS" else "yellow" if vr.verdict == "UNVERIFIABLE" else "red"
                 verdict_icon = "✅" if vr.verdict == "PASS" else "⚠️" if vr.verdict == "UNVERIFIABLE" else "❌"
@@ -3975,6 +4187,16 @@ class CyphexEngine:
 
     def _final_banner(self):
         self._emit("scan_end")
+        # Close the final waypoint and print the full waypoint trace before
+        # the score banner, so the run ends with "here is everything that
+        # happened and how long each part took" rather than only a number.
+        try:
+            self.trace.end_waypoint()
+            if getattr(self.trace, "waypoints", None):
+                import trace_deck
+                trace_deck.render_trace_summary(self.trace)
+        except Exception:
+            pass
         # Cleanup Docker Compose if used
         if hasattr(self, '_docker_compose_dir') and self._docker_compose_dir:
             try:
@@ -4024,8 +4246,8 @@ class CyphexEngine:
             "POOR": C.R, "CRITICAL": C.FLAME,
         }[sc_label]
         total = crit + high + med + low
-        border = C.gradient("━" * 72, 138, 43, 226, 0, 255, 255)
-        border2 = C.gradient("━" * 72, 0, 255, 255, 138, 43, 226)
+        border = C.gradient("━" * 72, *C.RAMP_LO, *C.RAMP_HI)
+        border2 = C.gradient("━" * 72, *C.RAMP_HI, *C.RAMP_LO)
         print(f"\n{border}")
         print(f"  {C.NEON}✓{C.RST} {C.BOLD}{C.CYAN}CYPHEX SCAN COMPLETE{C.RST}")
         print(f"{border2}\n")

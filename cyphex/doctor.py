@@ -28,7 +28,11 @@ from cyphex.hardware import (
     MODE_DESCRIPTIONS, MIN_PARAMS_FOR_PATCHING, MIN_PARAMS_FOR_DEBATE,
 )
 
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 
 def _check_binary(name: str) -> tuple[bool, str]:

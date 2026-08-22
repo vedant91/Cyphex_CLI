@@ -132,13 +132,13 @@ try:
     from terminal_ui import PHOS, PHOS_DIM, REF, CAUT, WARN_HOT, APEX, LABEL, _fg as _hex_fg
     _ANSI_RESET = "\033[0m"
 except ImportError:
-    # Mirror terminal_ui.py's MONO ELECTRIC BLUE ramp verbatim (same values as
+    # Mirror terminal_ui.py's MONO SIGNAL RED ramp verbatim (same values as
     # terminal_ui.py:54-65 / HUD_THEME) so the mascot stays on-brand even when
     # terminal_ui/rich can't be imported. Same convention cx.py already uses
     # for its own plain-ANSI fallback palette — keep these hex values in sync
     # with terminal_ui.py by hand if that ramp ever changes.
-    PHOS, PHOS_DIM, REF = "#3b82f6", "#1a4890", "#7dabff"
-    CAUT, WARN_HOT, APEX, LABEL = "#2563c6", "#a9c9ff", "#d6e6ff", "#5f7391"
+    PHOS, PHOS_DIM, REF = "#d95e62", "#6d2c31", "#e18e91"
+    CAUT, WARN_HOT, APEX, LABEL = "#c14e5b", "#eabcb8", "#f4e4e1", "#8e7174"
 
     def _hex_fg(hexcolor):
         r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))

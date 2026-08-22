@@ -59,6 +59,37 @@ class TestScoreFromCounts:
     def test_full_remediation_reaches_perfect_score(self):
         assert score_from_counts(0, 0, 0, 0) == 100
 
+    def test_regression_deep_remediation_shows_improvement_past_the_old_floor(self):
+        """The floor-side twin of the regression above, and the exact bug a
+        real scan hit: before-patch state had enough open severe findings
+        that total penalty already exceeded 100 (easily reached — 6 Critical
+        + 5 High is nowhere near exotic on a real scan). A linear
+        `100 - penalty` clamped to [0, 100] floors THAT straight to 0 — and
+        after verifying 5 patches and clearing several findings, the
+        after-patch state (4 Critical + 3 High + 2 Medium) ALSO still
+        exceeded penalty 100, so it floored to the identical 0. The banner
+        read "Before: 0/100, After: 0/100, Improvement: 0 points" despite 5
+        real, verified patches — remediation that is completely real showing
+        as if nothing happened, because the floor threw away every bit of
+        information about how far past 100 either penalty total was.
+        A formula whose output is strictly monotonic over its ENTIRE domain
+        (not just the sub-100-penalty range the other regression test
+        covers) must show improvement here too."""
+        before = score_from_counts(crit=6, high=5, med=3, low=0)   # deep in the red
+        after = score_from_counts(crit=4, high=3, med=2, low=0)    # still severe, but strictly fewer
+        assert after > before, (
+            f"remediation that strictly reduces every severity count must "
+            f"strictly improve the score even when both states are severe "
+            f"enough that a naive linear formula would floor both to 0 "
+            f"(before={before}, after={after})"
+        )
+        # And neither one should silently be the floor itself — that's the
+        # exact symptom (both floor to 0, so "improvement" is invisible).
+        assert before > 0 and after > 0, (
+            f"a severe-but-distinguishable state should not floor-clip to "
+            f"an indistinguishable 0 (before={before}, after={after})"
+        )
+
     def test_monotonic_in_each_severity_independently(self):
         """Fixing any single finding (holding the rest constant) must never
         lower the score, and must strictly raise it below the ceiling."""

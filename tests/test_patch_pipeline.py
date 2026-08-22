@@ -153,15 +153,49 @@ def test_backup_content_is_captured_even_on_failure():
 
 
 def test_python_parse_failure_auto_rolls_back():
+    """Syntax-check rejection path, in isolation.
+
+    Replaces ONLY the body line, so `def f():` survives and the structural
+    guard (which runs first, before any write) has nothing to complain
+    about — this reaches the syntax check and must be rejected there with
+    parse_valid False. Originally this test replaced lines 1-2, which also
+    deleted the `def` line; once the structural guard was added the patch
+    started being rejected earlier, leaving parse_valid None and making the
+    assertion stale. Splitting the two rejection paths (see the structural
+    test below) keeps both genuinely covered instead of having one mask the
+    other.
+    """
     original = "def f():\n    return 1\n"
     d = tempfile.mkdtemp()
     fp = os.path.join(d, "x.py")
     with open(fp, "w", encoding="utf-8") as f:
         f.write(original)
 
-    res = apply_patch(fp, 1, 2, "    return (")  # broken syntax
+    res = apply_patch(fp, 2, 2, "    return (")  # broken syntax, def preserved
     assert not res.success
     assert res.parse_valid is False
+    assert _read(fp) == original, "file must be restored to its pre-patch bytes"
+
+
+def test_patch_deleting_the_enclosing_def_is_structurally_rejected():
+    """Structural-guard rejection path.
+
+    A patch that removes the enclosing `def` is rejected before the syntax
+    check even runs (the guard is pre-write), so parse_valid stays None —
+    the tri-state the Verify Gate turns into UNVERIFIABLE rather than PASS.
+    Either way the file must come back byte-identical: both guards fail
+    closed.
+    """
+    original = "def f():\n    return 1\n"
+    d = tempfile.mkdtemp()
+    fp = os.path.join(d, "x.py")
+    with open(fp, "w", encoding="utf-8") as f:
+        f.write(original)
+
+    res = apply_patch(fp, 1, 2, "    return (")  # deletes `def f():`
+    assert not res.success
+    assert res.structure_error, "removing a function definition must be caught structurally"
+    assert "f" in res.structure_error
     assert _read(fp) == original, "file must be restored to its pre-patch bytes"
 
 

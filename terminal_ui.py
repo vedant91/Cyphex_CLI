@@ -1,16 +1,18 @@
 """
-CYPHEX Terminal UI — MONO ELECTRIC BLUE
+CYPHEX Terminal UI — MONO SIGNAL RED
 ════════════════════════════════════════════════════════════════════════════
 A monochromatic system: the entire interface lives in ONE hue's light→dark
-ramp (corporate, trustworthy electric blue). Hierarchy and severity are carried
-by BRIGHTNESS within the ramp, not by competing hues.
+ramp (a low-chroma rose-red). Hierarchy and severity are carried by
+BRIGHTNESS within the ramp, not by competing hues, and never by saturation —
+the ramp is deliberately desaturated so long stretches of themed output (the
+14-agent scan block, findings tables) read as shading rather than as alarm.
 
-    #7dabff  bright   — high emphasis / active / critical-high findings
-    #3b82f6  PRIMARY  — the wordmark, structure, "safe/engaged"
-    #2563c6  mid      — medium findings / secondary
-    #1a4890  dim      — borders, rails, low findings
-    #5f7391  muted    — captions, timestamps, comments
-    #c2d0e6  readout  — primary readable prose / numerics
+    #e18e91  bright   — high emphasis / active / critical-high findings
+    #d95e62  PRIMARY  — the wordmark, structure, "safe/engaged"
+    #c14e5b  mid      — medium findings / secondary
+    #6d2c31  dim      — borders, rails, low findings
+    #8e7174  muted    — captions, timestamps, comments
+    #e1d0d2  readout  — primary readable prose / numerics
 
 Everything degrades to a single clean static frame when stdout is not a TTY
 (CI / pipes) — no escape spam, no alt-screen, no cursor games.
@@ -59,21 +61,21 @@ from rich.progress import Progress, BarColumn, TextColumn
 CX_VERSION = "4.4"
 
 # ══════════════════════════════════════════════════════════════════════════
-#  MONO ELECTRIC BLUE  (one hue's ramp — hierarchy & severity by brightness)
+#  MONO SIGNAL RED  (one hue's ramp — hierarchy & severity by brightness)
 #  Names kept (PHOS/REF/TGT…) so every renderer recolours by value change.
 # ══════════════════════════════════════════════════════════════════════════
-VOID      = "#0a0f18"   # near-black navy — background / negative space
-PANEL     = "#111b2e"   # raised panel fill (navy)
-PHOS      = "#3b82f6"   # PRIMARY blue — wordmark, structure, "safe/engaged"
-PHOS_DIM  = "#1a4890"   # dim blue — borders, rails, low emphasis
-REF       = "#7dabff"   # bright blue — high emphasis / active / highlights
-TGT       = "#7dabff"   # bright blue — commanded target (mono: = accent)
-CAUT      = "#2563c6"   # mid blue — caution / medium findings
-WARN      = "#7dabff"   # bright blue — critical / high (brightest = most urgent)
-WARN_HOT  = "#a9c9ff"   # extra-bright blue — peak emphasis
-APEX      = "#d6e6ff"   # near-white blue — rare apex flash
-LABEL     = "#5f7391"   # muted blue-grey — captions, timestamps, comments
-READOUT   = "#c2d0e6"   # light blue-grey — primary readable prose / numerics
+VOID      = "#0a0809"   # near-black — background / negative space
+PANEL     = "#1a1214"   # raised panel fill
+PHOS      = "#d95e62"   # PRIMARY red — wordmark, structure, "safe/engaged"
+PHOS_DIM  = "#6d2c31"   # dim red — borders, rails, low emphasis
+REF       = "#e18e91"   # bright red — high emphasis / active / highlights
+TGT       = "#e18e91"   # bright red — commanded target (mono: = accent)
+CAUT      = "#c14e5b"   # mid red — caution / medium findings
+WARN      = "#e18e91"   # bright red — critical / high (brightest = most urgent)
+WARN_HOT  = "#eabcb8"   # extra-bright red — peak emphasis
+APEX      = "#f4e4e1"   # near-white red — rare apex flash
+LABEL     = "#8e7174"   # muted red-grey — captions, timestamps, comments
+READOUT   = "#e1d0d2"   # light red-grey — primary readable prose / numerics
 
 HUD_THEME = Theme({
     "hud.void": VOID, "hud.panel": PANEL,
@@ -90,9 +92,35 @@ HUD_THEME = Theme({
     "cy.green": PHOS, "cy.red": WARN,
     "brand": f"bold {PHOS}", "accent": REF, "muted": LABEL,
     "ok": f"bold {PHOS}", "warn": CAUT, "err": f"bold {WARN}", "text": READOUT,
+    # ── raw ANSI colour names, re-pointed into the ramp ──
+    # ~500 call sites across cli_engine/council/deepagents/doctor still write
+    # markup like "[green]OK[/green]". Rich resolves a style NAME against the
+    # theme before it ever tries to parse it as a colour, so naming them here
+    # drags every one of those sites onto the ramp without touching them.
+    # Compound forms need their own literal key — Rich looks up "bold green"
+    # as a whole string and only word-splits it when the theme has no such
+    # key, at which point "green" resolves as a colour again and escapes.
+    "red": WARN, "green": PHOS, "yellow": CAUT, "cyan": PHOS,
+    "magenta": REF, "blue": LABEL, "white": READOUT,
+    "bold red": f"bold {WARN}", "bold green": f"bold {PHOS}",
+    "bold yellow": f"bold {CAUT}", "bold cyan": f"bold {PHOS}",
+    "bold magenta": f"bold {REF}", "bold blue": f"bold {LABEL}",
+    "bold bright_magenta": f"bold {WARN_HOT}",
+    "bold bright_green": f"bold {REF}", "bold bright_cyan": f"bold {REF}",
 })
 
 soc = Console(theme=HUD_THEME, highlight=False)
+
+
+def themed_console(**kwargs):
+    """
+    A Console carrying HUD_THEME, for the modules that predate this one and
+    build their own bare Console(). Without the theme their markup renders in
+    the terminal's own red/green/cyan — the one thing a mono theme cannot
+    survive. Callers keep their own Console kwargs.
+    """
+    kwargs.setdefault("highlight", False)
+    return Console(theme=HUD_THEME, **kwargs)
 
 
 def _tty(console=None) -> bool:
@@ -363,7 +391,7 @@ class HUDCanvas:
 
 
 def sweep_trail_color(distance, length):
-    """boresight_sweep colour law: cyan head → phosphor → dim → void by age."""
+    """boresight_sweep colour law: bright head → phosphor → dim → void by age."""
     if distance <= 0:
         return REF
     t = min(distance / max(length, 1), 1.0)
@@ -374,9 +402,9 @@ def sweep_trail_color(distance, length):
 
 # ══════════════════════════════════════════════════════════════════════════
 #  CYPHEX LOCKMARK — the padlock brand glyph, drawn procedurally in Braille
-#  (violet body with a lavender top-highlight, magenta shackle, carved keyhole)
+#  (body lit in PRIMARY with a hot top-highlight, bright shackle, carved keyhole)
 # ══════════════════════════════════════════════════════════════════════════
-_LAV = "#C9A0FF"   # lavender highlight
+_LAV = "#eabcb8"   # hot top-highlight (in-ramp — WARN_HOT)
 
 
 def _padlock_canvas(cw=24, ch=16, shackle_open=1.0, lit=PHOS, ring=REF):
@@ -855,11 +883,33 @@ def _glitch_frame(progress=1.0, seed=BOOT_SEED):
 # ══════════════════════════════════════════════════════════════════════════
 #  MASTHEAD — the settled static header (persistent after boot)
 # ══════════════════════════════════════════════════════════════════════════
+def render_status_chip(state="idle", console=None):
+    """The persistent top-of-screen status chip:  CYPHEX   v4.4   ● idle
+
+    Literal text, never baked into the logo art — it stays legible at any
+    terminal width and needs no redraw when the palette changes. `state` is
+    free-form (idle / scanning / patching / offline …); the dot colour is
+    picked from the ramp by severity, brightest = most urgent.
+    """
+    c = console or soc
+    dot_style = {"idle": PHOS, "scanning": REF, "patching": REF,
+                 "blocked": WARN, "offline": LABEL}.get(state, PHOS)
+    dot = "*" if _ascii_mode(c) else "\u25cf"
+    chip = Text("  ")
+    chip.append("CYPHEX", style=f"bold {PHOS}")
+    chip.append(f"   v{CX_VERSION}   ", style=LABEL)
+    chip.append(dot + " ", style=dot_style)
+    chip.append(state, style=LABEL)
+    c.print(chip)
+
+
 def render_masthead(console=None, hint=True):
     """Claude/Codex-style home screen: LEFT-aligned logo, then a bordered
     workspace box (spanning the window) with a compact command reference and
     the current directory. Not a centered splash."""
     c = console or soc
+    c.print()
+    render_status_chip("idle", c)
     c.print()
     # ── Left-aligned brand logo (1-col indent, not centered) ──
     c.print(Padding(_logo_static(c), (0, 0, 0, 1)))
@@ -1351,43 +1401,88 @@ def _fg(hex):
 _ANSI_RST = "\033[0m"
 
 
+BOX_ROUND = {"tl": "╭", "tr": "╮", "bl": "╰", "br": "╯",
+             "h": "─", "v": "│"}
+BOX_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|"}
+
+
+def deck_box_glyphs(console=None):
+    """Border glyphs for the input field — rounded box-drawing, or the ASCII
+    substitution when the terminal can’t render them. One source of truth so
+    the top wall (here), the bottom wall (here) and the right wall painted by
+    deck_input.py’s raw-mode editor can never disagree."""
+    return dict(BOX_ASCII if _ascii_mode(console) else BOX_ROUND)
+
+
+def deck_box_width(console=None):
+    """Wall width of the input field. Shared by both walls and by the raw-mode
+    editor, which needs it to place the right wall at a fixed column."""
+    return max(_cols(console), 20)
+
+
+def deck_caret(session=None):
+    """(glyph, colour) of the armed caret for the current session posture.
+
+    Single source of truth: deck_prompt() (readline path) and deck_input.py
+    (raw-mode path) both read the caret from here, so the two input paths
+    cannot drift into showing different carets for the same state.
+    """
+    s = session or {}
+    return {"idle": ("⊕", PHOS), "executing": ("⌖", REF),
+            "locked": ("◈", TGT)}.get(s.get("caret", "idle"), ("⊕", PHOS))
+
+
+def deck_prompt_segments(session=None):
+    """The armed-caret prompt as [(text, hex_colour)] segments — including the
+    LEFT wall of the input field, since the prompt is what paints it.
+
+    deck_prompt() wraps each segment in readline’s \\001..\\002 markers;
+    deck_input.read_line() measures the segments to place the right wall and
+    paints them raw (those markers are meaningless outside readline). Callers
+    own the not-a-tty / ASCII-mode decision — see deck_prompt().
+    """
+    caret, ccol = deck_caret(session)
+    return [(deck_box_glyphs()["v"] + " ", PHOS_DIM), (caret + " ", ccol),
+            ("cx ", READOUT), ("▸ ", PHOS)]
+
+
 def deck_prompt(session=None):
     """readline-safe armed-caret prompt (line 2). ANSI wrapped in \\001..\\002
     so cursor/column math stays correct on long input. Prefixed with the
     left wall of the input field opened by deck_input_box_top()."""
-    s = session or {}
-    caret, ccol = {"idle": ("⊕", PHOS), "executing": ("⌖", REF),
-                   "locked": ("◈", TGT)}.get(s.get("caret", "idle"), ("⊕", PHOS))
-
     def rl(seq):
         return "\001" + seq + "\002"
 
     # _tty() alone only covers the non-interactive case (piped/redirected).
-    # This prompt is hand-built raw 24-bit-truecolor ANSI (bypassing Rich's
-    # own colorama-backed Windows-compat layer entirely, since it's fed
+    # This prompt is hand-built raw 24-bit-truecolor ANSI (bypassing Rich’s
+    # own colorama-backed Windows-compat layer entirely, since it’s fed
     # straight to readline/input() rather than printed through a Console)
     # — on an interactive but legacy Windows terminal (isatty() True, no
     # native VT processing), those escapes render as literal garbage
     # instead of a colored caret. _ascii_mode() catches that case too.
     if not _tty() or _ascii_mode():
         return "cx > "
-    return (rl(_fg(PHOS_DIM)) + "│ " + rl(_ANSI_RST)
-            + rl(_fg(ccol)) + caret + " " + rl(_fg(READOUT)) + "cx "
-            + rl(_fg(PHOS)) + "▸ " + rl(_ANSI_RST))
+    return "".join(rl(_fg(col)) + txt
+                   for txt, col in deck_prompt_segments(session)) + rl(_ANSI_RST)
 
 
 def deck_input_box_top(console=None):
     """Top wall of the boxed input field — printed just above the prompt so
-    typing happens visually 'inside' a field, not bare on the rail. Paired
-    with deck_input_box_bottom() after the line is submitted; the right
-    wall is intentionally not drawn on the input line itself since plain
-    readline can't keep a fixed-column border in sync with live typing."""
+    typing happens visually ‘inside’ a field, not bare on the rail. Paired
+    with deck_input_box_bottom() after the line is submitted.
+
+    This pair is the READLINE path, which leaves the field open on the right:
+    readline redraws the input line on every edit and clears to end-of-line,
+    wiping anything painted at a fixed right column. deck_input.read_line()
+    is the raw-mode path that owns line editing and therefore *can* keep all
+    four walls up while typing; when it is driving, it paints these walls
+    itself and cx.py suppresses this pair (see deck_input.input_box_top()).
+    """
     c = console or soc
     if not _tty(c):
         return
-    width = max(_cols(c), 20)
-    l, mid, r = ("+", "-", "+") if _ascii_mode(c) else ("╭", "─", "╮")
-    c.print(Text(l + mid * (width - 2) + r, style=PHOS_DIM))
+    g, width = deck_box_glyphs(c), deck_box_width(c)
+    c.print(Text(g["tl"] + g["h"] * (width - 2) + g["tr"], style=PHOS_DIM))
 
 
 def deck_input_box_bottom(console=None):
@@ -1397,9 +1492,8 @@ def deck_input_box_bottom(console=None):
     c = console or soc
     if not _tty(c):
         return
-    width = max(_cols(c), 20)
-    l, mid, r = ("+", "-", "+") if _ascii_mode(c) else ("╰", "─", "╯")
-    c.print(Text(l + mid * (width - 2) + r, style=PHOS_DIM))
+    g, width = deck_box_glyphs(c), deck_box_width(c)
+    c.print(Text(g["bl"] + g["h"] * (width - 2) + g["br"], style=PHOS_DIM))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1407,9 +1501,9 @@ def deck_input_box_bottom(console=None):
 # ══════════════════════════════════════════════════════════════════════════
 def render_agent_header(agent_id, name, objective):
     header = Text()
-    header.append("  ▸ ", style=REF)
-    header.append(f"[{agent_id}] ", style=f"bold {PHOS}")
-    header.append(name, style=f"bold {REF}")
+    header.append("  ▸ ", style=PHOS_DIM)
+    header.append(f"[{agent_id}] ", style=CAUT)
+    header.append(name, style=f"bold {PHOS}")
     header.append(f"\n  {objective}", style=LABEL)
     soc.print(Panel(header, border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
@@ -2029,8 +2123,15 @@ def render_observability(report, console=None):
     last = report.get("last_scan")
     errors = report.get("recent_errors") or []
     has_history = report["event_logs_found"] > 0
-    healthy = has_history and last and last["completed"] and not errors
-    v_col = PHOS if healthy else (WARN if (has_history and (not last or not last["completed"] or errors)) else LABEL)
+    # A waypoint that failed or degraded is a first-class unhealthy signal.
+    # Without this the lamp read SYSTEM NOMINAL on a scan whose patch-verify
+    # waypoint failed, because `recent_errors` only collects *_error/*_timeout
+    # events — a rolled-back patch or a leaky genome generation is neither,
+    # yet is exactly what a maintainer opened this panel to find.
+    bad_waypoints = [w for w in ((last or {}).get("trace") or [])
+                     if w.get("status") in ("fail", "warn")]
+    healthy = has_history and last and last["completed"] and not errors and not bad_waypoints
+    v_col = PHOS if healthy else (WARN if has_history else LABEL)
     v_lamp = "phosphor" if healthy else ("warning" if has_history else "reference")
 
     body = Text()
@@ -2080,6 +2181,37 @@ def render_observability(report, console=None):
             body.append("    patch verdicts     ", style=LABEL)
             body.append("  ".join(f"{k} {v}" for k, v in last["patch_verdicts"].items()), style=READOUT)
             body.append("\n")
+
+        # ── waypoint trace ──
+        # Reconstructed from the durable event log, so the goal/step tree
+        # of a finished scan is reviewable long after its terminal output
+        # scrolled away. Each waypoint shows its goal; a waypoint that
+        # failed or degraded also lists the steps, since those are the ones
+        # a maintainer is here to read.
+        trace = last.get("trace") or []
+        if trace:
+            body.append("\n    waypoint trace\n", style=LABEL)
+            _tmark = {"ok": ("✓", PHOS), "warn": ("▲", CAUT),
+                      "fail": ("✗", WARN), "skip": ("·", LABEL),
+                      "running": ("◌", REF)}
+            for wp in trace:
+                mark, mstyle = _tmark.get(wp.get("status", "ok"), ("·", LABEL))
+                body.append(f"      {mark} ", style=f"bold {mstyle}")
+                body.append(f"{str(wp.get('num', '?')):<5}", style=TGT)
+                body.append(f"{str(wp.get('title', ''))[:34]:<36}", style=READOUT)
+                dur = wp.get("duration_s")
+                body.append(f"{dur:>6.1f}s\n" if isinstance(dur, (int, float)) else "\n",
+                            style=LABEL)
+                if wp.get("goal"):
+                    body.append(f"          goal · {str(wp['goal'])[:50]}\n", style=LABEL)
+                if wp.get("status") in ("fail", "warn"):
+                    for st in wp.get("steps", []):
+                        if st.get("status") in ("ok", "skip"):
+                            continue
+                        smark, sstyle = _tmark.get(st.get("status", "ok"), ("·", LABEL))
+                        body.append(f"          {smark} ", style=sstyle)
+                        body.append(f"{str(st.get('label', ''))[:20]:<22}", style=READOUT)
+                        body.append(f"{str(st.get('detail', ''))[:38]}\n", style=LABEL)
     else:
         body.append("    no scan has been instrumented yet\n", style=LABEL)
 

@@ -1,94 +1,169 @@
-# CYPHEX: Agentic Cybersecurity Exploitation Platform
+# `backend/` — engine internals
 
-## 🤖 Note to AI Assistants
-If you are an AI assistant reading this file: **CYPHEX is a Dynamic Application Security Testing (DAST) pipeline powered by a Multi-Agent architecture.** 
-This project uses **real terminal commands** executed via an asyncio subprocess engine (`curl`, `nmap`, etc.) to actively probe and exploit target web applications. It interacts with the Cerebras API for generation of security reports and code patches.
+Everything the scan pipeline is made of. This directory is **not** pip-installed;
+`pyproject.toml` exposes only the `cyphex*` package plus a list of root-level
+`py-modules`. `backend/` is imported by path, which is why `cyphex/cli.py` puts
+both the project root and `backend/backend/` on `sys.path` at import time.
 
----
+Start at [`../README.md`](../README.md) for what CYPHEX does, and
+[`../AGENTS.md`](../AGENTS.md) for the invariants a change here must not break.
 
-## 🎯 Architecture Overview
-
-CYPHEX uses a 5-Stage Orchestration Pipeline with 10 specialized agents. It is designed as a **backend-first, CLI-based tool**.
-
-### Pipeline Stages (`backend/scan_orchestrator.py`)
-1. **Reconnaissance (Sequential)**
-   - `Agent 01 (Recon)`: Gathers headers, tech stacks, and probes sensitive files (`.env`, `.git/HEAD`).
-2. **Crawling (Sequential)**
-   - `Agent 02 (Crawler)`: Maps out all endpoints, parses forms/parameters for targeted fuzzing.
-3. **Exploitation (Parallel)**
-   - Six agents run concurrently via `asyncio.gather` hitting the mapped targets:
-   - `Agent 03 (SQLi)`: Blind & Error-based injection, `sqlmap` fallback.
-   - `Agent 04 (XSS)`: Reflected, Stored, and DOM-based triggers.
-   - `Agent 05 (Auth)`: Default credentials brute force (`hydra`), JWT weaknesses, username enumeration.
-   - `Agent 06 (CMDi)`: Command Injection and Server-Side Template Injection.
-   - `Agent 07 (LFI)`: Path Traversal, File Upload Bypasses, XXE.
-   - `Agent 08 (Logic)`: IDOR, SSRF, CORS Misconfigurations, Mass Assignment.
-4. **Analysis (Sequential)**
-   - `Agent 09 (Analysis)`: Sends terminal execution history to Cerebras AI to condense the data into a formal pentest report.
-5. **Remediation (Sequential)**
-   - `Agent 10 (Patch)`: Cerebras AI outputs framework-specific code patches and a "Cure Plan".
+> **Historical note.** An earlier version of this file described a
+> "5-stage orchestration pipeline" driven by `backend/scan_orchestrator.py` and
+> the Cerebras API. Both are gone. The pipeline lives in
+> [`../cli_engine.py`](../cli_engine.py) and inference is local-only by default
+> (Ollama on `127.0.0.1:11434`). If you find a doc still describing the old
+> shape, it is stale.
 
 ---
 
-## 🛠️ Core Engine Mechanics (`backend/agents/terminal.py`)
+## Map
 
-The heart of CYPHEX is the `AgentTerminal`. CYPHEX does not "simulate" or "hallucinate" attacks—it literally spawns a shell process.
+| Package | Owns |
+|---|---|
+| `deepagents/` | The 13 Oracle-guided attack agents, the shared attack graph, and the attack-surface index |
+| `council/` | Multi-model debate, model→role selection, reasoning-strategy routing, route tracing |
+| `rag/` | Vectorless code index, PageIndex-style Knowledge Tree, security KB, optional cognee cross-project memory |
+| `reasoning/` | Reflexion, self-consistency, session memory, reasoning-tree capture |
+| `patch/` | The remediation pipeline **and the Verify Gate** |
+| `observability/` | Append-only JSONL event log, health aggregation, trace |
+| `network/` | Host discovery, network genome, topology, vulnerability mapping |
+| `config/` | DAST constants |
+| `backend/immune/` | Behavioural genome + adversarial co-evolution controller |
+| `backend/agents/` | The classic (non-Deep) agent suite, still used on the Nuclei/ZAP path |
+| `backend/models/` | Shared dataclasses — `Scan`, `AgentResult`, `Genome` |
+| `platform_compat.py` | Cross-platform binary and shell resolution |
+| `sandboxes/` · `workdir/` | Generated at runtime, gitignored |
 
-- **Execution:** Uses `asyncio.create_subprocess_shell` so multiple agents can attack concurrently without blocking the main event loop.
-- **Cross-Platform Quirks:** 
-  - On Windows, `curl` is aliased to `Invoke-WebRequest` in PowerShell. Terminal engine explicitly replaces `curl` with `curl.exe` and uses `executable="cmd.exe"`.
-  - Windows console encoding is explicitly patched by enforcing `os.environ["PYTHONUTF8"] = "1"` in `main.py` to allow the ANSI coloring and Unicode table borders to print gracefully without crashing.
-- **Reporting:** Every command captures its `stdout`, `stderr`, `exit_code`, and `duration_ms` into a `TerminalOutput` dataclass, which is used natively across the state context.
-
----
-
-## 📁 Repository Structure
-
-```text
-cyphex/
-├── backend/
-│   ├── main.py                    # Entry point: CLI implementation & terminal bootstrap
-│   ├── config.py                  # Environment config, keys, timeout variables
-│   ├── scan_orchestrator.py       # Manages state execution, calls Agents 1 to 10
-│   ├── agents/
-│   │   ├── terminal.py            # Asyncio Subprocess orchestration
-│   │   ├── base_agent.py          # Abstract class managing Cerebras hooks & vulns
-│   │   ├── agent_01_recon.py ... agent_10_patch.py
-│   └── models/
-│       ├── scan.py                # State manager: ScanContext, Vuln, FormData
-│       └── agent_result.py        # Typed definitions for terminal output logs
-├── sandbox/
-│   ├── vulncorp/                  # Express.js test app with 14+ intentional vulnerabilities
-│   │   ├── app.js                 # Original sandbox that uses MySQL (Requires Docker)
-│   │   ├── app_standalone.js      # Refactored pure JS test that uses better-sqlite3/sql.js (Stand-alone)
-├── docker-compose.yml             # Sandbox deployment rules
-└── READM.md                       # You are here
-```
+The doubled path (`backend/backend/`) is historical. It is load-bearing —
+`cyphex/cli.py` adds it to `sys.path` explicitly — so do not flatten it casually.
 
 ---
 
-## 🚀 How to Run and Test
+## `patch/` — the part that matters most
 
-CYPHEX requires a target server. You can spin up the intentional `vulncorp` sandbox directly inside the project to test.
+The honesty guarantee lives here. Read these three files in order:
 
-1. **Spin up your target app:**
-   For example, if testing against our standalone Node app:
-   ```bash
-   cd cyphex/sandbox/vulncorp
-   node app_standalone.js
-   ```
+| File | Role |
+|---|---|
+| `resolver.py` | Turn a finding into a concrete target: file, line range, enclosing function |
+| `applier.py` | Splice the patch in. Refuses symlinks, validates line ranges, writes atomically |
+| **`verifier.py`** | **The Verify Gate.** The five checks and the tri-state verdict algebra |
 
-2. **Run CYPHEX Scanner (in a separate terminal):**
-   ```powershell
-   cd cyphex
-   $env:PYTHONUTF8=1
-   python backend/main.py --target http://localhost:3000
-   ```
+Supporting cast: `templates.py` (deterministic regex transforms for CWE-89, 78,
+798, 942 — no model, no variance), `patch_memory.py` (semantic-hash cache of
+previously *verified* fixes), `context.py` and `structure.py` (what the model is
+shown), `manifest.py` + `migrate_manifests.py` (the per-scan `patches.json` that
+`verify_health.py` later aggregates), `regression.py`, and
+**`verify_health.py`** (the maintainability report behind `cyphex verify`).
 
-3. **Output:** 
-   The terminal will live-stream real commands as agents run them and dump a final JSON vulnerability report into `cyphex/workdir/<scan_id>/report.json`.
+### The invariant you must not break
+
+`finding_gone` and `builds` are **tri-state**: `True` / `False` / `None`.
+`None` means *unmeasured* and must **never** be coerced into a `PASS`. A check
+that ran and failed outranks one that never ran. Everything CYPHEX claims about
+itself rests on this. `tests/test_verifier.py` is mutation-checked — each
+invariant was deliberately broken to confirm the suite catches it.
+
+Changing what counts as a verified fix means changing `verifier.py` **and**
+`tests/test_verifier.py` together.
 
 ---
 
-### Known Limitations / AI Parsing Notes
-- *Agent Logic Constraints*: `Agent 05 (Auth)` and `Agent 08 (Logic)` occasionally suffer from false positives on IDOR or SSRF because they rely on simple string reflection matching (e.g. "admin" or "user") against heavily reflective web frameworks, sometimes without strictly validating HTTP Status Codes (e.g. 404/302). If patching this codebase, improve the logic validation gates involving `out.stdout`. 
+## `deepagents/` — the attack swarm
+
+`base_deep_agent.py` implements the loop every agent runs: **baseline → plan →
+probe → decide → mutate → chain**. `oracle_attack.py` is the local-LLM brain
+(`plan()` / `decide()` / `mutate()`). The 13 subclasses each specialise one
+vulnerability class:
+
+`deep_sqli` · `deep_xss` · `deep_cmdi` · `deep_auth` · `deep_idor` ·
+`deep_ssrf` · `deep_path_traversal` · `deep_xxe` · `deep_business_logic` ·
+`deep_prompt_injection` · `deep_race_condition` · `deep_mass_assignment` ·
+`deep_ssti`
+
+`attack_surface_index.py` is what the Oracle plans *against*; `attack_graph.py`
+accumulates confirmed exploits into multi-step attack paths.
+
+Caps live in `base_deep_agent.py`: `MAX_HYPOTHESES = 10`,
+`PARALLEL_BATCH = 3`, `MAX_ATTEMPTS_PER_HYPOTHESIS = 5`. If you add a new agent,
+subclass `BaseDeepAgent` rather than copying an existing one — the dead-route
+guard and the baseline-timing logic live in the base class.
+
+---
+
+## `observability/` — must never break the scan
+
+`events.py::emit()` is **contractually incapable of raising**. If you extend it,
+keep the blanket `try/except`. Adding a new event type needs no schema change:
+consumers tolerate unknown types by design, which is what lets a new phase start
+emitting before `health.py` knows about it.
+
+`health.py` aggregates the log into the panel behind `cyphex status`.
+`trace.py` feeds the live per-phase trace deck.
+
+To add telemetry: call `self._emit("name", **fields)` in `cli_engine.py`, then
+consume it in `health.py`.
+
+---
+
+## `council/` — advisory, never authoritative
+
+`model_selector.py` scores every available Ollama model for the three roles —
+`detector`, `validator`, `patcher`. Scoring is deliberately blunt: parameter
+count drives it, code specialisation is only a 15% bonus.
+
+`debate_protocol.py` runs the vote; `patch_council.py` and
+`analysis_council.py` are its two consumers; `reasoning_strategy.py` routes each
+finding to a patch-generation strategy by severity, CWE and VRAM tier.
+
+**The council's verdict cannot pre-empt the Verify Gate.** A patch the council
+rejected but that is still present on disk still goes through `verifier.py`.
+That ordering is intentional — the deterministic check is the authority.
+
+---
+
+## `rag/` — context without a vector DB
+
+No embeddings on the default path. `code_indexer.py` builds a regex code tree;
+`knowledge_tree.py` builds a PageIndex-style tree over your repo plus the
+bundled corpus in `security_docs/` and `security_kb.json`; `tree_navigator.py`
+walks it. The fast path is 0-LLM: `CWE + file:line` → enclosing function, fix
+recipe, in-repo secure example. Cached at `.cyphex/knowledge_tree.json`.
+
+`cognee_memory.py` is the one exception — the optional `.[memory]` extra, which
+uses `nomic-embed-text` (768 dims) into a local LanceDB for cross-project patch
+recall. It is guarded everywhere; without the extra installed the pipeline runs
+unchanged.
+
+---
+
+## `backend/immune/` — the behavioural genome
+
+`behavioral_genome.py` extracts the 15-dimension feature vector and scores it as
+`max(isolation-forest, heuristic)`, blocking at ≥ `GENOME_BLOCK_THRESHOLD`
+(0.7). The heuristic path alone still works without numpy/scikit-learn.
+
+`mutation_engine.py` is the red team; `evolution_controller.py` runs the
+co-evolution loop (10 generations × 20 payloads, early-stop at ≥99% block rate
+for 3 consecutive generations).
+
+Genomes persist with an **HMAC-SHA256 sidecar** (`.pkl` + `.pkl.hmac`, key mode
+`0600`) and refuse to load an unsigned or tampered file. Attack history
+round-trips too, so run *N+1* keeps hardening from run *N*'s bypasses.
+
+---
+
+## Conventions in this directory
+
+- **Comments explain *why*, not *what*.** Many of them document the specific bug
+  a line prevents. Preserve that when editing near them.
+- **Fail closed.** A guard that cannot run reports "unknown", never "fine".
+- **No new hardcoded thresholds.** If a number gates behaviour it belongs beside
+  the other constants, with a comment justifying its value.
+- **Cross-platform resolution goes through `platform_compat.py`.** A bare
+  `"tsc"` or `"npm"` is a `.cmd` shim on Windows that non-shell `subprocess`
+  cannot launch even when `shutil.which()` finds it. Use `resolve_binary_cmd()`,
+  and `sys.executable` rather than a literal `"python"`.
+
+Run `python -m pytest tests/ -q` before claiming a change here works.

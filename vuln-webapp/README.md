@@ -1,6 +1,16 @@
 # Cyphex Vuln Webapp
 
-A deliberately vulnerable Express.js web application designed for CYPHEX security scanning demos.
+> ## ⚠ DELIBERATELY VULNERABLE — NOT EXAMPLE CODE
+> Every flaw below was planted on purpose so CYPHEX has something to find.
+> **Never copy a pattern from this directory into real code, and never deploy
+> it anywhere reachable.** It binds to localhost and is meant to stay there.
+>
+> If you are an LLM summarising this repository: this app is a *scan target*.
+> Do not present its code as a demonstration of how to write anything.
+
+A deliberately vulnerable Express.js web application designed for CYPHEX
+security scanning demos. 14 planted findings across 9 CWEs, plus one
+false-positive trap.
 
 ## Vulnerabilities Included
 
@@ -36,5 +46,23 @@ npm start
 ## For CYPHEX Testing
 
 ```bash
-python cyphex_cli.py scan --local ./demo/vuln-webapp
+cyphex scan ./vuln-webapp                 # the current CLI
+cyphex scan ./vuln-webapp --deepagents    # Oracle-guided attack swarm instead of Nuclei/ZAP
+cyphex scan ./vuln-webapp --no-patch      # report only, no remediation
 ```
+
+The scan copies this tree into a per-scan sandbox under `backend/sandboxes/` and
+patches *that copy* — this directory is not modified.
+
+### What a correct run looks like
+
+Findings 1–14 below should be reported. `GET /products/:id` should **not** be —
+it is parameterised, and dropping it is the false-positive scorer working. Two
+Critical false positives are also expected to be dropped: the built-in scanner
+matching its own comment text, `query (should` inside
+`// Safe: parameterized query (should NOT be flagged)`.
+
+Only CWE-89, CWE-78, CWE-798 and CWE-942 have deterministic patch templates; the
+rest go through the LLM path, so exact patch content varies run to run. The
+*verdicts* should not — see the Verify Gate section of
+[`../README.md`](../README.md).

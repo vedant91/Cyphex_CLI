@@ -31,16 +31,17 @@ class Colors:
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    MAGENTA = "\033[95m"
-    CYAN = "\033[96m"
-    WHITE = "\033[97m"
-    GRAY = "\033[90m"
-    BG_RED = "\033[41m"
-    BG_GREEN = "\033[42m"
+    # MONO SIGNAL RED — names kept, values mirror terminal_ui.py's ramp.
+    RED = "\033[38;2;225;142;145m"        # bright — error / high
+    GREEN = "\033[38;2;217;94;98m"        # PRIMARY — success / engaged
+    YELLOW = "\033[38;2;193;78;91m"       # mid — warning / medium
+    BLUE = "\033[38;2;142;113;116m"       # muted — info / low
+    MAGENTA = "\033[38;2;225;142;145m"    # bright (legacy alias)
+    CYAN = "\033[38;2;217;94;98m"         # PRIMARY (legacy alias)
+    WHITE = "\033[38;2;225;208;210m"      # readout — primary prose
+    GRAY = "\033[38;2;142;113;116m"       # muted — captions / timestamps
+    BG_RED = "\033[48;2;26;18;20m"        # PANEL — raised panel fill
+    BG_GREEN = "\033[48;2;26;18;20m"      # PANEL — raised panel fill
 
 
 # Agent color mapping

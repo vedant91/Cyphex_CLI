@@ -43,6 +43,7 @@ class EvolutionController:
         generations: int = None,
         payloads_per_gen: int = None,
         on_generation_complete: Optional[Callable] = None,
+        verbose: bool = True,
     ) -> list[EvolutionResult]:
         """
         Run the full co-evolution loop.
@@ -64,20 +65,29 @@ class EvolutionController:
         generations = generations or config.EVOLUTION_GENERATIONS
         payloads_per_gen = payloads_per_gen or config.EVOLUTION_PAYLOADS_PER_GEN
 
-        print(f"\n  🧬 Starting Adversarial Co-Evolution ({generations} generations)...")
-        print(f"  🧬 Payloads per generation: {payloads_per_gen}")
+        # Narration is opt-out, not opt-in. demo_immune_system.py exists to
+        # SHOW this loop, so the default has to stay verbose; only the scan
+        # pipeline quiets it, because there the same per-generation numbers
+        # are already rendered as traced waypoint steps and printing them
+        # twice just makes the scan output harder to read.
+        def _say(*a, **kw):
+            if verbose:
+                print(*a, **kw)
+
+        _say(f"\n  🧬 Starting Adversarial Co-Evolution ({generations} generations)...")
+        _say(f"  🧬 Payloads per generation: {payloads_per_gen}")
 
         # ─── Build initial genome from scan results ───
         # Skip if already profiled (the caller may have built or loaded it) so we
         # don't retrain on normal-only samples and clobber restored/accumulated
         # adversarial state.
-        print("  🔵 BLUE TEAM: Building behavioral genome from scan data...")
+        _say("  🔵 BLUE TEAM: Building behavioral genome from scan data...")
         if not self.genome.endpoint_profiles:
             self.genome.build_from_scan(context)
-        print(f"  🔵 Genome profiled {len(self.genome.endpoint_profiles)} endpoints")
+        _say(f"  🔵 Genome profiled {len(self.genome.endpoint_profiles)} endpoints")
 
         # ─── Generate initial attack payloads ───
-        print("  🔴 RED TEAM: Generating initial attack payloads...")
+        _say("  🔴 RED TEAM: Generating initial attack payloads...")
         current_payloads = []
         for attack_type in ["sqli", "xss", "cmdi"]:
             payloads = self.mutation.generate_initial_payloads(
@@ -85,7 +95,7 @@ class EvolutionController:
                 count=payloads_per_gen // 3,
             )
             current_payloads.extend(payloads)
-        print(f"  🔴 Generated {len(current_payloads)} initial payloads")
+        _say(f"  🔴 Generated {len(current_payloads)} initial payloads")
 
         # Assign endpoints to payloads
         endpoints = list(self.genome.endpoint_profiles.keys())
@@ -111,7 +121,7 @@ class EvolutionController:
 
             # Print generation result
             status = "🟢" if result.block_rate > 0.8 else "🟡" if result.block_rate > 0.5 else "🔴"
-            print(
+            _say(
                 f"  {status} Generation {gen}: "
                 f"blocked {result.payloads_blocked}/{result.payloads_generated} "
                 f"({result.block_rate:.1%}) | "
@@ -129,7 +139,7 @@ class EvolutionController:
             if result.block_rate >= config.EVOLUTION_CONVERGENCE_THRESHOLD:
                 convergence_count += 1
                 if convergence_count >= 3:
-                    print(f"  ✅ Genome converged at {result.block_rate:.1%} — stopping evolution")
+                    _say(f"  ✅ Genome converged at {result.block_rate:.1%} — stopping evolution")
                     break
             else:
                 convergence_count = 0
@@ -142,12 +152,12 @@ class EvolutionController:
         final = self.history[-1] if self.history else None
         initial = self.history[0] if self.history else None
 
-        print(f"\n  🧬 ══════ EVOLUTION COMPLETE ══════")
+        _say(f"\n  🧬 ══════ EVOLUTION COMPLETE ══════")
         if initial and final:
-            print(f"  📈 Block rate: {initial.block_rate:.1%} → {final.block_rate:.1%}")
-            print(f"  🔬 Generations: {len(self.history)}")
-            print(f"  🛡️  Genome is now hardened against {final.payloads_blocked} attack patterns")
-        print()
+            _say(f"  📈 Block rate: {initial.block_rate:.1%} → {final.block_rate:.1%}")
+            _say(f"  🔬 Generations: {len(self.history)}")
+            _say(f"  🛡️  Genome is now hardened against {final.payloads_blocked} attack patterns")
+        _say()
 
         return self.history
 

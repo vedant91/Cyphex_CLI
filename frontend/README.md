@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# `frontend/` — experimental dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> **Status: experimental. Not wired into the CLI.**
+> Nothing in `cyphex scan`, `cyphex verify` or the workspace touches this
+> directory, and nothing here is installed by `pip install -e .`. Do not
+> describe it as a shipped feature of CYPHEX.
 
-Currently, two official plugins are available:
+A React + TypeScript + Vite prototype of a scan-results dashboard — agent table,
+remediation cards, charts. It reads no live data today; the CLI writes its
+artifacts to `.cyphex/` and the two are not connected.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Running it
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd frontend
+npm install
+npm run dev        # vite
+npm run build      # tsc -b && vite build
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Stack: React 19, Vite, TailwindCSS 4, framer-motion, lucide-react,
+`@react-three/fiber`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## If you plan to finish it
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+The scan pipeline already emits everything a dashboard needs — start there
+rather than inventing a new format:
+
+| Source | Contains |
+|---|---|
+| `.cyphex/patches.json` (per scan) | Every patch and its `PASS` / `FAIL` / `UNVERIFIABLE` verdict |
+| `events.jsonl` (per scan) | Append-only phase timings, agent outcomes, errors |
+| `cyphex scan --format json` / `--format sarif` | The findings themselves |
+| `backend/patch/verify_health.py` | The aggregation the `cyphex verify` panel already computes |
+| `cyphex verify --json out.json` · `cyphex status --json out.json` | Both panels, machine-readable |
+
+The tri-state verdict is load-bearing: `UNVERIFIABLE` is **not** a soft pass and
+must never be rendered as one. See the Verify Gate section of
+[`../README.md`](../README.md).
+
+`package.json` still carries the scaffold's `"name": "customapp"`.

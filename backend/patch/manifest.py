@@ -26,12 +26,58 @@ class PatchManifest:
         self._load()
 
     def _load(self):
-        if os.path.isfile(self.path):
+        if not os.path.isfile(self.path):
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            self.entries = {}
+            return
+
+        self.entries, migrated = self._normalize(raw)
+
+        # Auto-heal legacy manifests. A pre-v1 CYPHEX build wrote a
+        # {"version", "updated_at", "patches": [...]} wrapper instead of the
+        # flat "file:line:cwe" -> entry map used now. Loaded as-is, self.entries
+        # would hold that wrapper dict, so is_already_patched()'s cache lookup
+        # (self.entries.get("file:line:cwe")) always missed and every location
+        # in those sandboxes re-patched from scratch on re-scan. Normalizing on
+        # load fixes the lookup in-memory; rewriting in the flat schema makes
+        # the fix durable so the migration happens exactly once per file.
+        if migrated:
             try:
-                with open(self.path, "r", encoding="utf-8") as f:
-                    self.entries = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                self.entries = {}
+                self.save()
+            except OSError:
+                pass  # a read-only sandbox must not break manifest loading
+
+    @staticmethod
+    def _normalize(raw) -> tuple[dict, bool]:
+        """
+        Coerce any on-disk manifest shape into the current flat
+        {"file:line:cwe": entry} map. Returns (entries, migrated_from_legacy).
+        """
+        # ── Legacy schema: entries live in a "patches" list. ──
+        if isinstance(raw, dict) and isinstance(raw.get("patches"), list):
+            flat: dict = {}
+            for e in raw["patches"]:
+                if not isinstance(e, dict):
+                    continue
+                entry = dict(e)
+                # Legacy entries carry their own composite key; fall back to
+                # rebuilding it from the parts if an even older record omitted it.
+                key = entry.pop("key", None)
+                if not key:
+                    rel = entry.get("rel_path") or entry.get("file") or "?"
+                    key = f"{rel}:{entry.get('line', '?')}:{entry.get('cwe', '?')}"
+                entry.setdefault("file", entry.get("rel_path", "?"))
+                flat[key] = entry
+            return flat, True
+        # ── Current schema: flat map, keep only well-formed entry dicts. ──
+        if isinstance(raw, dict):
+            return {k: v for k, v in raw.items() if isinstance(v, dict)}, False
+        # ── Unusable top-level shape (list/int/str) — start clean. ──
+        return {}, False
 
     def save(self):
         """

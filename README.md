@@ -1,14 +1,17 @@
 <p align="center">
+  <img src="assets/banner.png" alt="CYPHEX" width="720" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Ollama-Local_LLM-000000?style=for-the-badge&logo=ollama&logoColor=white" />
   <img src="https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
   <img src="https://img.shields.io/badge/DeepAgents-13_Oracle--Guided-D64545?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Genome-91.3%25_Recall-6D28D9?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/tests-136_passing-2ea44f?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/tests-388_passing-2ea44f?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Verify_Gate-maintainability_panel-3b82f6?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 </p>
-
-<h1 align="center">CYPHEX</h1>
 
 <p align="center">
   <b>Point CYPHEX at a repo. It deploys the app in a sandbox, attacks it with local-LLM agents,<br/>
@@ -21,7 +24,8 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
-  <a href="#the-verify-gate">Verify Gate</a> · <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
+  <a href="#the-verify-gate">Verify Gate</a> · <a href="#the-maintainability-panel">Maintainability Panel</a> ·
+  <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
   <a href="#usage">Usage</a> · <a href="#configuration">Config</a> ·
   <a href="#troubleshooting">Troubleshooting</a> · <a href="#what-cyphex-cant-do-yet">Limitations</a>
 </p>
@@ -36,13 +40,15 @@
 | **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
 | **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
 | **[The Verify Gate](#the-verify-gate)** | The honesty guarantee |
+| **[The Maintainability Panel](#the-maintainability-panel)** · [full docs](docs/VERIFICATION_MAINTAINABILITY_PANEL.md) | Is that guarantee still working? |
 | **[The 8-step pipeline](#how-it-works--the-8-step-pipeline)** · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
 | **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** · [Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays) · [RAG](#3-vectorless-rag--knowledge-tree--context-without-a-vector-db) · [Council](#4-the-council--multi-model-validation) | The four subsystems |
 | **[Immune system](#the-behavioural-immune-system)** · [Benchmark](#benchmarked-quality) | Anomaly detection |
 | **[Network scanning](#network-scanning-optional)** · [RASP + auto-heal](#rasp--auto-heal-daemon) | Beyond the codebase |
-| **[Usage](#usage)** · [Configuration](#configuration) · [CI](#using-cyphex-in-ci) | Operating it |
-| **[Repository layout](#repository-layout)** · [Testing](#testing) · [Troubleshooting](#troubleshooting) | Working on it |
-| **[Limitations](#what-cyphex-cant-do-yet)** · [Security & ethics](#security--ethics) | What to know before trusting it |
+| **[Usage](#usage)** · [Terminal surface](#the-terminal-surface) · [Configuration](#configuration) · [CI](#using-cyphex-in-ci) | Operating it |
+| **[Repository layout](#repository-layout)** · [Testing](#testing) · [Troubleshooting](#troubleshooting) · [Contributing](CONTRIBUTING.md) | Working on it |
+| **[Limitations](#what-cyphex-cant-do-yet)** · [Security & ethics](#security--ethics) · [SECURITY.md](SECURITY.md) | What to know before trusting it |
+| **[Full documentation](#full-documentation)** · [per-directory READMEs](#per-directory-readmes) · [llms.txt](llms.txt) | Everything else |
 
 ---
 
@@ -65,8 +71,11 @@ It refuses to overclaim: an unverifiable patch reports UNVERIFIABLE, not success
 
 ```bash
 # 1. Clone
-git clone https://github.com/Punya23/Cyphex_CLI.git
+git clone --recurse-submodules https://github.com/Punya23/Cyphex_CLI.git
 cd Cyphex_CLI
+# --recurse-submodules pulls demo/vibemart, a second scan target. Optional —
+# leave it off and everything except that one demo still works. Already cloned?
+# git submodule update --init
 
 # 2. Install (extras: '.[memory]' cognee graph · '.[reasoning]' · '.[dev]')
 pip install -e .
@@ -220,6 +229,45 @@ Every candidate must clear all of:
 Ordinary scans ignore a regex match inside a code comment — a commented-out query isn't a vulnerability. If verification did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
 
 So the re-scan flips comment-matching back on: commenting-out still fails and rolls back. Meanwhile *parameterised-SQL* suppression stays active both ways, because adding placeholders genuinely is a fix and must verify as one. Deliberate asymmetry, covered by tests.
+
+---
+
+## The Maintainability Panel
+
+*A gate that can degrade silently is a gate you can't trust.* The Verify Gate above is correct — but correctness without visibility has a failure mode: if `tsc` goes missing, every TypeScript patch verifies as UNVERIFIABLE forever, the score stops improving, and **nothing anywhere says why**.
+
+`cyphex verify` closes that loop. It aggregates every verdict the gate has ever written — scattered one `patches.json` per scan — into one maintainer-facing answer.
+
+```mermaid
+flowchart LR
+    SCAN["cyphex scan"] -->|"PASS / FAIL / UNVERIFIABLE"| MAN[("patches.json<br/>per scan")]
+    SCAN -->|"emit() · never raises"| EV[("events.jsonl<br/>per scan")]
+    MAN --> VH["verify_health.py"]
+    EV --> OH["observability/health.py"]
+    VH --> V["/verify<br/>config · status · next steps"]
+    VH --> CI["--ci<br/>exit 0/1/2"]
+    OH --> S["/status<br/>last scan · agents · errors"]
+```
+
+| | Shows | Verdict lamp |
+|---|---|---|
+| **`cyphex verify`** | **Configuration** — blast-radius caps, suppression patterns, per-check toolchain readiness · **Status** — durability rate, PASS/FAIL/UNVERIFIABLE, per-CWE breakdown, scan-over-scan trend · **Next steps** | `GATE HEALTHY` · `GATE DEGRADED` · `GATE UNUSED` |
+| **`cyphex status`** | Last scan's phase timings, DeepAgents swarm outcomes, cognee memory rates, recent-errors tail | `SYSTEM NOMINAL` · `SYSTEM DEGRADED` · `NO TELEMETRY YET` |
+
+```bash
+cyphex verify              # config + status + next steps
+cyphex verify --selftest   # live self-test: drive each check, don't just probe for a binary
+cyphex verify --ci         # exit 0 healthy / 1 degraded / 2 unusable
+cyphex status              # what actually happened on the last scan
+```
+
+**Presence ≠ works.** `--selftest` drives each real check path against a synthetic fixture — compiles a deliberately broken file to prove the syntax check *rejects*, runs the scanner over a known-vulnerable fixture to prove re-scan matching still fires, exercises `httpx`'s connection-error path. A tool can report *installed* and still be broken for the check it gates; this is the only thing that catches that.
+
+**Next steps are derived, never templated.** Each entry appears only when its condition holds and names the specific action — *"Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently verify as UNVERIFIABLE, not PASS, because the build check can't run."*
+
+Both panels are read-only, degrade to plain text without Rich, and degrade again to pure ASCII on terminals that can't render box-drawing glyphs.
+
+→ **[Full documentation: docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)**
 
 ---
 
@@ -439,8 +487,14 @@ cyphex scan --repo https://github.com/user/app.git --deepagents --network
 cyphex scan --path ./vuln-webapp --deep --format sarif      # --deep aliases --deepagents
 cyphex scan --path ./my-app --judge                         # deterministic JSON/MD/SARIF artifacts
 cyphex setup | doctor | council-doctor | version
+cyphex verify --ci                      # Verify Gate health → exit 0 healthy / 1 degraded / 2 unusable
+cyphex status                           # what actually happened on the last scan
+cyphex benchmark --threshold 0.6        # immune-system benchmark
 cyphex                                  # no args → slash-command workspace (also: repl / workspace / shell)
 ```
+
+`verify`, `status` and `benchmark` are the same handlers the workspace's `/verify`, `/status` and
+`/benchmark` call, and the same ones `./cx` exposes — one implementation, three entry points.
 
 | Flag | Effect |
 |---|---|
@@ -459,7 +513,9 @@ cyphex                                  # no args → slash-command workspace (a
 /deep <target>     · /full <target>     # DeepAgents swarm · + network sweep
 /net [host]        · /netaudit · /netwatch
 /watch                                  # RASP auto-heal daemon
-/benchmark [--threshold N] [--json out.json]
+/verify [path] [--selftest] [--ci] [--json out.json] [--watch [s]]
+/status [path] [--json out.json] [--watch [s]]
+/benchmark [--data corpus.csv] [--threshold N] [--json out.json]
 /setup /doctor /models /version /history /clear /help /exit
 <bare path or URL>                      # auto-scans it; Tab completes commands
 <plain English>                         # "run my repo <link>" → routed to /scan --full
@@ -467,9 +523,22 @@ cyphex                                  # no args → slash-command workspace (a
                                          # only ever emits a real slash command or refuses
 ```
 
-**`./cx` launcher** — same engine, non-interactively: `cx scan`, `cx deep`, `cx net`, `cx benchmark`, `cx doctor`, `cx models`, `cx --version`, or `cx <path|url>` to auto-scan.
+**`./cx` launcher** — same engine, non-interactively: `cx scan`, `cx deep`, `cx net`, `cx verify`, `cx status`, `cx benchmark`, `cx doctor`, `cx models`, `cx --version`, or `cx <path|url>` to auto-scan. `cx verify --ci` sets a process exit code the same way `cyphex verify --ci` does.
 
 **Legacy** (`python3 cyphex_cli.py <cmd>`): `watch`, `github-hook`, `onboard`, `netmap`, `netwatch`, `netaudit`, `scan --branch` — not yet ported to the `cyphex` binary.
+
+### The terminal surface
+
+Every panel is drawn by `terminal_ui.py` and **degrades twice**: no Rich → plain-text renderer; a terminal that can't render box-drawing glyphs → pure ASCII (`_ascii_mode()` / `_box()`). CI proves this — the matrix runs a `LANG=C` job and an Alpine/musl job specifically because a win32-only UTF-8 fix once crashed both.
+
+| Piece | What it is |
+|---|---|
+| `trace_deck.py` | Live per-phase trace deck during a scan, plus the end-of-scan summary with real step durations |
+| `deck_input.py` | Raw-mode single-line editor behind the REPL's boxed input field — keeps all four walls up *while* you type, which readline alone cannot do. Falls back to readline if unavailable |
+| `nl_router.py` | Plain English → a real slash command, via local Ollama. Guardrailed: it either emits a command from the known list or refuses — it never invents one |
+| `mascot*.py` | Tiered terminal pixel-art mascot. Tier 3 Kitty/iTerm inline images → sextant/quadrant subcell → half-block → plain glyphs. Pillow optional; without it the render drops a tier rather than failing. `mascot_companion_loop.py` can run it in its own terminal window |
+
+Colour is a single hue — **MONO SIGNAL RED** — with severity and hierarchy carried by *brightness* inside that hue, not by different colours.
 
 ---
 
@@ -512,7 +581,10 @@ The immune benchmark is the gate — exits non-zero if recall drops below 80% or
 
 ```yaml
 - name: Immune-system regression gate
-  run: python3 cyphex_benchmark.py
+  run: python3 cyphex_benchmark.py        # or: cyphex benchmark
+
+- name: Verify Gate health gate
+  run: cyphex verify --ci                 # exit 0 healthy / 1 degraded / 2 unusable
 
 - name: Security scan (report only, no patching)
   run: cyphex scan . --no-patch --format sarif > results.sarif
@@ -524,12 +596,22 @@ The immune benchmark is the gate — exits non-zero if recall drops below 80% or
 
 Use `--no-patch` in CI — a full patching run needs Ollama and ~18 minutes. `--judge` gives deterministic artifacts for diffing scan-over-scan.
 
+| Gate | Command | Non-zero when |
+|---|---|---|
+| Immune regression | `cyphex benchmark` / `python3 cyphex_benchmark.py` | recall < 80% **or** FPR > 10% |
+| Verify Gate health | `cyphex verify --ci` | `1` a check degraded · `2` the gate is unusable |
+| Unit suite | `pytest` | any of the 388 tests fails |
+
+> `cyphex verify --ci` measures **your own toolchain**, not the target — it is the check that catches "`tsc` disappeared, so every TypeScript patch has silently read UNVERIFIABLE for three weeks."
+
 ---
 
 ## Repository Layout
 
+Every directory below carries its own `README.md` with the detail this table omits.
+
 ```
-cyphex/                     # The pip-installed package — CLI entry point
+cyphex/                     # The pip-installed package — CLI entry point   → cyphex/README.md
   cli.py                    #   argparse surface, `cyphex <cmd>`
   scanner.py                #   static analysis: Semgrep + 16 built-in rulesets + FP scoring
   dynamic_scanner.py        #   Nuclei / ZAP integration
@@ -539,22 +621,43 @@ cyphex/                     # The pip-installed package — CLI entry point
   onboarder.py              #   zero-click RASP injection into a target app
   github_hook.py            #   opt-in PR flow (the one path that leaves your machine)
 
-backend/
-  deepagents/               # 13 Oracle-guided attack agents + attack graph + surface index
-  council/                  # multi-model debate, model selection, reasoning strategies
-  rag/                      # vectorless code index, Knowledge Tree, security KB, cognee memory
-  reasoning/                # reflexion, self-consistency, session memory, reasoning trees
-  patch/                    # resolver → applier → verifier → templates → manifest → regression
-  network/                  # discovery, network genome, topology, vuln mapping
-  backend/immune/           # behavioural genome + adversarial evolution controller
-  backend/agents/           # the classic (non-Deep) agent suite
-  sandboxes/                # per-scan working copies (gitignored)
+backend/                    # Engine internals (not pip-installed)          → backend/README.md
+  deepagents/               #   13 Oracle-guided attack agents + attack graph + surface index
+  council/                  #   multi-model debate, model selection, reasoning strategies
+  rag/                      #   vectorless code index, Knowledge Tree, security KB, cognee memory
+  reasoning/                #   reflexion, self-consistency, session memory, reasoning trees
+  patch/                    #   resolver → applier → **verifier** → templates → manifest → regression
+  observability/            #   append-only JSONL event log + health aggregation (`/status`)
+  network/                  #   discovery, network genome, topology, vuln mapping
+  config/                   #   defaults; env vars override
+  platform_compat.py        #   cross-platform binary/shell resolution (Windows `.cmd` shims)
+  backend/immune/           #   behavioural genome + adversarial evolution controller
+  backend/agents/           #   the classic (non-Deep) agent suite
+  sandboxes/  workdir/      #   per-scan working copies, genomes, reasoning trees (gitignored)
 
-sdks/node/cyphex-rasp.js    # the runtime shield
-cli_engine.py               # pipeline orchestrator — wires all of the above together
-cyphex_benchmark.py         # immune-system benchmark + CI gate
-tests/                      # 136 tests
-vuln-webapp/                # bundled deliberately-vulnerable Express app
+Root-level engine modules (declared as `py-modules` so an editable install exposes them):
+  cli_engine.py             # pipeline orchestrator — `CyphexEngine.run()`, 9 phases
+  cx.py                     # the interactive workspace (REPL) — the default UX
+  cyphex_cli.py             # legacy argparse driver (watch / github-hook / onboard / netmap …)
+  terminal_ui.py            # every Rich `render_*` panel, with plain-text + ASCII fallbacks
+  scoring.py                # SOLE source of truth for the 0-100 posture score
+  nl_router.py              # plain-English → slash command, guardrailed, local Ollama
+  deck_input.py             # raw-mode single-line editor behind the REPL's boxed input field
+  trace_deck.py             # live per-phase trace deck + end-of-scan summary
+  cyphex_benchmark.py       # immune-system benchmark + CI gate
+  mascot*.py                # tiered terminal pixel-art mascot (8 modules)  → assets/README.md
+
+docs/                       # Long-form deliverable docs                    → docs/README.md
+tests/                      # 388 tests, ~50s                              → tests/README.md
+benchmarks/                 # the 76-sample immune corpus                   → benchmarks/README.md
+sdks/node/cyphex-rasp.js    # the runtime shield (Express)                  → sdks/node/README.md
+scripts/                    # end-to-end convenience shell scripts          → scripts/README.md
+assets/                     # mascot source art + QA renders                → assets/README.md
+finetune/                   # optional QLoRA specialisation of the patcher  → finetune/README.md
+frontend/                   # experimental React dashboard (not wired in)   → frontend/README.md
+iot/                        # experimental ESP32 sensor bridge              → iot/README.md
+vuln-webapp/                # bundled deliberately-vulnerable Express app   → vuln-webapp/README.md
+demo/                       # demo targets used in walkthroughs
 ```
 
 ---
@@ -563,9 +666,13 @@ vuln-webapp/                # bundled deliberately-vulnerable Express app
 
 ```bash
 pip install -e ".[dev]"
-pytest                      # 136 tests, ~7s
+pytest                      # 388 tests, ~50s, no network needed
 pytest -m integration       # slow tests that drive real local models (needs Ollama)
+pytest tests/test_verifier.py -q          # just the Verify Gate
+pytest tests/test_scoring.py -q           # just the score's monotonicity proofs
 ```
+
+389 tests are collected; 1 is deselected by default (`-m 'not integration'`).
 
 Integration tests are excluded by default (`addopts = "-m 'not integration'"`) — `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
 
@@ -633,6 +740,36 @@ The Verify Gate tests are worth reading to understand the system's guarantees �
 ---
 
 ## Full Documentation
+
+| Document | What it covers |
+|---|---|
+| **[docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)** | The verification surface in depth — architecture, verdict states, event taxonomy, CI gating, design rationale |
+| **[AGENTS.md](AGENTS.md)** | Repository orientation for coding agents — layout, invariants, where to change what |
+| **[llms.txt](llms.txt)** | Condensed machine-readable project summary ([llmstxt.org](https://llmstxt.org)) |
+| **[CYPHEX_PRD.md](CYPHEX_PRD.md)** | Living specification — see the section index below |
+| **[CYPHEX_BUILD_GUIDE.md](CYPHEX_BUILD_GUIDE.md)** | Implementation walkthrough and file tree |
+| **[CONTRIBUTING.md](CONTRIBUTING.md)** | How to set up, what to run before opening a PR, and the invariants a change must not break |
+| **[SECURITY.md](SECURITY.md)** | How to report a vulnerability in CYPHEX itself, and CYPHEX's own threat model |
+| **[CITATION.cff](CITATION.cff)** | Machine-readable citation metadata |
+
+### Per-directory READMEs
+
+Each of these answers "what is in this folder and what may I safely change" without reading the root README first:
+
+| Directory | Covers |
+|---|---|
+| **[cyphex/](cyphex/README.md)** | The installed package — CLI surface, scanner, sandbox, daemon, doctor |
+| **[backend/](backend/README.md)** | Engine internals — DeepAgents, council, RAG, patch + Verify Gate, observability, network, immune |
+| **[docs/](docs/README.md)** | Index of the long-form docs and which question each answers |
+| **[tests/](tests/README.md)** | What each test file pins down, and which tests are mutation-checked |
+| **[benchmarks/](benchmarks/README.md)** | The 76-sample immune corpus — schema, provenance, how to extend it |
+| **[sdks/node/](sdks/node/README.md)** | The RASP shield — install, options, per-route mounting, daemon auth |
+| **[scripts/](scripts/README.md)** | The end-to-end shell scripts and their prerequisites |
+| **[assets/](assets/README.md)** | Mascot source art, the remaster pipeline, and the QA render corpus |
+| **[vuln-webapp/](vuln-webapp/README.md)** | The bundled vulnerable target — every planted CWE and its line |
+| **[finetune/](finetune/README.md)** | Optional QLoRA specialisation of the patcher model |
+| **[frontend/](frontend/README.md)** | Experimental React dashboard — **not wired into the CLI** |
+| **[iot/](iot/README.md)** | Experimental ESP32 sensor bridge — **not wired into the CLI** |
 
 Everything below lives in **[CYPHEX_PRD.md](CYPHEX_PRD.md)**:
 

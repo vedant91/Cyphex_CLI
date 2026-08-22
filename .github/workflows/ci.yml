@@ -50,8 +50,14 @@ jobs:
           "
 
       - name: Run tests
-        run: |
-          python -m pytest tests/ -v --tb=short || echo "No tests yet — will add in Phase 6"
+        # No `|| echo` swallow. This step used to end in
+        # `|| echo "No tests yet — will add in Phase 6"`, a placeholder from
+        # when the suite was empty — it survived long enough that a real
+        # failing test (a stale assertion in test_patch_pipeline.py) sat
+        # green in CI. The suite is 388 tests now; a failure here must fail
+        # the build, otherwise the `publish` job's `needs: [test]` gate is
+        # decorative and a broken commit can ship to PyPI on a tag.
+        run: python -m pytest tests/ -v --tb=short
 
       - name: Doctor check (dry run)
         run: |

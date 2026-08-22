@@ -3,7 +3,11 @@ from rich.console import Console
 from backend.council.council_orchestrator import CouncilOrchestrator
 from backend.council.model_selector import get_selector
 
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 ANALYSIS_SYSTEM = """
 You are a security analyst writing a technical report.

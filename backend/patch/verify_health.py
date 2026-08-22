@@ -288,11 +288,11 @@ def _build_next_steps(toolchain: dict, reason_tally: Counter, manifests_found: i
                        legacy_count: int = 0) -> list:
     steps = []
     if legacy_count:
-        steps.append(f"{legacy_count} patch record(s) come from a pre-v1 manifest schema "
-                      "({\"version\", \"patches\": [...]}) that PatchManifest can't load directly — "
-                      "reported here by reading the raw JSON, but is_already_patched()'s cache lookup "
-                      "won't see them. Migrate old backend/sandboxes/*/.cyphex/patches.json files to "
-                      "the current flat-map schema, or accept the cache miss on re-scans of those targets.")
+        steps.append(f"{legacy_count} patch record(s) are still in the pre-v1 manifest schema "
+                      "({\"version\", \"patches\": [...]}). PatchManifest now auto-migrates a file to "
+                      "the flat schema the next time its target is scanned, so is_already_patched() "
+                      "will see them again then. To convert every stale file at once without a "
+                      "re-scan, run `python -m backend.patch.migrate_manifests`.")
     if not toolchain["tsc"]["ok"]:
         steps.append("Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently "
                       "verify as UNVERIFIABLE, not PASS, because the build check can't run.")

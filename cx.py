@@ -64,6 +64,25 @@ except ImportError:
 
 CX_VERSION = ui.CX_VERSION if BOOT_UI else "4.3"
 
+# ── Boxed live input editor (optional — falls back to readline/input()) ──────
+# deck_input owns the line editing itself (termios raw mode + hand-rolled key
+# decoding) so ALL FOUR walls of the input field stay up WHILE the user types.
+# Plain readline can only ever keep three up: it redraws the input line and
+# clears to end-of-line on every edit, wiping anything painted at a fixed right
+# column — see terminal_ui.deck_input_box_top()'s docstring for the long form.
+#
+# Guarded like readline and terminal_ui above, but on Exception rather than
+# ImportError alone: a module that is present-but-broken (a bad edit, a partial
+# install, a platform that trips its module-level probing) must degrade to
+# today's readline behaviour, not take the whole interactive workspace down at
+# import time. deck_input.supported() then makes the per-turn call.
+try:
+    import deck_input
+    RAW_INPUT = True
+except Exception:
+    deck_input = None
+    RAW_INPUT = False
+
 # ── Terminal mascot (optional — _spinner() below just stays a plain line if
 #    unavailable; no-ops itself on non-tty/NO_COLOR either way) ──────────────
 try:
@@ -111,9 +130,36 @@ def _repl_prompt():
     return f"{C.CYAN}cx{C.RST}{C.GREY}>{C.RST} "
 
 
-def _input_box_top():
+def _raw_input_live() -> bool:
+    """True when deck_input's raw-mode editor will drive THIS turn's prompt.
+
+    Asked ONCE per REPL turn and then threaded through every wall call below.
+    That single decision is what keeps the box honest: the editor paints the
+    whole three-row field itself (top wall, text row + right wall, bottom
+    wall), so if each call site asked deck_input independently and the answers
+    ever disagreed mid-turn — a console swapped, NO_COLOR set by a command,
+    stdout no longer a tty — scrollback would keep a doubled top rule or an
+    orphaned bottom rule forever. Either the editor draws all the walls or
+    _input_box_top/_input_box_bottom do. Never a mix.
+    """
+    if not RAW_INPUT:
+        return False
+    try:
+        return bool(deck_input.supported())
+    except Exception:
+        return False
+
+
+def _input_box_top(raw: bool = False):
     """Open the bordered input field above the prompt (no-op in the plain
-    ANSI fallback, or if rendering fails — never blocks the REPL)."""
+    ANSI fallback, or if rendering fails — never blocks the REPL).
+
+    Also a no-op when the raw-mode editor is driving (raw=True): read_line()
+    paints its own top wall, so a rule from here would simply be a second,
+    duplicate one stacked above the field.
+    """
+    if raw:
+        return
     if BOOT_UI:
         try:
             ui.deck_input_box_top()
@@ -121,8 +167,17 @@ def _input_box_top():
             pass
 
 
-def _input_box_bottom():
-    """Close the bordered input field after a line is submitted."""
+def _input_box_bottom(raw: bool = False):
+    """Close the bordered input field after a line is submitted.
+
+    No-op when the raw-mode editor is driving (raw=True): by the time
+    read_line() returns, the editor has already painted the bottom wall and
+    parked the cursor on the line below it — on Enter, on Ctrl+C and on
+    Ctrl+D alike, since that happens in its teardown `finally` arm. Printing
+    a rule here would strand a stray wall under a box that is already closed.
+    """
+    if raw:
+        return
     if BOOT_UI:
         try:
             ui.deck_input_box_bottom()
@@ -130,10 +185,43 @@ def _input_box_bottom():
             pass
 
 
+def _read_command(raw: bool = False) -> str:
+    """Read one command line from the user.
+
+    raw=True  → deck_input's raw-mode editor: a complete box while typing,
+                with tab completion served by the same _completer readline
+                uses, and Up/Down over this session's input history.
+    raw=False → today's behaviour, byte for byte: input(_repl_prompt()).
+
+    Both paths raise KeyboardInterrupt on Ctrl+C and EOFError on Ctrl+D at an
+    empty line, and both return the line unstripped (the REPL strips), so the
+    caller's existing arms need no special-casing.
+    """
+    if raw:
+        try:
+            return deck_input.read_line(_session, completer=_completer,
+                                        history=_input_history)
+        except (KeyboardInterrupt, EOFError):
+            raise                     # the REPL's own arms own these
+        except Exception:
+            # The editor broke *after* opening its field. Its teardown has
+            # already restored the tty and closed the box, so open a fresh
+            # readline field for this one turn rather than leaving a bare
+            # prompt hanging under a closed box — and close it on every exit
+            # path here, because the REPL will skip its own bottom wall for
+            # this turn (raw is nominally still True).
+            _input_box_top(raw=False)
+            try:
+                return input(_repl_prompt())
+            finally:
+                _input_box_bottom(raw=False)
+    return input(_repl_prompt())
+
+
 def _goodbye():
     if BOOT_UI:
         try:
-            ui.soc.print("\n  [#4FC5D6]◈[/] [#3BF7A7]CYPHEX offline · canopy dark.[/]\n")
+            ui.soc.print(f"\n  [{ui.REF}]◈[/] [{ui.PHOS}]CYPHEX offline · canopy dark.[/]\n")
             return
         except Exception:
             pass
@@ -150,10 +238,20 @@ def _print_help():
     print(QUICK_HELP)
 
 
-# ── Colours ── plain-ANSI fallback palette · MONO ELECTRIC BLUE brand ─────────
+# ── Colours ── plain-ANSI fallback palette · MONO SIGNAL RED brand ───────────
 # Only used when terminal_ui / rich is unavailable. Mirrors terminal_ui.py's
-# single-hue blue ramp so the degraded banner stays on-brand. RED/YEL are kept
-# as the alert channel for legible errors/warnings in the plain fallback path.
+# single-hue red ramp so the degraded banner stays on-brand. RED/YEL keep their
+# names as the alert channel, but their VALUES now sit inside the red ramp —
+# a literal red error mark on a red theme reads as body text, so severity is
+# carried by brightness here exactly as it is in terminal_ui.py.
+#
+# The alert marks take the TOP two rungs (APEX for ✗, WARN_HOT for ⚠) plus
+# bold, so the channel is strictly brighter than everything it has to be
+# distinguished from. Placing them mid-ramp does not work: at CAUT the warning
+# mark lands at the same luminance as the muted caption grey (0.172 vs 0.168),
+# and at REF the error mark is byte-identical to NEON, so a failure renders
+# exactly like a command name. Severity ordering here is now strictly
+# monotonic — captions < body < emphasis < warning < error.
 #
 # These are raw 24-bit truecolor escapes with no Rich/colorama translation —
 # this class exists specifically for the case where rich itself failed to
@@ -168,18 +266,31 @@ except ImportError:
     pass
 
 
+C_BOLD = "\033[1m"
+
+
 def _tc(hex_):
     r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
     return f"\033[38;2;{r};{g};{b}m"
 
 class C:
-    CYAN   = _tc("#3B82F6")   # PRIMARY blue — wordmark / accents / active
-    NEON   = _tc("#7DABFF")   # bright blue — command names / high emphasis
-    RED    = _tc("#FF3141")   # error mark (plain-fallback alert channel)
-    YEL    = _tc("#FFB020")   # warning mark (plain-fallback alert channel)
-    BLUE   = _tc("#3B82F6")   # PRIMARY blue
-    GREY   = _tc("#5F7391")   # muted blue-grey — captions / timestamps
-    MAG    = _tc("#7DABFF")   # bright blue (legacy alias)
+    CYAN   = _tc("#D95E62")   # PRIMARY red — wordmark / accents / active
+    NEON   = _tc("#E18E91")   # bright red — command names / high emphasis
+    # Alert channel. Both marks are BOLD, which the rest of the palette is
+    # not, because this path has none of the structure Rich gives the normal
+    # one — no panels, no rules, no styled headings. A bare ⚠ or ✗ sits in a
+    # line of plain terminal text and has to carry its own emphasis, so weight
+    # does the work hue can't in a single-hue theme.
+    #
+    # Bold on the error mark also mirrors terminal_ui's "err": bold WARN. Colour
+    # alone cannot separate it there either: WARN and REF are the same value, so
+    # without the weight an error renders identically to ordinary high-emphasis
+    # text (which is exactly what this fallback did before).
+    RED    = C_BOLD + _tc("#F4E4E1")  # APEX — error mark, peak of the ramp
+    YEL    = C_BOLD + _tc("#EABCB8")  # WARN_HOT — warning mark, one rung below
+    BLUE   = _tc("#D95E62")   # PRIMARY red
+    GREY   = _tc("#8E7174")   # muted red-grey — captions / timestamps
+    MAG    = _tc("#E18E91")   # bright red (legacy alias)
     BOLD   = "\033[1m"
     DIM    = "\033[2m"
     RST    = "\033[0m"
@@ -260,6 +371,13 @@ _session = {
     "last_target": None,
     "history": [],
 }
+
+# Command lines typed at the REPL prompt, for the raw-mode editor's Up/Down.
+# Deliberately NOT _session["history"], which holds scan-record dicts —
+# deck_input.read_line() wants a plain list[str] and refuses to append to
+# anything else. In memory for the life of the process only, exactly like
+# readline's own history on the fallback path: nothing is written to disk.
+_input_history: list[str] = []
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -872,21 +990,26 @@ def _repl():
         # is always honest. Static snapshot per turn — the animated deck only
         # runs inside rich.Live during operations, never against readline.
         _deck()
-        _input_box_top()
+        # ONE decision per turn, threaded through all four calls below: either
+        # deck_input's editor paints the whole box (walls up while typing), or
+        # _input_box_top/_input_box_bottom do (walls up after Enter). The
+        # submitted field looks the same either way; only the live one differs.
+        raw = _raw_input_live()
+        _input_box_top(raw)
         try:
-            line = input(_repl_prompt()).strip()
+            line = _read_command(raw).strip()
         except KeyboardInterrupt:
             # Ctrl+C → new line, don't quit
-            _input_box_bottom()
+            _input_box_bottom(raw)
             print()
             continue
         except EOFError:
             # Ctrl+D → quit
-            _input_box_bottom()
+            _input_box_bottom(raw)
             _goodbye()
             break
 
-        _input_box_bottom()
+        _input_box_bottom(raw)
         _handle(line)
 
 

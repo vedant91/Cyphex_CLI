@@ -65,6 +65,11 @@ cyphex = "cyphex.cli:main"
 # (`pip install -e .`) exposes them and `cyphex` can open the workspace.
 py-modules = [
     "cli_engine", "cx", "terminal_ui", "cyphex_cli", "cyphex_benchmark", "mascot",
+    # deck_input  raw-mode single-line editor for the REPL's boxed input field.
+    #             cx.py imports it defensively at runtime; without it installed
+    #             the workspace silently drops back to readline, which can only
+    #             keep three of the four walls up while you type.
+    "deck_input",
     # mascot.py's tiered pixel-art rendering backends + the opt-in separate-
     # terminal-window companion — sibling top-level modules it imports
     # defensively at runtime, so an installed (not just in-repo) build can

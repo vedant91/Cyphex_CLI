@@ -128,6 +128,36 @@ def _last_scan_summary(events: list) -> Optional[dict]:
 
     verdicts = Counter(e.get("verdict", "?") for e in evs if e.get("event") == "patch_verdict")
 
+    # Waypoint trace, reconstructed from the trace_* events the recorder
+    # mirrored into this log. This is what makes the trace outlive the
+    # terminal: the live deck is gone once the scan ends, but a maintainer
+    # asking "what did that scan actually do, and where did it slow down or
+    # fail?" gets the whole goal/step tree back from here.
+    trace = []
+    by_num = {}
+    for e in evs:
+        ev = e.get("event")
+        if ev == "trace_waypoint_start":
+            wp = {"num": e.get("num", "?"), "title": e.get("title", ""),
+                  "goal": e.get("goal", ""), "highlight": bool(e.get("highlight")),
+                  "status": "running", "duration_s": None, "steps": []}
+            trace.append(wp)
+            by_num[wp["num"]] = wp
+        elif ev == "trace_waypoint_end":
+            wp = by_num.get(e.get("num"))
+            if wp is not None:
+                wp["status"] = e.get("status", "ok")
+                wp["duration_s"] = e.get("duration_s")
+        elif ev == "trace_step_end":
+            wp = by_num.get(e.get("waypoint"))
+            if wp is not None:
+                wp["steps"].append({
+                    "label": e.get("label", ""),
+                    "detail": e.get("detail", ""),
+                    "status": e.get("status", "ok"),
+                    "duration_s": e.get("duration_s"),
+                })
+
     return {
         "scan_id": scan_id,
         "started": start is not None,
@@ -146,6 +176,7 @@ def _last_scan_summary(events: list) -> Optional[dict]:
             "persist_total": len(persists),
         },
         "patch_verdicts": dict(verdicts),
+        "trace": trace,
     }
 
 

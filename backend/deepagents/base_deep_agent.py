@@ -19,7 +19,11 @@ from backend.deepagents.attack_graph import AttackGraph
 from backend.deepagents.attack_surface_index import AttackSurfaceIndex
 from backend.deepagents.oracle_attack import AttackOracle, Hypothesis, HttpRequest
 
-console = Console()
+try:                      # drag legacy [green]/[red] markup onto the ramp
+    from terminal_ui import themed_console as _themed_console
+except Exception:         # terminal_ui not importable in this context
+    def _themed_console(**kw): return Console(**kw)
+console = _themed_console()
 
 
 # How many hypotheses to test in parallel (keep at 3 to avoid hammering target)

@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: "CYPHEX — a local-first autonomous security scanner"
+message: "If you use CYPHEX in your work, please cite it using these metadata."
+type: software
+abstract: >-
+  CYPHEX is a local-first autonomous security scanner. It deploys a target
+  application in a sandbox, attacks it with local-LLM-guided agents, patches
+  what it confirms, and re-scans to prove the fix. All inference runs against a
+  local Ollama instance on 127.0.0.1:11434 — no cloud LLM, no API key, and no
+  outbound telemetry on the default path. Its distinguishing property is a
+  tri-state verification gate: a patch is reported as fixed only when a re-scan
+  and four further independent checks all pass, and a patch whose checks could
+  not be run reports UNVERIFIABLE rather than success.
+authors:
+  - alias: Punya23
+    website: "https://github.com/Punya23"
+repository-code: "https://github.com/Punya23/Cyphex_CLI"
+url: "https://github.com/Punya23/Cyphex_CLI"
+license: MIT
+version: "0.1.0"
+keywords:
+  - security
+  - static analysis
+  - dynamic analysis
+  - SAST
+  - DAST
+  - vulnerability scanner
+  - automated program repair
+  - local LLM
+  - anomaly detection
+  - multi-agent systems
