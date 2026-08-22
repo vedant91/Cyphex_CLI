@@ -257,3 +257,112 @@ def cleanup_all_sandboxes():
                 subprocess.run(["docker", "rmi", "-f", img], capture_output=True, timeout=10)
     except Exception:
         pass
+
+
+async def deploy_multicontainer_sandbox(
+    source_dir: str,
+    scan_id: str,
+    services_manifest: dict
+) -> dict:
+    from cyphex.compose_synth import synthesize_compose
+    import yaml
+    
+    project_name = f"cyphex-{scan_id}"
+    
+    # 1. Synthesize docker-compose.sandbox.yml
+    compose_path = synthesize_compose(source_dir, services_manifest)
+    
+    # 2. Run docker compose up
+    try:
+        up = await asyncio.to_thread(
+            subprocess.run,
+            ["docker", "compose", "-p", project_name, "-f", compose_path, "up", "-d", "--build"],
+            cwd=source_dir, capture_output=True, text=True, timeout=300
+        )
+        if up.returncode != 0:
+            return {
+                "error": f"Docker compose up failed: {up.stderr[:500]}",
+                "sandbox_id": scan_id,
+            }
+            
+        # 3. Resolve ports and build result
+        await asyncio.sleep(5)
+        
+        result = {
+            "mode": "multi-container",
+            "compose_path": compose_path,
+            "project_name": project_name,
+            "services": {},
+            "datastores": services_manifest.get("datastores", [])
+        }
+        
+        # We need to map service names to their dynamic host ports
+        for srv_name, srv_data in services_manifest.get("services", {}).items():
+            # Get port using docker compose port
+            internal_port = srv_data.get("port", 3000)
+            port_cmd = await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "compose", "-p", project_name, "-f", compose_path, "port", srv_name, str(internal_port)],
+                cwd=source_dir, capture_output=True, text=True, timeout=10
+            )
+            
+            host_port_str = port_cmd.stdout.strip() # expected format: 0.0.0.0:32768 or 127.0.0.1:32768
+            if host_port_str and ":" in host_port_str:
+                host_port = int(host_port_str.split(":")[-1])
+            else:
+                # Fallback, just in case
+                host_port = internal_port
+                
+            # Get container name
+            ps_cmd = await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "compose", "-p", project_name, "-f", compose_path, "ps", "-q", srv_name],
+                cwd=source_dir, capture_output=True, text=True, timeout=10
+            )
+            container_id = ps_cmd.stdout.strip()
+            
+            # Use `docker inspect` to get the actual container name
+            container_name = srv_name
+            if container_id:
+                inspect_cmd = await asyncio.to_thread(
+                    subprocess.run,
+                    ["docker", "inspect", "--format", "{{.Name}}", container_id],
+                    capture_output=True, text=True, timeout=10
+                )
+                if inspect_cmd.stdout.strip():
+                    container_name = inspect_cmd.stdout.strip().lstrip("/")
+            
+            result["services"][srv_name] = {
+                "port": host_port,
+                "url": f"http://localhost:{host_port}",
+                "container_name": container_name,
+                "status": "running" if host_port_str else "failed",
+                "role": srv_data.get("role", []),
+                "language": srv_data.get("language", "unknown"),
+                "stack": srv_data.get("stack", "unknown"),
+                "agents_override": srv_data.get("agents_override", []),
+                "confidence": srv_data.get("confidence", "low")
+            }
+            
+        return result
+        
+    except Exception as e:
+        return {
+            "error": f"Docker compose deploy failed: {str(e)}",
+            "sandbox_id": scan_id,
+        }
+
+def cleanup_multicontainer_sandbox(source_dir: str, project_name: str) -> dict:
+    compose_path = os.path.join(source_dir, "docker-compose.sandbox.yml")
+    if not os.path.exists(compose_path):
+        return {"status": "skipped", "reason": "No compose file"}
+        
+    try:
+        subprocess.run(
+            ["docker", "compose", "-p", project_name, "-f", compose_path, "down", "-v"],
+            cwd=source_dir, capture_output=True, text=True, timeout=30
+        )
+        return {"status": "stopped", "project": project_name}
+    except Exception as e:
+        return {"error": str(e), "project": project_name}
+

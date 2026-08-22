@@ -84,6 +84,7 @@ class Vuln:
     business_impact: str = ""
     fix: str = ""
     cwe: str = ""
+    service_name: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = {

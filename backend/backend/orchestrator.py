@@ -128,6 +128,7 @@ class AgentOrchestrator:
         cognee_memory=None,
         council=None,
         event_callback=None,
+        sandbox_info=None,
     ):
         self.scan_id = scan_id
         self.target_url = target_url
@@ -136,6 +137,7 @@ class AgentOrchestrator:
         self.council = council
         self.feedback = FeedbackLoop()
         self._emit = event_callback
+        self.sandbox_info = sandbox_info
 
     # ===================================================
     # TIER 1: DETERMINISTIC TOOLS (Semgrep + Nuclei)
@@ -258,7 +260,10 @@ class AgentOrchestrator:
                 pass
 
         # Build adaptive attack plan
-        plan = self._build_attack_plan(context, prior_intel)
+        if self.sandbox_info and "services" in self.sandbox_info:
+            plan = self._build_multiservice_attack_plan(context, prior_intel, self.sandbox_info["services"])
+        else:
+            plan = self._build_attack_plan(context, prior_intel)
 
         # -- Show attack plan --
         total_agents = sum(len(g) for g in plan.groups)
@@ -315,8 +320,12 @@ class AgentOrchestrator:
 
             # Collect findings from this group
             group_vulns = []
-            for result in results:
+            for agent, result in zip(group, results):
                 if isinstance(result, AgentResult):
+                    service_name = getattr(agent, "service_name", None)
+                    if service_name:
+                        for v in result.vulns:
+                            v.service_name = service_name
                     group_vulns.extend(result.vulns)
                 elif isinstance(result, Exception):
                     print(f"  {Colors.RED}  [ERR] Agent error: {result}{Colors.RESET}")
@@ -572,6 +581,78 @@ class AgentOrchestrator:
             make_deep(DeepMassAssignmentAgent),
         ]
         plan.groups.append(group4)
+
+        return plan
+
+    def _build_multiservice_attack_plan(
+        self, context: ScanContext, prior_intel: list, services: dict
+    ) -> AttackPlan:
+        from agents.terminal import Colors
+        plan = AttackPlan()
+
+        try:
+            import sys as _sys
+            _backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _backend_root not in _sys.path:
+                _sys.path.insert(0, _backend_root)
+
+            from cyphex.agent_routing import get_agents_for_service
+            from deepagents.oracle_attack import AttackOracle
+            from deepagents.attack_graph import AttackGraph as DeepAttackGraph
+            from deepagents.attack_surface_index import AttackSurfaceIndex
+        except ImportError as e:
+            logger.error(f"Failed to load modules for multiservice plan: {e}")
+            return self._build_legacy_plan(context, prior_intel)
+
+        # -- Shared infrastructure across ALL services --
+        graph = DeepAttackGraph()
+        asi = AttackSurfaceIndex()
+        oracle = AttackOracle()
+
+        # Seed ASI for all services
+        for ep in context.all_endpoints:
+            asi.ingest_response(ep, "GET", "", 200, "", {})
+        for form in context.all_forms:
+            body_parts = "&".join(f"{inp}=test" for inp in form.inputs) if form.inputs else ""
+            asi.ingest_response(form.action, form.method.upper(), body_parts, 200, "", {})
+        for param in context.all_params:
+            full_url = f"{param.url}?{param.name}=test"
+            asi.ingest_response(full_url, "GET", "", 200, "", {})
+        for path in context.discovered_paths:
+            asi.ingest_response(path, "GET", "", 200, "", {})
+        for link in context.all_links:
+            asi.ingest_response(link, "GET", "", 200, "", {})
+
+        # Also seed each service's URL
+        for s_name, s_data in services.items():
+            asi.ingest_response(s_data["url"], "GET", "", 200, "", {})
+
+        logger.info(f"Multiservice ASI seeded: {len(asi.endpoints)} endpoints across {len(services)} services")
+        print(f"  {Colors.RED}{Colors.BOLD}  [PHASE A] RED TEAM — Multi-service Pre-genome attack phase{Colors.RESET}")
+
+        flat_agents = []
+        for s_name, s_data in services.items():
+            target_url = s_data["url"]
+            stack = s_data.get("stack", "unknown")
+            agent_classes = get_agents_for_service(s_name, stack)
+            for agent_cls in agent_classes:
+                agent = agent_cls(
+                    scan_id=self.scan_id,
+                    target_url=target_url,
+                    attack_graph=graph,
+                    asi=asi,
+                    oracle=oracle,
+                )
+                # Monkeypatch service_name onto agent for later extraction when vulns are created
+                agent.service_name = s_name
+                # Also override agent_id to include service name for display
+                agent.agent_id = f"{agent_cls.__name__} ({s_name})"
+                flat_agents.append(agent)
+                
+        # Split flat_agents into chunks of 5 to avoid overwhelming docker host
+        chunk_size = 5
+        for i in range(0, len(flat_agents), chunk_size):
+            plan.groups.append(flat_agents[i:i+chunk_size])
 
         return plan
 

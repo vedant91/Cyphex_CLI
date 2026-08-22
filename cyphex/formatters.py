@@ -100,6 +100,9 @@ def to_sarif(scan_result: dict) -> str:
                     }
                 }
             }],
+            "properties": {
+                "serviceName": vuln.get("service_name")
+            }
         }
         run["results"].append(result)
 
@@ -144,6 +147,8 @@ def to_markdown(scan_result: dict) -> str:
             lines.append(f"### {i}. {icon} {name} ({cwe})\n")
             lines.append(f"- **Severity:** {sev}")
             lines.append(f"- **Endpoint:** `{endpoint}`")
+            if v.get("service_name"):
+                lines.append(f"- **Service:** `{_sanitize_for_markdown(v['service_name'])}`")
             if v.get("description"):
                 lines.append(f"- **Description:** {_sanitize_for_markdown(v['description'])}")
             if v.get("evidence"):

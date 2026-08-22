@@ -64,6 +64,7 @@ class PatchManifest:
         patched_hash: str,
         exploit_payload: str = "",
         evidence: Optional[dict] = None,
+        service_name: Optional[str] = None,
     ):
         """Record a patch attempt with its verification verdict."""
         key = f"{rel_path}:{line}:{cwe}"
@@ -79,6 +80,7 @@ class PatchManifest:
             "verified": verdict == "PASS",
             "exploit_payload": exploit_payload[:200],
             "evidence": evidence or {},
+            "service_name": service_name,
         }
         self.save()
 

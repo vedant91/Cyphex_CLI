@@ -388,6 +388,8 @@ def main():
     scan_parser.add_argument("--mode", type=str,
                              choices=["full", "standard", "lite", "cloud"],
                              help="Override auto-detected hardware mode")
+    scan_parser.add_argument("--services", type=str,
+                             help="Override auto-detected services with a custom services.json manifest")
 
     # ── cyphex setup ──
     subparsers.add_parser("setup", help="Auto-install optional security tools (Semgrep, Nuclei)")
@@ -439,7 +441,8 @@ def main():
 
         if is_repo or args.repo:
             asyncio.run(engine.run(repo_url=target, judge=args.judge, auto_patch=auto_patch,
-                                   use_deepagents=use_deepagents, network_scan=network_scan))
+                                   use_deepagents=use_deepagents, network_scan=network_scan,
+                                   services_override=args.services))
         elif is_url:
             # Live URL scan — skip sandbox, go directly to dynamic scan
             asyncio.run(engine.run(target_url=target, judge=args.judge, auto_patch=auto_patch,
@@ -447,7 +450,8 @@ def main():
         else:
             # Local source path
             asyncio.run(engine.run(source_path=target, judge=args.judge, auto_patch=auto_patch,
-                                   use_deepagents=use_deepagents, network_scan=network_scan))
+                                   use_deepagents=use_deepagents, network_scan=network_scan,
+                                   services_override=args.services))
 
     elif args.command == "council-doctor":
         sys.path.insert(0, _PROJECT_ROOT)

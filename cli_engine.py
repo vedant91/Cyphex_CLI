@@ -182,12 +182,13 @@ class CyphexEngine:
                   target_url=None, branch="main",
                   generations=10, output_file=None, auto_patch=True,
                   judge_mode=False, judge=False, non_interactive=False,
-                  network_scan=False, use_deepagents=False):
+                  network_scan=False, use_deepagents=False, services_override=None):
         self.start_ts = time.time()
         self.repo_url = repo_url
         self.local_path = local_path
         self.judge_mode = judge_mode or judge
         self.non_interactive = non_interactive
+        self.services_override = services_override
 
         # Show premium splash banner
         self._splash_banner()
@@ -826,6 +827,37 @@ class CyphexEngine:
             print(f"  {C.SLATE}  → Skipping container sandbox; deploying the target as a NATIVE process (npm/node).{C.RST}")
             print(f"  {C.SLATE}  → The full dynamic + DeepAgents phase still runs against the live native app.{C.RST}")
 
+
+        # ── Priority 0: Multi-container Sandbox (CYPHEX auto-detection) ──
+        if docker_ok and shutil.which("docker"):
+            try:
+                from cyphex.service_detection import detect_services
+                from cyphex.docker_sandbox import deploy_multicontainer_sandbox
+                # If the user passed a services override file, it would be handled here (we pass source_dir for now)
+                # Read self.services_override if set (to be implemented via --services flag later)
+                if hasattr(self, 'services_override') and self.services_override:
+                    import json
+                    with open(self.services_override, 'r') as f:
+                        services_manifest = json.load(f)
+                else:
+                    services_manifest = detect_services(source_dir)
+                    
+                if len(services_manifest.get("services", {})) > 1:
+                    print(f"  {C.CYAN}▸ [MULTI-CONTAINER]{C.RST} {C.SLATE}Detected {len(services_manifest['services'])} services. Deploying multi-container sandbox...{C.RST}")
+                    result = await deploy_multicontainer_sandbox(source_dir, self.scan_id, services_manifest)
+                    if result and not result.get("error"):
+                        self.sandbox_info = result
+                        print(f"  {C.NEON}✓{C.RST} {C.SLATE}Multi-container sandbox ready{C.RST}")
+                        sb = C.gradient("━" * 58, 0, 255, 255, 138, 43, 226)
+                        print(f"  {sb}")
+                        for s_name, s_data in result["services"].items():
+                            print(f"  {C.CYAN}▸{C.RST} {s_name}: {C.NEON}{s_data['url']}{C.RST} ({s_data['stack']})")
+                        print(f"  {sb}")
+                        return "multi-container"
+                    else:
+                        print(f"  {C.Y}[WARN]{C.RST} Multi-container deploy failed: {result.get('error')} — falling back")
+            except Exception as e:
+                print(f"  {C.Y}[WARN]{C.RST} Multi-container deploy failed: {str(e)} — falling back")
 
         # ── Priority 1: Docker Compose (full stack with DB) ──
         compose_file = os.path.join(source_dir, "docker-compose.yml")
@@ -1980,6 +2012,7 @@ class CyphexEngine:
                         source_dir=getattr(self, "source_dir", "") or "",
                         cognee_memory=_memory,
                         event_callback=None,
+                        sandbox_info=getattr(self, "sandbox_info", None)
                     )
                     context = await _deep_orch.execute_agents(context)
                     deep_count = len(context.confirmed_vulns)
@@ -2239,6 +2272,30 @@ class CyphexEngine:
             rate = (blocked / mal * 100) if mal else 0
             console.print(f"\n  Blocked: {blocked}/{mal} ({rate:.0f}%)  |  False positives: {fp}")
 
+    def _compute_score(self, vulns: list) -> tuple[int, int]:
+        import math
+        services = {}
+        for v in vulns:
+            svc = getattr(v, 'service_name', None) or "default"
+            services.setdefault(svc, []).append(v)
+            
+        total_penalty = 0
+        for svc_vulns in services.values():
+            c = sum(1 for v in svc_vulns if v.severity == "Critical")
+            h = sum(1 for v in svc_vulns if v.severity == "High")
+            m = sum(1 for v in svc_vulns if v.severity == "Medium")
+            l = sum(1 for v in svc_vulns if v.severity in ("Low", "Info"))
+            
+            p = 0
+            if c: p += 20 + 10 * math.log2(1 + c)
+            if h: p += 10 + 8 * math.log2(1 + h)
+            if m: p += 3 + 4 * math.log2(1 + m)
+            if l: p += 1 + 2 * math.log2(1 + l)
+            total_penalty += p
+            
+        score = max(0, min(100, round(100 - total_penalty)))
+        return score, round(total_penalty)
+
     async def _print_report(self, duration):
         vulns = self.context.confirmed_vulns
         crit = sum(1 for v in vulns if v.severity == "Critical")
@@ -2246,15 +2303,7 @@ class CyphexEngine:
         med = sum(1 for v in vulns if v.severity == "Medium")
         low = sum(1 for v in vulns if v.severity in ("Low", "Info"))
         total = len(vulns)
-        score = max(0, 100 - crit * 25 - high * 10 - med * 5 - low)
-        # Diminishing returns: duplicate findings of same severity don't stack fully
-        import math
-        penalty = 0
-        if crit: penalty += 20 + 10 * math.log2(1 + crit)  # ~20 first, +10 per doubling
-        if high: penalty += 10 + 8 * math.log2(1 + high)   # ~10 first, +8 per doubling
-        if med:  penalty += 3 + 4 * math.log2(1 + med)
-        if low:  penalty += 1 + 2 * math.log2(1 + low)
-        score = max(0, min(100, round(100 - penalty)))
+        score, penalty = self._compute_score(vulns)
 
         if score >= 80:
             sc_rich, sc_label = "green", "SECURE"
@@ -2452,17 +2501,7 @@ class CyphexEngine:
                 console.print(f"[dim]  Route tracer unavailable or failed: {str(e)}[/dim]")
 
         # Calculate BEFORE score
-        import math
-        crit_b = sum(1 for v in vulns if v.severity == "Critical")
-        high_b = sum(1 for v in vulns if v.severity == "High")
-        med_b  = sum(1 for v in vulns if v.severity == "Medium")
-        low_b  = sum(1 for v in vulns if v.severity in ("Low", "Info"))
-        penalty_b = 0
-        if crit_b: penalty_b += 20 + 10 * math.log2(1 + crit_b)
-        if high_b: penalty_b += 10 + 8 * math.log2(1 + high_b)
-        if med_b:  penalty_b += 3 + 4 * math.log2(1 + med_b)
-        if low_b:  penalty_b += 1 + 2 * math.log2(1 + low_b)
-        score_before = max(0, min(100, round(100 - penalty_b)))
+        score_before, _ = self._compute_score(vulns)
 
         # ═══════════════════════════════════════════════════════════════
         # V2 PIPELINE: Vectorless RAG + Grounded Reasoning
@@ -2735,6 +2774,7 @@ class CyphexEngine:
                         "imports": imports_str, "vuln_type": vuln_type,
                         "cwe": cwe, "start_l": start_l, "end_l": end_l,
                         "filepath": loc.file, "location": loc, "lang": lang,
+                        "service_name": getattr(v, "service_name", None),
                     })
                 elif loc and loc.kind == "url":
                     dynamic_only.append(v)
@@ -2779,6 +2819,7 @@ class CyphexEngine:
                     "cwe": cwe, "start_l": start_l, "end_l": end_l,
                     "filepath": filepath, "snippet_fn": snippet, "ctx_quality": "window",
                     "imports": "", "location": None, "lang": "js",
+                    "service_name": getattr(v, "service_name", None),
                 })
 
         if dynamic_only:
@@ -3252,6 +3293,7 @@ class CyphexEngine:
                         original_hash=hashlib.sha256(original_content.encode()).hexdigest()[:16],
                         patched_hash=hashlib.sha256(patched_content.encode()).hexdigest()[:16],
                         exploit_payload=getattr(v, "payload", ""),
+                        service_name=p.get("service_name"),
                     )
 
                 # Store in patch memory for future reuse
@@ -3416,13 +3458,7 @@ class CyphexEngine:
         high_a = sum(1 for v in remaining if v.severity == "High")
         med_a  = sum(1 for v in remaining if v.severity == "Medium")
         low_a  = sum(1 for v in remaining if v.severity in ("Low", "Info"))
-        penalty_a = 0
-        # MUST use the SAME coefficients as score_before (20/10, 10/8, 3/4, 1/2)
-        if crit_a: penalty_a += 20 + 10 * math.log2(1 + crit_a)
-        if high_a: penalty_a += 10 + 8 * math.log2(1 + high_a)
-        if med_a:  penalty_a += 3 + 4 * math.log2(1 + med_a)
-        if low_a:  penalty_a += 1 + 2 * math.log2(1 + low_a)
-        score_after = max(0, min(100, round(100 - penalty_a)))
+        score_after, _ = self._compute_score(remaining)
         # Final guard: 0 patches ⇒ 0 improvement
         if not patched_files:
             score_after = score_before
@@ -3745,13 +3781,7 @@ class CyphexEngine:
             high = sum(1 for v in vulns if v.severity == "High")
             med = sum(1 for v in vulns if v.severity == "Medium")
             low = sum(1 for v in vulns if v.severity in ("Low", "Info"))
-            import math
-            penalty = 0
-            if crit: penalty += 20 + 10 * math.log2(1 + crit)
-            if high: penalty += 10 + 8 * math.log2(1 + high)
-            if med:  penalty += 3 + 4 * math.log2(1 + med)
-            if low:  penalty += 1 + 2 * math.log2(1 + low)
-            score = max(0, min(100, round(100 - penalty)))
+            score, _ = self._compute_score(vulns)
 
         endpoints = len(self.context.all_endpoints) if self.context else 0
         pa = getattr(self, '_patches_applied', 0)
