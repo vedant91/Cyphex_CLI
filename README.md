@@ -3,13 +3,18 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/%E2%97%88_VERIFY_GATE-every_fix_must_prove_itself-FF3B3B?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/verdicts-PASS_%C2%B7_FAIL_%C2%B7_UNVERIFIABLE-D63447?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/%E2%97%88_MAINTAINABILITY_PANEL-cyphex_verify-FF6B6B?style=for-the-badge" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Ollama-Local_LLM-000000?style=for-the-badge&logo=ollama&logoColor=white" />
   <img src="https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
   <img src="https://img.shields.io/badge/DeepAgents-13_Oracle--Guided-D64545?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Genome-91.3%25_Recall-6D28D9?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/tests-388_passing-2ea44f?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Verify_Gate-maintainability_panel-3b82f6?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/tests-408_passing-2ea44f?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 </p>
 
@@ -18,14 +23,28 @@
   patches what it confirms, and re-scans to prove the fix. No cloud LLM, no API keys, no billing.</b>
 </p>
 
-> **Two subsystems carry the weight of that claim; everything else exists to feed or verify them.**
-> **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** — 13 attack agents that run no fixed script. Each asks a local LLM what to try next, tests it live, and mutates on failure, chaining confirmed exploits into multi-step attack paths.
-> **[Behavioural Genome](#the-behavioural-immune-system)** — a per-endpoint anomaly detector that trains itself by fighting its own AI-generated attacks across generations, then proves the result: 91.3% recall, 97.7% precision, 3.3% false-positive rate.
+> [!IMPORTANT]
+> ### ◈ The whole project rests on one refusal
+>
+> **Every other AI security tool tells you it fixed your code. None of them can show you.**
+> CYPHEX will not call a patch a fix until a re-scan proves the finding is gone — and when it
+> *cannot* run that proof, it says `UNVERIFIABLE` instead of quietly claiming success.
+>
+> | | |
+> |---|---|
+> | **[▸ The Verify Gate](#the-verify-gate)** | **The guarantee.** Five independent checks, one tri-state verdict. `UNVERIFIABLE` is never rounded up to `PASS`, and a failed patch is rolled back to the original bytes. |
+> | **[▸ The Maintainability Panel](#the-maintainability-panel)** | **Proof the guarantee still holds.** A gate can rot silently — `cyphex verify` shows whether every check can still actually run, and `--ci` turns that into an exit code. |
+> | **[▸ Waypoint Tracing](#waypoint-tracing--and-the-cyphex-buddy)** | **What it was trying to do.** Every phase carries an explicit goal and records its sub-steps. Recorded even with no terminal attached, so a past run stays inspectable. |
+>
+> Everything below — the attack swarm, the immune system, the council — exists to **feed** that
+> gate or to **verify** it. See it in 60 seconds: [the demo](#see-it-in-60-seconds).
 
 <p align="center">
+  <b><a href="#the-verify-gate">◈ Verify Gate</a></b> · <b><a href="#the-maintainability-panel">◈ Maintainability Panel</a></b> ·
+  <b><a href="#waypoint-tracing--and-the-cyphex-buddy">◈ Waypoint Tracing</a></b> ·
+  <a href="#see-it-in-60-seconds">60-Second Demo</a> ·
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
-  <a href="#the-verify-gate">Verify Gate</a> · <a href="#the-maintainability-panel">Maintainability Panel</a> ·
-  <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
+  <a href="#architecture">Architecture</a> ·
   <a href="#usage">Usage</a> · <a href="#configuration">Config</a> ·
   <a href="#troubleshooting">Troubleshooting</a> · <a href="#what-cyphex-cant-do-yet">Limitations</a>
 </p>
@@ -37,11 +56,13 @@
 | | |
 |---|---|
 | **[Why CYPHEX exists](#why-cyphex-exists)** | The gap it fills |
+| ◈ **[THE VERIFY GATE](#the-verify-gate)** | ★ **The honesty guarantee — the reason this project exists** |
+| ◈ **[THE MAINTAINABILITY PANEL](#the-maintainability-panel)** · [full docs](docs/VERIFICATION_MAINTAINABILITY_PANEL.md) | ★ **Proof that guarantee is still working** |
+| ◈ **[WAYPOINT TRACING](#waypoint-tracing--and-the-cyphex-buddy)** | ★ **What each phase was trying to do — and the buddy that shows it** |
+| **[See it in 60 seconds](#see-it-in-60-seconds)** | Run the guarantee yourself |
 | **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
 | **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
-| **[The Verify Gate](#the-verify-gate)** | The honesty guarantee |
-| **[The Maintainability Panel](#the-maintainability-panel)** · [full docs](docs/VERIFICATION_MAINTAINABILITY_PANEL.md) | Is that guarantee still working? |
-| **[The 8-step pipeline](#how-it-works--the-8-step-pipeline)** · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
+| **[Architecture](#architecture)** · [Patch ladder](#the-patch-ladder) · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
 | **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** · [Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays) · [RAG](#3-vectorless-rag--knowledge-tree--context-without-a-vector-db) · [Council](#4-the-council--multi-model-validation) | The four subsystems |
 | **[Immune system](#the-behavioural-immune-system)** · [Benchmark](#benchmarked-quality) | Anomaly detection |
 | **[Network scanning](#network-scanning-optional)** · [RASP + auto-heal](#rasp--auto-heal-daemon) | Beyond the codebase |
@@ -63,7 +84,244 @@ Most security tooling stops short.
 
 CYPHEX closes the loop locally: **find → attack → verify → fix → prove**. Findings correlate to `file:line`, a local model patches with real code context, and the patch only counts if a re-scan confirms the finding is gone — all against your own Ollama on `127.0.0.1`.
 
+### The gap nobody else closes
+
+An AI that writes patches is not the hard part any more. **Knowing which of those patches actually worked is.**
+
+| | Finds it | Proves it's exploitable | Writes the fix | **Proves the fix worked** | Stays on your machine |
+|---|:---:|:---:|:---:|:---:|:---:|
+| SAST (Semgrep, CodeQL) | ✅ | ❌ | ❌ | ❌ | ✅ |
+| DAST (Nuclei, ZAP) | ⚠️ | ✅ | ❌ | ❌ | ✅ |
+| Cloud AI fixers | ✅ | ❌ | ✅ | ❌ | ❌ |
+| **CYPHEX** | ✅ | ✅ | ✅ | **✅ [Verify Gate](#the-verify-gate)** | ✅ |
+
+That last-but-one column is the entire point. A tool that patches without verifying has just moved the
+problem: now you have a diff you did not write, in code you have not read, with no evidence it helped.
+CYPHEX's answer is a gate that a patch must survive — and a [second surface](#the-maintainability-panel)
+that tells you whether the gate itself is still working.
+
 It refuses to overclaim: an unverifiable patch reports UNVERIFIABLE, not success; the 76-sample benchmark is directional, not certified; unresolved gaps [say so](#what-cyphex-cant-do-yet).
+
+---
+
+## The Verify Gate
+
+> **◈ Flagship.** If you read one section, read this one. Everything else in CYPHEX
+> produces *candidates*; this is the part that decides which of them are real.
+
+*A patch counts as "fixed" only if a re-scan proves it.*
+
+Delete this gate and CYPHEX becomes what every other AI fixer already is: a tool that writes a
+diff and asserts it worked. The gate is the difference between **"I patched it"** and
+**"I patched it, and here is the re-scan that proves the finding is gone."**
+
+Every candidate must clear all of:
+
+- the finding is **gone on re-scan**;
+- the file still **compiles** (`node --check` / `py_compile` / `tsc --noEmit`);
+- **no suppression comments** were added (`nosemgrep`, `eslint-disable`, `# noqa`, `@ts-ignore`, `@ts-expect-error`, `noinspection`, `pragma: no cover`);
+- **no more than 70%** of the file's non-blank lines were deleted;
+- the diff stays inside a **severity-scaled blast radius** — Critical 80 lines · High 60 · Medium 40 · Low 30 — with the target line range validated before any splice.
+
+### The three verdicts
+
+| Verdict | Meaning | Effect |
+|---|---|---|
+| **PASS** | Every check ran and passed | Counts toward the score; stores a reusable `CWE:strategy` pattern + a cross-project memory entry |
+| **FAIL** | A check ran and failed | **Rolled back** to the original bytes; writes a "try a different remediation approach" lesson into session memory |
+| **UNVERIFIABLE** | A check could not be run at all | Patch stays applied but **never counts toward the score** |
+
+`finding_gone` and `builds` are tri-state (`True`/`False`/`None`) — `None` means *unmeasured*, and is never coerced into a PASS. A check that ran and failed always outranks one that never ran.
+
+### Why comment-matching flips during verification
+
+Ordinary scans ignore a regex match inside a code comment — a commented-out query isn't a vulnerability. If verification did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
+
+So the re-scan flips comment-matching back on: commenting-out still fails and rolls back. Meanwhile *parameterised-SQL* suppression stays active both ways, because adding placeholders genuinely is a fix and must verify as one. Deliberate asymmetry, covered by tests.
+
+---
+
+## The Maintainability Panel
+
+> **◈ Flagship.** The [Verify Gate](#the-verify-gate) is the guarantee. This is the proof the
+> guarantee is still holding — the part that stops CYPHEX from over-trusting *itself*.
+
+*A gate that can degrade silently is a gate you can't trust.* The Verify Gate above is correct — but correctness without visibility has a failure mode: if `tsc` goes missing, every TypeScript patch verifies as UNVERIFIABLE forever, the score stops improving, and **nothing anywhere says why**.
+
+Most projects stop at "we verify our patches". The second-order question — *are we still able to
+verify them?* — is the one that decays quietly in every real deployment, and it is the one this
+panel exists to answer. [See it break and get caught](#see-it-in-60-seconds).
+
+`cyphex verify` closes that loop. It aggregates every verdict the gate has ever written — scattered one `patches.json` per scan — into one maintainer-facing answer.
+
+```mermaid
+flowchart LR
+    SCAN["cyphex scan"] -->|"PASS / FAIL / UNVERIFIABLE"| MAN[("patches.json<br/>per scan")]
+    SCAN -->|"emit() · never raises"| EV[("events.jsonl<br/>per scan")]
+    MAN --> VH["verify_health.py"]
+    EV --> OH["observability/health.py"]
+    VH --> V["/verify<br/>config · status · next steps"]
+    VH --> CI["--ci<br/>exit 0/1/2"]
+    OH --> S["/status<br/>last scan · agents · errors"]
+```
+
+| | Shows | Verdict lamp |
+|---|---|---|
+| **`cyphex verify`** | **Configuration** — blast-radius caps, suppression patterns, per-check toolchain readiness · **Status** — durability rate, PASS/FAIL/UNVERIFIABLE, per-CWE breakdown, scan-over-scan trend · **Next steps** | `GATE HEALTHY` · `GATE DEGRADED` · `GATE UNUSED` |
+| **`cyphex status`** | Last scan's phase timings, DeepAgents swarm outcomes, cognee memory rates, recent-errors tail | `SYSTEM NOMINAL` · `SYSTEM DEGRADED` · `NO TELEMETRY YET` |
+
+```bash
+cyphex verify              # config + status + next steps
+cyphex verify --selftest   # live self-test: drive each check, don't just probe for a binary
+cyphex verify --ci         # exit 0 healthy / 1 degraded / 2 unusable
+cyphex status              # what actually happened on the last scan
+```
+
+**Presence ≠ works.** `--selftest` drives each real check path against a synthetic fixture — compiles a deliberately broken file to prove the syntax check *rejects*, runs the scanner over a known-vulnerable fixture to prove re-scan matching still fires, exercises `httpx`'s connection-error path. A tool can report *installed* and still be broken for the check it gates; this is the only thing that catches that.
+
+**Next steps are derived, never templated.** Each entry appears only when its condition holds and names the specific action — *"Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently verify as UNVERIFIABLE, not PASS, because the build check can't run."*
+
+Both panels are read-only, degrade to plain text without Rich, and degrade again to pure ASCII on terminals that can't render box-drawing glyphs.
+
+→ **[Full documentation: docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)**
+
+---
+
+## Waypoint Tracing — and the CYPHEX Buddy
+
+The panel above answers *"is the gate healthy?"*. Tracing answers the question underneath it: **"what was the pipeline trying to do at each step, and how far did it get?"**
+
+A scan is nine phases and can run twenty minutes. A phase banner tells you *where* it is; it does not tell you what that phase is *for*, which sub-operation it is stuck in, or whether the thing it just did actually worked. Every phase now opens a **waypoint** carrying an explicit **goal** — a plain sentence naming what it is trying to establish — and records its sub-steps beneath it.
+
+```
+╭─ ◈ CYPHEX  5/9  IMMUNE SYSTEM - BUILD GENOME ──────────────────── 143s ─╮
+│  ▛▀▀▀▀▜   goal · Learn this app's normal behaviour well enough to      │
+│  ▌▪▪▪ ▐   ✓ genome source     fresh genome                      0.0s   │
+│  ▙▄▄▄▄▟   ▲ generation 0      blocked 22/30 · 73.3% · red: url_e 0.5s  │
+│   ▀  ▀    ✓ generation 1      blocked 18/20 · 90.0%             0.1s   │
+╰────────────────────────────────────────────────────────────────────────╯
+```
+
+### The buddy is a state indicator, not decoration
+
+The mascot exists **for traceability**. It is 8 columns wide, lives *inside* the trace box next to the thing it is reacting to, and its animation is **bound to trace state** — not to a timer. Its frame advances on real trace transitions, so it visibly works harder when the pipeline is doing more, and a glance at it tells you the same thing the text does.
+
+That binding is observable. Below is the buddy's face at each waypoint, taken verbatim from one real scan's output — the eyes genuinely differ by phase because the animation is selected by what the pipeline is doing:
+
+| Waypoint | Buddy | Animation |
+|---|---|---|
+| `1/9` GETTING SOURCE CODE | `▌▘  ▘▐` | `uploading` — fetching |
+| `2/9` STATIC CODE ANALYSIS | `▌▘▸  ▐` | `searching` — scanning |
+| `3/9` DEPLOYING SANDBOX | `▌▘  ▘▐` | `working` |
+| `4/9` DYNAMIC VULNERABILITY SCAN | `▌▘▸▸ ▐` | `searching` — attacking |
+| `5/9` IMMUNE SYSTEM - BUILD GENOME | `▌▪▪▪ ▐` | `thinking` — the highlighted phase |
+| `6/9` AI ATTACK SIMULATION | `▌▘  ▘▐` | `working` |
+| `7/9` SECURITY REPORT | `▌▪▪  ▐` | `thinking` |
+
+On failure it switches to `error`; on a clean finish, `success`. The genome build is the one phase flagged `highlight`, because it is the only one whose internals *evolve measurably while you watch* rather than being a single long opaque wait.
+
+> **Why this matters and a spinner wouldn't.** A spinner tells you the process is alive. The buddy tells you *which kind of work* is alive — and because the same state drives the trace text, the durable event log, and `/status`, the picture can never drift from the record.
+
+### The genome build, traced
+
+`run_evolution()` had always accepted an `on_generation_complete` callback and nothing ever passed one, so the adversarial co-evolution loop — the most interesting thing CYPHEX does — ran as an opaque wait behind a few emoji prints. Each generation is now a traced step carrying the real measured numbers, so the climb from a leaky first generation to a converged one is visible live:
+
+```
+▲ 5/9  IMMUNE SYSTEM - BUILD GENOME                     2.6s
+      goal · Learn this app's normal behaviour well enough to spot an attack
+      ✓ genome source      fresh genome
+      ✓ profile endpoints  20 endpoints
+      ▲ generation 0       blocked 22/30 · 73.3% · red: url_encode   0.5s
+      ✓ generation 1       blocked 18/20 · 90.0% · red: entropy      0.1s
+      ✓ generation 2       blocked 20/20 · 100.0%                    0.1s
+      ✓ co-evolution       converged at generation 2
+```
+
+Generation 0 is marked `▲` because it blocked under 75% — and that one warn propagates up to mark the whole waypoint, since **a waypoint is as bad as its worst step**.
+
+### Traceability outlives the terminal
+
+Recording is **decoupled from rendering**. The deck is one *view*; the record is an append-only JSONL event log. A scan running in CI with no TTY records exactly the same trace an interactive one does — which is the whole difference between traceability and terminal scrollback.
+
+```bash
+cyphex runs                # every recorded run: status, score, verified, duration
+cyphex verify <scan_id>    # one run in full — score movement, verdicts, complete trace
+cyphex status              # last scan's phases, agents, errors
+```
+
+That is what makes a *past* run inspectable. `cyphex verify 5f055704` replays that scan's entire goal/step tree — including that two DeepAgents timed out in it — long after its output scrolled away.
+
+The buddy degrades in three levels, like every other surface here: animated beside the trace (TTY + Pillow) → text-only box (no mascot assets) → one static line per completed step (no TTY, e.g. CI logs). It is never load-bearing for the record.
+
+---
+
+## See It in 60 Seconds
+
+Three commands. Every line of output below is copied from a real run, not written by hand.
+
+**1 — Is the guarantee working right now?**
+
+```bash
+cyphex verify --ci
+```
+```
+[CI] Verify Gate: PASS — gate healthy (exit 0)
+```
+
+Exit `0` healthy · `1` degraded · `2` unusable. Drop that one line into CI and a rotting gate
+fails the build instead of silently passing everything.
+
+**2 — "Installed" and "works" are different claims. Prove it.**
+
+```bash
+cyphex verify --selftest
+```
+```
+live self-test — actually drove each check, not just presence
+  ✓ py_compile     compiles valid code, rejects invalid syntax
+  ✓ tsc            correctly flags a known type error
+  ✓ static_scanner detected 1 finding(s) in a known-vulnerable fixture
+  ✓ httpx          client constructs and handles a closed-port
+```
+
+It does not ask whether `tsc` exists. It hands `tsc` a file with a **known type error** and
+confirms it *rejects* it — because a linter that has stopped rejecting things still reports
+as installed.
+
+**3 — Break the toolchain. Watch it get caught.**
+
+```bash
+PATH=/usr/bin:/bin cyphex verify        # node and tsc now invisible
+```
+```
+toolchain readiness — what each check depends on to run at all
+  ✗ node           not installed        gates: JS/JSX build check
+  ✗ tsc            not installed        gates: TS/TSX build check
+  ✓ py_compile     stdlib               gates: Python build check
+  ✓ static_scanner importable           gates: static re-scan (finding_gone)
+
+NEXT STEPS
+  → Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently
+    verify as UNVERIFIABLE, not PASS, because the build check can't run.
+  → Install Node.js — JS/JSX build checks can't run without it.
+```
+
+**This is the whole thesis in one screen.** Without the panel, that missing `tsc` is invisible:
+every TypeScript patch quietly reads UNVERIFIABLE, the score stops improving, and nothing tells
+you why. The next steps are *derived*, not templated — each appears only when its condition
+holds, and names the exact command that fixes it.
+
+> The verdict lamp still reads `GATE HEALTHY` here, and `--ci` still exits `0`. That is
+> deliberate, not a miss: only `static_scanner` and `py_compile` are *required* checks, because
+> a Python-only project genuinely does not need Node. `node`/`tsc` gate language-specific
+> checks, so they surface as readiness failures and next steps rather than failing your build.
+
+**Want to see a patch actually earn its PASS?**
+
+```bash
+cyphex scan ./vuln-webapp        # ~18 min on 7B/8B; add --no-patch to just look
+cyphex verify                    # per-CWE durability, the trend, every recent verdict
+```
 
 ---
 
@@ -202,94 +460,24 @@ exact same formula, with a hard guard: **zero applied patches ⇒
 
 ---
 
-## The Verify Gate
+## Architecture
 
-*A patch counts as "fixed" only if a re-scan proves it.* This is the single most important thing in the codebase — everything else produces candidates, and this decides which are real.
+<p align="center"><img src="assets/architecture.png" width="980" alt="CYPHEX architecture — ingest, sandbox, static and dynamic analysis, the DeepAgent swarm, the immune system, and the patching pipeline" /></p>
 
-Every candidate must clear all of:
+<p align="center"><sub>
+<b>Shipping today:</b> GitHub webhook + local-directory ingest · Docker sandbox · Semgrep and Nuclei ·
+cognee agent memory · the behavioural genome and mutation engine · vectorless RAG (code indexer,
+security KB, route tracer, patch memory) · the oracle reasoning layer (CoT / ReAct / ToT) ·
+Qwen-coder patch generation · validation before any change is pushed.<br/>
+<b>Designed, not yet in the tree:</b> the diagram shows the target attack surface of 20 agents —
+<b>13 are implemented</b> (<a href="#1-deepagents--an-oracle-guided-attack-swarm">see the list</a>).
+The Android column — Android SAST, the Kotlin/Java rules, the manifest and XML scanners, the ADB
+emulator, and the two Android agents — is <b>planned and not yet built</b>.
+</sub></p>
 
-- the finding is **gone on re-scan**;
-- the file still **compiles** (`node --check` / `py_compile` / `tsc --noEmit`);
-- **no suppression comments** were added (`nosemgrep`, `eslint-disable`, `# noqa`, `@ts-ignore`, `@ts-expect-error`, `noinspection`, `pragma: no cover`);
-- **no more than 70%** of the file's non-blank lines were deleted;
-- the diff stays inside a **severity-scaled blast radius** — Critical 80 lines · High 60 · Medium 40 · Low 30 — with the target line range validated before any splice.
+## The Patch Ladder
 
-### The three verdicts
-
-| Verdict | Meaning | Effect |
-|---|---|---|
-| **PASS** | Every check ran and passed | Counts toward the score; stores a reusable `CWE:strategy` pattern + a cross-project memory entry |
-| **FAIL** | A check ran and failed | **Rolled back** to the original bytes; writes a "try a different remediation approach" lesson into session memory |
-| **UNVERIFIABLE** | A check could not be run at all | Patch stays applied but **never counts toward the score** |
-
-`finding_gone` and `builds` are tri-state (`True`/`False`/`None`) — `None` means *unmeasured*, and is never coerced into a PASS. A check that ran and failed always outranks one that never ran.
-
-### Why comment-matching flips during verification
-
-Ordinary scans ignore a regex match inside a code comment — a commented-out query isn't a vulnerability. If verification did the same, a patch that simply **comments the vulnerable line out** would read as "finding gone" and PASS.
-
-So the re-scan flips comment-matching back on: commenting-out still fails and rolls back. Meanwhile *parameterised-SQL* suppression stays active both ways, because adding placeholders genuinely is a fix and must verify as one. Deliberate asymmetry, covered by tests.
-
----
-
-## The Maintainability Panel
-
-*A gate that can degrade silently is a gate you can't trust.* The Verify Gate above is correct — but correctness without visibility has a failure mode: if `tsc` goes missing, every TypeScript patch verifies as UNVERIFIABLE forever, the score stops improving, and **nothing anywhere says why**.
-
-`cyphex verify` closes that loop. It aggregates every verdict the gate has ever written — scattered one `patches.json` per scan — into one maintainer-facing answer.
-
-```mermaid
-flowchart LR
-    SCAN["cyphex scan"] -->|"PASS / FAIL / UNVERIFIABLE"| MAN[("patches.json<br/>per scan")]
-    SCAN -->|"emit() · never raises"| EV[("events.jsonl<br/>per scan")]
-    MAN --> VH["verify_health.py"]
-    EV --> OH["observability/health.py"]
-    VH --> V["/verify<br/>config · status · next steps"]
-    VH --> CI["--ci<br/>exit 0/1/2"]
-    OH --> S["/status<br/>last scan · agents · errors"]
-```
-
-| | Shows | Verdict lamp |
-|---|---|---|
-| **`cyphex verify`** | **Configuration** — blast-radius caps, suppression patterns, per-check toolchain readiness · **Status** — durability rate, PASS/FAIL/UNVERIFIABLE, per-CWE breakdown, scan-over-scan trend · **Next steps** | `GATE HEALTHY` · `GATE DEGRADED` · `GATE UNUSED` |
-| **`cyphex status`** | Last scan's phase timings, DeepAgents swarm outcomes, cognee memory rates, recent-errors tail | `SYSTEM NOMINAL` · `SYSTEM DEGRADED` · `NO TELEMETRY YET` |
-
-```bash
-cyphex verify              # config + status + next steps
-cyphex verify --selftest   # live self-test: drive each check, don't just probe for a binary
-cyphex verify --ci         # exit 0 healthy / 1 degraded / 2 unusable
-cyphex status              # what actually happened on the last scan
-```
-
-**Presence ≠ works.** `--selftest` drives each real check path against a synthetic fixture — compiles a deliberately broken file to prove the syntax check *rejects*, runs the scanner over a known-vulnerable fixture to prove re-scan matching still fires, exercises `httpx`'s connection-error path. A tool can report *installed* and still be broken for the check it gates; this is the only thing that catches that.
-
-**Next steps are derived, never templated.** Each entry appears only when its condition holds and names the specific action — *"Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently verify as UNVERIFIABLE, not PASS, because the build check can't run."*
-
-Both panels are read-only, degrade to plain text without Rich, and degrade again to pure ASCII on terminals that can't render box-drawing glyphs.
-
-→ **[Full documentation: docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)**
-
----
-
-## How It Works — the 8-Step Pipeline
-
-<p align="center"><img src="cyphex_final_architecture.png" width="820" alt="CYPHEX architecture" /></p>
-
-| # | Waypoint | What happens |
-|---|---|---|
-| 1 | **Get Source** | Copy/clone the target into a per-scan sandbox copy; detect framework. Clone URLs are restricted to `https://` / `git@` / `ssh://`. |
-| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) + a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — merged and de-duplicated, then [confidence-scored](#false-positive-scoring). |
-| 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
-| 3b | **Network Scan** *(opt)* | Host/port sweep + per-device network genome. |
-| 4 | **Dynamic Scan** | Crawler + API discovery, then Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — mutually exclusive. A multi-model council debates findings and drops false positives. |
-| 5 | **Build Genome** | Learn "normal" per endpoint, run adversarial co-evolution to convergence. Genomes load from disk for the same target, so evolution *continues* across scans. |
-| 6 | **Attack Arena** | BEFORE/AFTER defence demo — defence rate plus false positives on benign traffic. |
-| 7 | **Security Report** | The AI council writes it; a **second model fact-checks** it for invented findings. |
-| 8 | **Patch + Verify + Score** | Per vuln: **memory cache** → deterministic **template** → **council** (RAG + Knowledge-Tree context, multi-model vote) → **[Verify Gate](#the-verify-gate)** → score from PASS-verified fixes only. |
-
-### The patch ladder (step 8, in order)
-
-Cheapest rung tried first:
+Every confirmed vulnerability goes through this ladder. Cheapest rung first:
 
 1. **Patch-memory cache** — semantic hash of the enclosing function, keyed by CWE. A hit reuses a previously *verified* fix with **zero model calls**.
 2. **Deterministic template** — regex transform for the four CWEs that have one, no model, no variance:
@@ -304,7 +492,7 @@ Cheapest rung tried first:
 3. **Council generation** — LLM path, RAG + Knowledge-Tree context, multi-model vote.
 4. **Verify Gate** — on FAIL, a **reflexion** retry feeds the failure evidence back into the next prompt.
 
-### False-positive scoring
+## False-Positive Scoring
 
 Every finding carries a `confidence` (Semgrep 0.90, built-in regex 0.85) and, if marked down, an `fp_reason`. Findings ≤ `FP_DROP_THRESHOLD` (0.15) are dropped from ordinary scans.
 
@@ -600,7 +788,7 @@ Use `--no-patch` in CI — a full patching run needs Ollama and ~18 minutes. `--
 |---|---|---|
 | Immune regression | `cyphex benchmark` / `python3 cyphex_benchmark.py` | recall < 80% **or** FPR > 10% |
 | Verify Gate health | `cyphex verify --ci` | `1` a check degraded · `2` the gate is unusable |
-| Unit suite | `pytest` | any of the 388 tests fails |
+| Unit suite | `pytest` | any of the 408 tests fails |
 
 > `cyphex verify --ci` measures **your own toolchain**, not the target — it is the check that catches "`tsc` disappeared, so every TypeScript patch has silently read UNVERIFIABLE for three weeks."
 
@@ -648,7 +836,7 @@ Root-level engine modules (declared as `py-modules` so an editable install expos
   mascot*.py                # tiered terminal pixel-art mascot (8 modules)  → assets/README.md
 
 docs/                       # Long-form deliverable docs                    → docs/README.md
-tests/                      # 388 tests, ~50s                              → tests/README.md
+tests/                      # 408 tests, ~45s                              → tests/README.md
 benchmarks/                 # the 76-sample immune corpus                   → benchmarks/README.md
 sdks/node/cyphex-rasp.js    # the runtime shield (Express)                  → sdks/node/README.md
 scripts/                    # end-to-end convenience shell scripts          → scripts/README.md
@@ -666,13 +854,13 @@ demo/                       # demo targets used in walkthroughs
 
 ```bash
 pip install -e ".[dev]"
-pytest                      # 388 tests, ~50s, no network needed
+pytest                      # 408 tests, ~45s, no network needed
 pytest -m integration       # slow tests that drive real local models (needs Ollama)
 pytest tests/test_verifier.py -q          # just the Verify Gate
 pytest tests/test_scoring.py -q           # just the score's monotonicity proofs
 ```
 
-389 tests are collected; 1 is deselected by default (`-m 'not integration'`).
+409 tests are collected; 1 is deselected by default (`-m 'not integration'`).
 
 Integration tests are excluded by default (`addopts = "-m 'not integration'"`) — `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
 
@@ -791,5 +979,6 @@ Everything below lives in **[CYPHEX_PRD.md](CYPHEX_PRD.md)**:
 
 MIT — see [LICENSE](LICENSE).
 
-<p align="center"><br><b>CYPHEX</b> — find → attack → verify → fix → harden, on your own machine.<br>
-<i>Oracle-guided attacks · AI council debate · Adversarial evolution · Auto-patching that has to prove itself.</i></p>
+<p align="center"><br><b>CYPHEX</b> — find → attack → verify → fix → <b>prove</b>, on your own machine.<br>
+<i>Any tool can write a patch. This one has to show its work.</i><br>
+<a href="#the-verify-gate">◈ The Verify Gate</a> · <a href="#the-maintainability-panel">◈ The Maintainability Panel</a></p>

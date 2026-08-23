@@ -967,7 +967,9 @@ def render_help(console=None):
         ("/benchmark", "[corpus]", "Score the Immune System — precision/recall/F1"),
         ("/verify", "[path]", "Verify Gate maintainability panel — config/status/health"),
         ("", "flags", "--selftest  --ci  --watch [s]  --json <file>"),
+        ("/verify", "<scan_id>", "Replay ONE run — score, verdicts, full waypoint trace"),
         ("/status", "[path]", "System Observability — event log, last scan, errors"),
+        ("/runs", "[N]", "Recorded runs, newest first — status, score, verified"),
         ("/models", "", "List available local Ollama models"),
         ("/history", "", "Recent intercepts this session"),
         ("/clear", "", "Repaint the canopy"),
@@ -980,7 +982,8 @@ def render_help(console=None):
     for cmd, arg, desc in rows:
         t.add_row(cmd, arg, desc)
     c.print(Panel(t, title=Text("◈ COMMAND DECK", style=f"bold {REF}"),
-                  subtitle=Text("type a path, URL, or plain English to acquire it", style=LABEL),
+                  subtitle=Text("type a path, URL, or plain English · every waypoint is traced",
+                                style=LABEL),
                   subtitle_align="left", title_align="left",
                   border_style=PHOS_DIM, box=_box(c), padding=(0, 2)))
 
@@ -2097,6 +2100,78 @@ def render_verify_health(report, console=None):
     else:
         body.append("    no patch history yet — run a scan with patching enabled\n", style=LABEL)
 
+    # ── run history ──
+    # The series the panel was missing. A single aggregate ("52 patches, 100%
+    # durable") describes a pile of scans; this describes a sequence of them,
+    # which is what makes "did it get worse?" answerable at all.
+    hist = report.get("history") or {}
+    runs = hist.get("runs") or []
+    if runs:
+        body.append("\n  RUN HISTORY\n", style=f"bold {PHOS}")
+        body.append(f"    {hist.get('total_runs', 0)} run(s) recorded  ·  ", style=LABEL)
+        body.append(f"{hist.get('completed', 0)} completed", style=PHOS)
+        body.append("  ·  ", style=LABEL)
+        body.append(f"{hist.get('interrupted', 0)} interrupted\n", style=CAUT if hist.get("interrupted") else LABEL)
+
+        reg = hist.get("regression")
+        if reg:
+            arrow = "▼" if reg["regressed"] else ("▲" if reg["delta"] > 0 else "=")
+            rstyle = WARN if reg["regressed"] else (PHOS if reg["delta"] > 0 else LABEL)
+            body.append("    latest vs previous  ", style=LABEL)
+            body.append(f"{arrow} {reg['previous']} → {reg['current']} ({reg['delta']:+d})\n",
+                         style=f"bold {rstyle}")
+
+        body.append("\n    ", style=LABEL)
+        body.append(f"{'scan':<14}{'took':<8}{'status':<13}{'score':<8}{'verified':<10}{'findings'}\n",
+                     style=LABEL)
+        for r in runs:
+            st = r.get("status", "unknown")
+            sstyle = {"completed": PHOS, "interrupted": CAUT}.get(st, LABEL)
+            body.append(f"      {str(r.get('scan_id', '?')).replace('cli_', ''):<12}", style=TGT)
+            dur = r.get("duration_s")
+            body.append(f"{(f'{dur:.0f}s' if isinstance(dur, (int, float)) else '—'):<8}", style=LABEL)
+            body.append(f"{st:<13}", style=sstyle)
+            score = r.get("score")
+            if score is None:
+                body.append(f"{'—':<8}", style=LABEL)
+            else:
+                body.append(f"{score:<8}", style=f"bold {score_color(score)}")
+            # Prefer the manifest's own verdict tally over the scan_score
+            # event's applied/total: the manifest exists for every run ever
+            # recorded, while scan_score is newer — so runs that predate it
+            # still show real numbers instead of a dash.
+            vd = r.get("verdicts") or {}
+            p = r.get("patches") or {}
+            if vd:
+                pv = f"{vd.get('PASS', 0)}/{sum(vd.values())}"
+            elif p.get("total"):
+                pv = f"{p.get('applied', 0)}/{p.get('total', 0)}"
+            else:
+                pv = "—"
+            body.append(f"{pv:<10}", style=READOUT)
+            body.append(f"{r.get('total_findings', 0) or '—'}\n", style=READOUT)
+        body.append("\n    inspect one run in full:  ", style=LABEL)
+        body.append(f"cyphex verify {str(runs[0].get('scan_id', '')).replace('cli_', '')}\n", style=REF)
+
+    # ── toolchain impact ──
+    # Only rendered when a missing tool actually costs something here, so it
+    # stays a finding rather than a permanent scold about optional tooling.
+    impact = [i for i in (report.get("toolchain_impact") or []) if i.get("affected_patches")]
+    if impact:
+        body.append("\n  TOOLCHAIN IMPACT\n", style=f"bold {WARN}")
+        for i in impact:
+            body.append(f"      {i['tool']:<15}", style=f"bold {WARN}")
+            body.append(f"{i['detail']}\n", style=READOUT)
+
+    # ── coverage ──
+    cov = report.get("coverage") or {}
+    if cov.get("unproven"):
+        body.append("\n  COVERAGE GAPS\n", style=f"bold {CAUT}")
+        body.append("    CWEs with patch attempts but no durable PASS\n", style=LABEL)
+        for u in cov["unproven"][:6]:
+            body.append(f"      {u['cwe']:<10}", style=TGT)
+            body.append(f"{u['attempts']} attempt(s), 0 verified\n", style=CAUT)
+
     # ── next steps ──
     body.append("\n  NEXT STEPS\n", style=f"bold {PHOS}")
     for step in report["next_steps"]:
@@ -2118,6 +2193,123 @@ def render_verify_health(report, console=None):
 #  what happened on the last scan" dashboard. Consumes the report dict from
 #  backend.observability.health.get_system_health().
 # ══════════════════════════════════════════════════════════════════════════
+def render_run_detail(run, console=None):
+    """Everything recorded about ONE scan.
+
+    Reached with `cyphex verify <scan_id>`. This is the drill-down the run
+    history exists to lead to: the panel gives you a series, this gives you
+    the run — its score movement, its verdicts, and the full waypoint trace
+    with goals, reconstructed from that scan's own durable event log.
+    """
+    c = console or soc
+    d = run.as_dict() if hasattr(run, "as_dict") else dict(run)
+    st = d.get("status", "unknown")
+    ok = st == "completed"
+    v_col = PHOS if ok else CAUT
+    body = Text()
+
+    # ── identity ──
+    body.append("  RUN\n", style=f"bold {PHOS}")
+    body.append("    scan id   ", style=LABEL)
+    body.append(f"{d.get('scan_id', '?')}\n", style=f"bold {TGT}")
+    body.append("    status    ", style=LABEL)
+    body.append(f"{st}", style=f"bold {v_col}")
+    dur = d.get("duration_s")
+    if isinstance(dur, (int, float)):
+        body.append(f"   ({dur:.1f}s)", style=LABEL)
+    body.append("\n")
+    if d.get("target"):
+        body.append("    target    ", style=LABEL)
+        body.append(f"{str(d['target'])[:58]}\n", style=READOUT)
+    if d.get("started_at"):
+        body.append("    started   ", style=LABEL)
+        body.append(f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(d['started_at']))}\n",
+                     style=READOUT)
+
+    # ── score ──
+    score, before = d.get("score"), d.get("score_before")
+    if score is not None:
+        body.append("\n  SCORE\n", style=f"bold {PHOS}")
+        body.append("    ")
+        body.append_text(_rate_bar(score / 100, width=28))
+        body.append(f"  {score}/100", style=f"bold {score_color(score)}")
+        lbl, _tier = _scoring_band(score)
+        body.append(f"  {lbl}\n", style=score_color(score))
+        if before is not None:
+            delta = d.get("score_delta") or 0
+            arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "=")
+            dstyle = PHOS if delta > 0 else (WARN if delta < 0 else LABEL)
+            body.append("    before patching  ", style=LABEL)
+            body.append(f"{before}/100  {arrow} {delta:+d}\n", style=f"bold {dstyle}")
+        sev = d.get("severities") or {}
+        if any(sev.values()):
+            body.append("    remaining  ", style=LABEL)
+            for name, style in (("Critical", WARN), ("High", WARN),
+                                ("Medium", CAUT), ("Low", LABEL)):
+                body.append(f"{name} {sev.get(name, 0)}  ", style=style)
+            body.append("\n")
+
+    # ── verify gate ──
+    vd = d.get("verdicts") or {}
+    if vd:
+        body.append("\n  VERIFY GATE\n", style=f"bold {PHOS}")
+        body.append("    PASS ", style=f"bold {PHOS}")
+        body.append(f"{vd.get('PASS', 0):>3}   ", style=READOUT)
+        body.append("FAIL ", style=f"bold {WARN}")
+        body.append(f"{vd.get('FAIL', 0):>3}   ", style=READOUT)
+        body.append("UNVERIFIABLE ", style=f"bold {CAUT}")
+        body.append(f"{vd.get('UNVERIFIABLE', 0):>3}", style=READOUT)
+        rate = d.get("durability_rate")
+        if rate is not None:
+            body.append(f"    {rate:.0f}% durable\n", style=f"bold {score_color(rate)}")
+        else:
+            body.append("\n")
+
+    # ── agents ──
+    ag = d.get("agents") or {}
+    if any(ag.values()):
+        body.append("\n  DEEPAGENTS   ", style=f"bold {PHOS}")
+        body.append(f"{ag.get('ok', 0)} ok", style=PHOS)
+        body.append("  ·  ", style=LABEL)
+        body.append(f"{ag.get('timeout', 0)} timed out", style=CAUT if ag.get("timeout") else LABEL)
+        body.append("  ·  ", style=LABEL)
+        body.append(f"{ag.get('error', 0)} errored\n", style=WARN if ag.get("error") else LABEL)
+
+    # ── waypoint trace ──
+    wps = d.get("waypoints") or []
+    if wps:
+        body.append("\n  WAYPOINT TRACE\n", style=f"bold {PHOS}")
+        marks = {"ok": ("✓", PHOS), "warn": ("▲", CAUT), "fail": ("✗", WARN),
+                 "skip": ("·", LABEL), "running": ("◌", REF)}
+        for wp in wps:
+            m, mstyle = marks.get(wp.get("status", "ok"), ("·", LABEL))
+            body.append(f"    {m} ", style=f"bold {mstyle}")
+            body.append(f"{str(wp.get('num', '?')):<6}", style=TGT)
+            body.append(f"{str(wp.get('title', ''))[:36]:<38}", style=f"bold {READOUT}")
+            wd = wp.get("duration_s")
+            body.append(f"{wd:>7.1f}s\n" if isinstance(wd, (int, float)) else "\n", style=LABEL)
+            if wp.get("goal"):
+                body.append(f"        goal · {str(wp['goal'])[:56]}\n", style=LABEL)
+            for s in wp.get("steps", []):
+                sm, sstyle = marks.get(s.get("status", "ok"), ("·", LABEL))
+                body.append(f"        {sm} ", style=sstyle)
+                body.append(f"{str(s.get('label', ''))[:20]:<22}", style=READOUT)
+                body.append(f"{str(s.get('detail', ''))[:32]:<34}", style=LABEL)
+                sd = s.get("duration_s")
+                body.append(f"{sd:>6.1f}s\n" if isinstance(sd, (int, float)) else "\n", style=LABEL)
+    elif not d.get("has_events"):
+        body.append("\n  WAYPOINT TRACE\n", style=f"bold {PHOS}")
+        body.append("    this run predates waypoint tracing — only its patch manifest survives\n",
+                     style=LABEL)
+
+    body.append("\n  ")
+    lamp = "RUN COMPLETED" if ok else ("RUN INTERRUPTED" if st == "interrupted" else "RUN UNKNOWN")
+    body.append_text(annunciator(lamp, "phosphor" if ok else "caution"))
+
+    c.print(Panel(body, title=Text(f"◈ RUN  {d.get('scan_id', '?')}", style=f"bold {v_col}"),
+                  title_align="left", border_style=v_col, box=_box(c), padding=(0, 2)))
+
+
 def render_observability(report, console=None):
     c = console or soc
     last = report.get("last_scan")

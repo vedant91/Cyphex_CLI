@@ -5,6 +5,7 @@ Long-form documentation that is too detailed for the root
 
 | Document | Answers |
 |---|---|
+| [DOCKERIZATION.md](DOCKERIZATION.md) | How a target is isolated: the container constraint set, the generated Dockerfile, the native fallback, and what multi-container support does *not* yet do. |
 | [VERIFICATION_MAINTAINABILITY_PANEL.md](VERIFICATION_MAINTAINABILITY_PANEL.md) | How the Verify Gate's health surface works — architecture, the full report schema, every verdict state and its exact triggering condition, the event taxonomy, CI gating, and the design rationale |
 
 ## Where else to look

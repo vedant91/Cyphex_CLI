@@ -95,6 +95,31 @@ async def test_reflexion_feeds_failure_evidence_into_the_next_round():
 
 
 @pytest.mark.asyncio
+async def test_reflexion_feeds_structure_evidence_into_the_next_round():
+    """_build_feedback() previously handled rescan/replay/build_error/suppression/
+    liveness/blast_radius but silently dropped 'structure' evidence — the exact
+    key backend/patch/verifier.py sets when check_structure_preserved() finds a
+    route/function/class declaration deleted. A model whose patch got rejected
+    for dropping a route handler retried completely blind to that reason."""
+    async def gen(_vuln, context):
+        return context  # echo the prompt back so we can inspect what it saw
+
+    calls = {"n": 0}
+
+    async def verify(_vuln, _patch):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _verdict("FAIL", structure="route handler 'GET /export' was removed")
+        return _verdict("PASS")
+
+    res = await patch_with_reflexion(_VULN, "ctx", gen, verify, max_rounds=2)
+
+    assert res.status == "verified"
+    assert "STRUCTURE:" in res.patch
+    assert "route handler 'GET /export' was removed" in res.patch
+
+
+@pytest.mark.asyncio
 async def test_reflexion_unverified_when_nothing_passes():
     async def gen(_vuln, _context):
         return "always_broken"

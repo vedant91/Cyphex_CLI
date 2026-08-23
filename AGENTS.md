@@ -6,11 +6,17 @@ Orientation for coding agents working in this repository. Humans should start at
 
 CYPHEX is a local-first autonomous security scanner. It deploys a target app in a sandbox, attacks it with local-LLM agents, patches what it confirms, and re-scans to prove the fix. All inference goes to Ollama on `127.0.0.1:11434` — there is no cloud LLM, no API key, and no outbound telemetry. Python 3.11+, MIT.
 
+**The two deliverables everything else serves:** the **Verify Gate**
+(`backend/patch/verifier.py`) and the **Maintainability Panel**
+(`backend/patch/verify_health.py` + `terminal_ui.py::render_verify_health()`).
+Treat changes near either as higher-risk than their diff size suggests — see
+invariant 1.
+
 ## Setup
 
 ```bash
 pip install -e ".[dev]"     # extras: .[memory] .[reasoning] .[cloud]
-python -m pytest tests/ -q  # 388 tests, ~50s, no network needed
+python -m pytest tests/ -q  # 408 tests, ~45s, no network needed
 ```
 
 The default pytest config deselects `-m integration` (those need a live Ollama). Do not remove that marker to "fix" a slow suite.
@@ -36,7 +42,7 @@ The default pytest config deselects `-m integration` (those need a live Ollama).
 | `backend/rag/` | Code indexing, knowledge tree, cross-project memory. |
 | `backend/network/` | Network discovery and behavioural flow monitoring. |
 | `backend/platform_compat.py` | Cross-platform binary/shell resolution. |
-| `tests/` | 388 tests (389 collected, 1 `integration` deselected). See [tests/README.md](tests/README.md). |
+| `tests/` | 408 tests (409 collected, 1 `integration` deselected). See [tests/README.md](tests/README.md). |
 
 ## Invariants — do not break these
 
