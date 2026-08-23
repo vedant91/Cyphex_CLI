@@ -44,7 +44,7 @@
   <b><a href="#waypoint-tracing--and-the-cyphex-buddy">◈ Waypoint Tracing</a></b> ·
   <a href="#see-it-in-60-seconds">60-Second Demo</a> ·
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
-  <a href="#how-it-works--the-8-step-pipeline">Pipeline</a> ·
+  <a href="#architecture">Architecture</a> ·
   <a href="#usage">Usage</a> · <a href="#configuration">Config</a> ·
   <a href="#troubleshooting">Troubleshooting</a> · <a href="#what-cyphex-cant-do-yet">Limitations</a>
 </p>
@@ -62,7 +62,7 @@
 | **[See it in 60 seconds](#see-it-in-60-seconds)** | Run the guarantee yourself |
 | **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
 | **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
-| **[The 8-step pipeline](#how-it-works--the-8-step-pipeline)** · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
+| **[Architecture](#architecture)** · [Patch ladder](#the-patch-ladder) · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
 | **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** · [Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays) · [RAG](#3-vectorless-rag--knowledge-tree--context-without-a-vector-db) · [Council](#4-the-council--multi-model-validation) | The four subsystems |
 | **[Immune system](#the-behavioural-immune-system)** · [Benchmark](#benchmarked-quality) | Anomaly detection |
 | **[Network scanning](#network-scanning-optional)** · [RASP + auto-heal](#rasp--auto-heal-daemon) | Beyond the codebase |
@@ -460,25 +460,24 @@ exact same formula, with a hard guard: **zero applied patches ⇒
 
 ---
 
-## How It Works — the 8-Step Pipeline
+## Architecture
 
-<p align="center"><img src="cyphex_final_architecture.png" width="820" alt="CYPHEX architecture" /></p>
+<p align="center"><img src="assets/architecture.png" width="980" alt="CYPHEX architecture — ingest, sandbox, static and dynamic analysis, the DeepAgent swarm, the immune system, and the patching pipeline" /></p>
 
-| # | Waypoint | What happens |
-|---|---|---|
-| 1 | **Get Source** | Copy/clone the target into a per-scan sandbox copy; detect framework. Clone URLs are restricted to `https://` / `git@` / `ssh://`. |
-| 2 | **Static Analysis** | Semgrep (`--metrics=off`, never `--config auto`) + a built-in 16-ruleset regex scanner — 12 languages plus Dockerfile/YAML/SQL/`.env` — merged and de-duplicated, then [confidence-scored](#false-positive-scoring). |
-| 3 | **Deploy Sandbox** | Docker container from an auto-generated Dockerfile (`--cap-drop ALL`, `--memory 512m`, `--cpus 1`, `--pids-limit 200`, `no-new-privileges`, non-root user, port on `127.0.0.1` only), or a resource-capped native subprocess fallback. |
-| 3b | **Network Scan** *(opt)* | Host/port sweep + per-device network genome. |
-| 4 | **Dynamic Scan** | Crawler + API discovery, then Nuclei/ZAP (`/scan`) **or** the **13 Oracle-guided DeepAgents** (`/deep`, `/full`) — mutually exclusive. A multi-model council debates findings and drops false positives. |
-| 5 | **Build Genome** | Learn "normal" per endpoint, run adversarial co-evolution to convergence. Genomes load from disk for the same target, so evolution *continues* across scans. |
-| 6 | **Attack Arena** | BEFORE/AFTER defence demo — defence rate plus false positives on benign traffic. |
-| 7 | **Security Report** | The AI council writes it; a **second model fact-checks** it for invented findings. |
-| 8 | **Patch + Verify + Score** | Per vuln: **memory cache** → deterministic **template** → **council** (RAG + Knowledge-Tree context, multi-model vote) → **[Verify Gate](#the-verify-gate)** → score from PASS-verified fixes only. |
+<p align="center"><sub>
+<b>Shipping today:</b> GitHub webhook + local-directory ingest · Docker sandbox · Semgrep and Nuclei ·
+cognee agent memory · the behavioural genome and mutation engine · vectorless RAG (code indexer,
+security KB, route tracer, patch memory) · the oracle reasoning layer (CoT / ReAct / ToT) ·
+Qwen-coder patch generation · validation before any change is pushed.<br/>
+<b>Designed, not yet in the tree:</b> the diagram shows the target attack surface of 20 agents —
+<b>13 are implemented</b> (<a href="#1-deepagents--an-oracle-guided-attack-swarm">see the list</a>).
+The Android column — Android SAST, the Kotlin/Java rules, the manifest and XML scanners, the ADB
+emulator, and the two Android agents — is <b>planned and not yet built</b>.
+</sub></p>
 
-### The patch ladder (step 8, in order)
+## The Patch Ladder
 
-Cheapest rung tried first:
+Every confirmed vulnerability goes through this ladder. Cheapest rung first:
 
 1. **Patch-memory cache** — semantic hash of the enclosing function, keyed by CWE. A hit reuses a previously *verified* fix with **zero model calls**.
 2. **Deterministic template** — regex transform for the four CWEs that have one, no model, no variance:
@@ -493,7 +492,7 @@ Cheapest rung tried first:
 3. **Council generation** — LLM path, RAG + Knowledge-Tree context, multi-model vote.
 4. **Verify Gate** — on FAIL, a **reflexion** retry feeds the failure evidence back into the next prompt.
 
-### False-positive scoring
+## False-Positive Scoring
 
 Every finding carries a `confidence` (Semgrep 0.90, built-in regex 0.85) and, if marked down, an `fp_reason`. Findings ≤ `FP_DROP_THRESHOLD` (0.15) are dropped from ordinary scans.
 
