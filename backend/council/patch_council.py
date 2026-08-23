@@ -418,6 +418,44 @@ class PatchCouncil(CouncilOrchestrator):
             "vote_summary": f"{approved_count}/{total_reviewers} validators approved"
         }
 
+    async def generate_patch_light(self, vuln_dict: dict) -> str:
+        """
+        Single-shot patch generation with NO oracle stage and NO reviewer
+        stage — just prompt -> model -> fixed_code.
+
+        For grounded-reflexion RETRY rounds only (_patch_workflow calling this
+        after the deterministic Verify Gate — re-scan, structural-integrity
+        check, syntax, blast radius — rejected the previous attempt, with the
+        rejection reason folded into vuln_dict["context"] as feedback via
+        backend.reasoning.reflexion._build_feedback). Deliberately skips the
+        review stage generate_and_validate_patch() bundles in: that stage is
+        a SECOND, subjective LLM opinion, and the objective Verify Gate the
+        retried patch is about to go through again is the real arbiter — a
+        second review call per retry round would roughly double the already
+        multiplied (max_rounds) LLM cost of retrying for no accuracy gain.
+
+        vuln_dict must have the same shape generate_and_validate_batch()
+        builds per entry: vuln_name, cwe, vulnerable_code, file_path,
+        severity, memory_hint, context. Returns "" (never raises) on any
+        model failure — callers must treat that exactly like "model did not
+        return fixed code" elsewhere in this file.
+        """
+        try:
+            selector = await get_selector(quiet=True)
+            self.vram.update_costs(selector.get_vram_costs())
+            patch_model = selector.get("patcher")
+            prompt = _build_patch_prompt(vuln_dict)
+            result = await self._call(
+                patch_model, PATCH_GENERATION_SYSTEM, prompt,
+                task_name="Generating", severity=vuln_dict.get("severity", ""),
+                cwe=vuln_dict.get("cwe", ""),
+            )
+            fixed = result.get("fixed_code", "")
+            return str(fixed).strip() if fixed else ""
+        except Exception as e:
+            console.print(f"[yellow]⚠ Reflexion retry generation failed: {str(e)[:120]}[/yellow]")
+            return ""
+
     async def generate_and_validate_batch(self, vuln_list: list[dict]) -> list[dict]:
         """
         Agent-Centric Batching with Patch Cache:

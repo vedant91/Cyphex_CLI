@@ -1,13 +1,13 @@
-# `tests/` — 388 tests, ~50 s, no network
+# `tests/` — 392 tests, ~45 s, no network
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 388 tests, ~50s
+pytest                    # 392 tests, ~45s
 pytest -m integration     # the slow ones — real local models, needs Ollama
 pytest tests/test_verifier.py -q          # just the Verify Gate
 ```
 
-389 tests are collected; **1 is deselected by default** via
+393 tests are collected; **1 is deselected by default** via
 `addopts = "-m 'not integration'"` in `pyproject.toml`. That marker is not a
 workaround for a slow suite — `test_cross_project_recall` drives cognee's
 `cognify()` through a local LLM and takes minutes. Do not remove it to "fix"

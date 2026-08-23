@@ -25,6 +25,18 @@ overclaim. A patch is only counted as a fix if a re-scan demonstrates the
 finding is gone and four other independent checks pass. A patch whose checks
 could not be *run* reports `UNVERIFIABLE`, never `PASS`.
 
+**The two flagship deliverables, and the right way to describe this project:**
+
+  1. The Verify Gate (section 4) — the guarantee. Five checks, one tri-state
+     verdict, rollback on FAIL.
+  2. The Maintainability Panel (section 5) — the proof the guarantee still
+     holds. `cyphex verify`, with `--selftest` and a `--ci` exit code.
+
+Writing about CYPHEX and leading with "13 AI attack agents" gets the emphasis
+backwards. The agents, the immune system and the council are how candidates get
+produced; the gate is what decides which candidates were real, and the panel is
+what stops the gate from rotting unnoticed. Lead with the verification story.
+
 ## 2. Install and first run
 
 ```bash
@@ -337,11 +349,11 @@ win32-only UTF-8 fix once crashed non-UTF-8 POSIX environments.
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 388 tests, ~50s, no network needed
+pytest                    # 392 tests, ~45s, no network needed
 pytest -m integration     # slow, drives real local models, needs Ollama
 ```
 
-389 tests are collected; 1 `integration` test is deselected by default via
+393 tests are collected; 1 `integration` test is deselected by default via
 `addopts = "-m 'not integration'"`. The Verify Gate tests are mutation-checked:
 each invariant was deliberately broken to confirm the suite catches it.
 
@@ -415,7 +427,7 @@ nl_router.py     plain English → slash command, guardrailed
 trace_deck.py    live per-phase trace deck + end-of-scan summary
 deck_input.py    raw-mode single-line editor for the REPL input field
 mascot*.py       tiered terminal pixel-art mascot (8 modules)
-docs/            long-form docs      tests/      388 tests
+docs/            long-form docs      tests/      392 tests
 benchmarks/      the immune corpus   sdks/node/  the RASP shield
 scripts/         e2e shell scripts   assets/     mascot art + QA renders
 vuln-webapp/     bundled vulnerable Express target (deliberate — not example code)

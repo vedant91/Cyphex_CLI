@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from backend.council.patch_council import PatchCouncil
+from backend.council.patch_council import PatchCouncil, PATCH_GENERATION_SYSTEM
 from backend.council.model_selector import ModelInfo
 
 
@@ -217,3 +217,72 @@ class TestPatchCouncil:
         # Both models should have been unloaded before Qwen loaded
         assert "deepseek-coder:1.3b" in unloaded_models
         assert "phi3:mini" in unloaded_models
+
+    # ── generate_patch_light: the reflexion-retry generation primitive ──
+    # (cli_engine.py's grounded-reflexion wiring calls this — NOT
+    # generate_and_validate_patch — for retry rounds, so a failing vuln
+    # doesn't pay for a second reviewer pass on every retry. See the
+    # docstring on generate_patch_light() for the full rationale.)
+
+    @pytest.mark.asyncio
+    async def test_generate_patch_light_returns_fixed_code_only(self, council):
+        """No oracle stage, no reviewer stage — just prompt -> model -> fixed_code."""
+        calls = []
+
+        async def mock_call(model, system, prompt, **kwargs):
+            calls.append((model, system, prompt, kwargs))
+            return {"fixed_code": "const q = db.query('...', [id]);", "patch_safety": "safe"}
+
+        mock_selector = _make_mock_selector()
+        with patch('backend.council.patch_council.get_selector', return_value=mock_selector):
+            with patch.object(council, '_call', side_effect=mock_call):
+                result = await council.generate_patch_light({
+                    "vuln_name": "SQL Injection", "cwe": "CWE-89",
+                    "vulnerable_code": "db.query('SELECT * FROM t WHERE id=' + id)",
+                    "file_path": "routes/users.js", "severity": "Critical",
+                    "context": "=== VERIFICATION FAILED (attempt 1) ===\nSTRUCTURE: route handler removed",
+                })
+
+        assert result == "const q = db.query('...', [id]);"
+        # Exactly ONE model call — no oracle round-trip, no reviewer calls.
+        assert len(calls) == 1
+        model, system, prompt, kwargs = calls[0]
+        assert model == "cyphex-patch"
+        assert system == PATCH_GENERATION_SYSTEM
+        # The feedback-laden context must actually reach the prompt — this is
+        # the whole point of the reflexion retry (a blind retry that doesn't
+        # see why it failed defeats the purpose).
+        assert "STRUCTURE: route handler removed" in prompt
+        assert kwargs.get("cwe") == "CWE-89"
+
+    @pytest.mark.asyncio
+    async def test_generate_patch_light_empty_on_blank_response(self, council):
+        async def mock_call(model, system, prompt, **kwargs):
+            return {"fixed_code": "", "patch_safety": "rejected"}
+
+        mock_selector = _make_mock_selector()
+        with patch('backend.council.patch_council.get_selector', return_value=mock_selector):
+            with patch.object(council, '_call', side_effect=mock_call):
+                result = await council.generate_patch_light({
+                    "vuln_name": "XSS", "cwe": "CWE-79",
+                    "vulnerable_code": "x", "file_path": "a.js",
+                })
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_generate_patch_light_never_raises_on_model_failure(self, council):
+        """A retry round's generation blowing up must not crash the patch loop —
+        callers treat "" exactly like "model did not return fixed code"."""
+        async def mock_call(model, system, prompt, **kwargs):
+            raise RuntimeError("model timed out")
+
+        mock_selector = _make_mock_selector()
+        with patch('backend.council.patch_council.get_selector', return_value=mock_selector):
+            with patch.object(council, '_call', side_effect=mock_call):
+                result = await council.generate_patch_light({
+                    "vuln_name": "SSRF", "cwe": "CWE-918",
+                    "vulnerable_code": "x", "file_path": "a.js",
+                })
+
+        assert result == ""

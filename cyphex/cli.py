@@ -419,6 +419,8 @@ def _run_panel(name: str, argv: list) -> None:
             sys.exit(code)
     elif name == "status":
         cx._cmd_status(rest)
+    elif name == "runs":
+        cx._cmd_runs(rest)
     else:
         cx._cmd_benchmark(rest)
 
@@ -426,7 +428,7 @@ def _run_panel(name: str, argv: list) -> None:
 def main():
     # Pre-parse intercept — see _run_panel's docstring for why these three
     # cannot go through argparse.
-    if len(sys.argv) > 1 and sys.argv[1] in ("verify", "status", "benchmark"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("verify", "status", "runs", "benchmark"):
         _run_panel(sys.argv[1], sys.argv[2:])
         return
 
@@ -489,6 +491,8 @@ def main():
                    "[path] [--selftest] [--ci] [--json out.json] [--watch [s]]"),
         ("status", "System observability panel — last scan's phases, agents, errors "
                    "[path] [--json out.json] [--watch [s]]"),
+        ("runs", "Recorded scan runs, newest first — status, score, verified "
+                 "[N] [--json out.json]"),
         ("benchmark", "Immune-system benchmark "
                       "[--data corpus.csv] [--threshold N] [--json out.json]"),
     ):

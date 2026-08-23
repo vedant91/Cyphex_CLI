@@ -291,6 +291,78 @@ Two manifest schemas exist on disk: the current flat `{"file:line:cwe": {...}}` 
 
 ---
 
+## 5b. Run history — the series, not just the aggregate
+
+A single aggregate ("52 patches across 22 manifests, 100% durable") is a
+true statement that answers almost nothing a maintainer actually asks:
+
+> *What did the last five runs score? Did the run after that refactor get
+> worse? Which runs never finished? What exactly happened this morning?*
+
+The **run registry** (`backend/observability/runs.py`) turns the pile of
+per-scan sandboxes into an ordered history — reconstructed from the patch
+manifests and event logs already on disk. No new storage format, no
+migration.
+
+```
+RUN HISTORY
+  27 run(s) recorded  ·  5 completed  ·  9 interrupted
+  latest vs previous  ▼ 61 → 55 (-6)
+
+  scan          took    status       score   verified  findings
+    5f055704    1744s   completed    61      6/6       9
+    ae7d19ca    —       interrupted  —       —         —
+    e0c7871a    354s    completed    72      —         4
+
+  inspect one run in full:  cyphex verify 5f055704
+```
+
+| Column | Meaning |
+|---|---|
+| `status` | `completed` vs `interrupted` — a run that recorded a start but never an end |
+| `score` | The posture score that run finished on (`—` for runs predating score recording) |
+| `verified` | PASS / total from that run's own patch manifest |
+| `findings` | Severity-weighted findings remaining at the end |
+
+**Interrupted is a first-class status.** A crashed scan's numbers are not
+comparable to a finished one's, and averaging them together is how a
+crashed run quietly drags a trend line down. The panel counts them
+separately and says so in NEXT STEPS.
+
+**Regression detection.** The newest scored run is compared against the
+previous one; a real drop is surfaced at the top of NEXT STEPS with both
+scan ids, so the two runs can be diffed. An equal or improved score is not
+a regression.
+
+### Drilling into one run
+
+`cyphex verify <scan_id>` (bare or prefix — `5f055704` or `5f05`) opens
+that run in full: score movement before → after, Verify Gate verdicts,
+DeepAgents outcomes, and the complete waypoint trace with goals and
+per-step timings, all reconstructed from that scan's own event log.
+
+`cyphex runs` (or `/runs`) lists the history on its own.
+
+Runs that predate a given event type degrade rather than disappear — a
+sandbox with only a `patches.json` still appears with its verdicts, and its
+score reads `—` rather than a fabricated `0`.
+
+## 5c. Toolchain impact and coverage gaps
+
+Two modules that turn facts into decisions.
+
+**Toolchain impact** quantifies what a missing dependency actually costs
+*on this codebase*. `tsc: not installed` is a fact; *"tsc missing — 7
+recorded TS/TSX patches could not be build-checked"* is a decision. The
+module only renders when a missing tool has real cost, so it stays a
+finding rather than a permanent scold about optional tooling.
+
+**Coverage gaps** lists CWEs with patch attempts but **zero** durable
+PASSes. This is precisely the case a global "100% durable" headline hides:
+if every attempt at a CWE landed `UNVERIFIABLE`, it never entered the
+durability denominator, so the pipeline can keep failing at a whole
+vulnerability class while the headline stays green.
+
 ## 6. Live self-test (presence ≠ works)
 
 `probe_toolchain()` answers *"is this installed?"*. That is a weaker claim than *"does this work?"*, and the gap between them is exactly where silent degradation lives: a CLI flag renamed after an upgrade, a scanner API that changed shape, an outbound network block.

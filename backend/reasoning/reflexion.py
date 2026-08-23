@@ -133,6 +133,9 @@ def _build_feedback(evidence: dict, last_patch: str, round_num: int) -> str:
     if evidence.get("build_error"):
         lines.append(f"  BUILD ERROR: {evidence['build_error']}")
 
+    if evidence.get("structure"):
+        lines.append(f"  STRUCTURE: {evidence['structure']}")
+
     if evidence.get("suppression"):
         lines.append(f"  REJECTED: {evidence['suppression']}")
 

@@ -20,7 +20,7 @@ ollama pull qwen2.5-coder:7b
 ollama pull llama3.1:8b
 
 cyphex doctor        # confirms binaries, Ollama, models, hardware tier
-pytest               # 388 tests, ~50s, no network needed
+pytest               # 392 tests, ~45s, no network needed
 ```
 
 Extras: `.[dev]` (pytest), `.[memory]` (cognee cross-project graph),

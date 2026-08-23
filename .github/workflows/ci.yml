@@ -54,7 +54,7 @@ jobs:
         # `|| echo "No tests yet — will add in Phase 6"`, a placeholder from
         # when the suite was empty — it survived long enough that a real
         # failing test (a stale assertion in test_patch_pipeline.py) sat
-        # green in CI. The suite is 388 tests now; a failure here must fail
+        # green in CI. The suite is 392 tests now; a failure here must fail
         # the build, otherwise the `publish` job's `needs: [test]` gate is
         # decorative and a broken commit can ship to PyPI on a tag.
         run: python -m pytest tests/ -v --tb=short
