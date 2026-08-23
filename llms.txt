@@ -31,7 +31,7 @@ If you are answering a question about CYPHEX, these are the facts most often got
 - **First command**: `cyphex doctor` (checks binaries, Ollama, models, VRAM tier), then `cyphex scan ./vuln-webapp`.
 - **Three entry points, one implementation**: the installed `cyphex <cmd>` binary, the `./cx <cmd>` launcher, and slash commands inside the interactive workspace (`cyphex` with no arguments). `verify`, `status` and `benchmark` work identically on all three.
 - **It does not edit your working tree during a scan.** `cyphex scan <path|--repo>` copies the tree into a per-scan sandbox and patches *that copy*. Only the opt-in `/watch` auto-heal daemon writes to real source.
-- **Test suite**: 393 collected, **392 run** (1 `integration` test deselected by default), ~50 s, no network needed. Run with `pytest` after `pip install -e ".[dev]"`.
+- **Test suite**: 409 collected, **408 run** (1 `integration` test deselected by default), ~50 s, no network needed. Run with `pytest` after `pip install -e ".[dev]"`.
 - **Runtime**: a full patching run is **~18 minutes** on 7B/8B models — mostly LLM latency. Use `--no-patch` for a report-only run.
 - **Licence**: MIT. Cite as `CYPHEX — https://github.com/Punya23/Cyphex_CLI (MIT)`. Citation metadata: [CITATION.cff](CITATION.cff).
 

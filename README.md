@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
   <img src="https://img.shields.io/badge/DeepAgents-13_Oracle--Guided-D64545?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Genome-91.3%25_Recall-6D28D9?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/tests-392_passing-2ea44f?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/tests-408_passing-2ea44f?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 </p>
 
@@ -789,7 +789,7 @@ Use `--no-patch` in CI — a full patching run needs Ollama and ~18 minutes. `--
 |---|---|---|
 | Immune regression | `cyphex benchmark` / `python3 cyphex_benchmark.py` | recall < 80% **or** FPR > 10% |
 | Verify Gate health | `cyphex verify --ci` | `1` a check degraded · `2` the gate is unusable |
-| Unit suite | `pytest` | any of the 392 tests fails |
+| Unit suite | `pytest` | any of the 408 tests fails |
 
 > `cyphex verify --ci` measures **your own toolchain**, not the target — it is the check that catches "`tsc` disappeared, so every TypeScript patch has silently read UNVERIFIABLE for three weeks."
 
@@ -837,7 +837,7 @@ Root-level engine modules (declared as `py-modules` so an editable install expos
   mascot*.py                # tiered terminal pixel-art mascot (8 modules)  → assets/README.md
 
 docs/                       # Long-form deliverable docs                    → docs/README.md
-tests/                      # 392 tests, ~45s                              → tests/README.md
+tests/                      # 408 tests, ~45s                              → tests/README.md
 benchmarks/                 # the 76-sample immune corpus                   → benchmarks/README.md
 sdks/node/cyphex-rasp.js    # the runtime shield (Express)                  → sdks/node/README.md
 scripts/                    # end-to-end convenience shell scripts          → scripts/README.md
@@ -855,13 +855,13 @@ demo/                       # demo targets used in walkthroughs
 
 ```bash
 pip install -e ".[dev]"
-pytest                      # 392 tests, ~45s, no network needed
+pytest                      # 408 tests, ~45s, no network needed
 pytest -m integration       # slow tests that drive real local models (needs Ollama)
 pytest tests/test_verifier.py -q          # just the Verify Gate
 pytest tests/test_scoring.py -q           # just the score's monotonicity proofs
 ```
 
-393 tests are collected; 1 is deselected by default (`-m 'not integration'`).
+409 tests are collected; 1 is deselected by default (`-m 'not integration'`).
 
 Integration tests are excluded by default (`addopts = "-m 'not integration'"`) — `test_cross_project_recall` runs cognee's `cognify()` through a local LLM and takes minutes.
 

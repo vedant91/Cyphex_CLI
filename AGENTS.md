@@ -16,7 +16,7 @@ invariant 1.
 
 ```bash
 pip install -e ".[dev]"     # extras: .[memory] .[reasoning] .[cloud]
-python -m pytest tests/ -q  # 392 tests, ~45s, no network needed
+python -m pytest tests/ -q  # 408 tests, ~45s, no network needed
 ```
 
 The default pytest config deselects `-m integration` (those need a live Ollama). Do not remove that marker to "fix" a slow suite.
@@ -42,7 +42,7 @@ The default pytest config deselects `-m integration` (those need a live Ollama).
 | `backend/rag/` | Code indexing, knowledge tree, cross-project memory. |
 | `backend/network/` | Network discovery and behavioural flow monitoring. |
 | `backend/platform_compat.py` | Cross-platform binary/shell resolution. |
-| `tests/` | 392 tests (393 collected, 1 `integration` deselected). See [tests/README.md](tests/README.md). |
+| `tests/` | 408 tests (409 collected, 1 `integration` deselected). See [tests/README.md](tests/README.md). |
 
 ## Invariants — do not break these
 
