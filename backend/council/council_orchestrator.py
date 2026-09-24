@@ -2,8 +2,6 @@ import httpx
 import json
 import os
 import re
-import asyncio
-from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
@@ -46,29 +44,6 @@ def _ollama_timeout() -> httpx.Timeout:
 # GPU probing. Small/low-end hardware stays at 4096 (also the cyphex-patch
 # Modelfile pin); mid gets 6144; high/ultra get 8192 for the non-pinned
 # reasoning/review models.
-_TIER_CTX = {
-    "minimal": 4096,
-    "low":     4096,
-    "cloud":   4096,
-    "mid":     6144,
-    "high":    8192,
-    "ultra":   8192,
-}
-_CTX_CACHE: Optional[int] = None
-
-
-def ctx_for_tier() -> int:
-    """Return the num_ctx to use, based on detected hardware tier (cached)."""
-    global _CTX_CACHE
-    if _CTX_CACHE is None:
-        try:
-            from cyphex.hardware import detect_mode
-            _CTX_CACHE = _TIER_CTX.get(detect_mode(), 4096)
-        except Exception:
-            _CTX_CACHE = 4096
-    return _CTX_CACHE
-
-
 def is_approved_vote(value) -> bool:
     """
     Strictly interpret a council vote's "approved"/"confirmed" field.

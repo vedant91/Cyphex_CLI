@@ -9,12 +9,10 @@ Model routing:
 
 Falls back to best single available model if any is missing.
 """
-import json
-import re
 import asyncio
 import httpx
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from backend.council.council_orchestrator import CouncilOrchestrator
 
@@ -265,11 +263,9 @@ class AttackOracle:
     Routes tasks to the most capable available local model.
     """
 
-    # Preferred model per role (the actual model may fall back if missing);
-    # exposed so the UI can name the model before a call resolves it.
+    # Preferred planner model (the actual model may fall back if missing);
+    # exposed so the UI can name it before a call resolves it.
     PLANNER_MODEL = _ROLE_PLANNER
-    ANALYST_MODEL = _ROLE_ANALYST
-    MUTATOR_MODEL = _ROLE_MUTATOR
 
     def __init__(self, orchestrator: CouncilOrchestrator):
         self.orchestrator = orchestrator

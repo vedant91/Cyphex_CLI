@@ -43,7 +43,7 @@ from rich.columns import Columns
 from rich.align import Align
 from rich.padding import Padding
 from rich.console import Group
-from rich.box import Box, ROUNDED, HEAVY, MINIMAL
+from rich.box import Box, ROUNDED
 from rich.theme import Theme
 from rich.style import Style
 from rich.live import Live
@@ -2650,7 +2650,6 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
                         killed=None, unpatchable=0, console=None):
     c = console or soc
     label, color, lamp = _verdict(score)
-    total = crit + high + med + low
 
     def board(shown, cool_val):
         cc = score_color(cool_val)
