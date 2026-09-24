@@ -30,11 +30,17 @@ the face is real characters: the same expressions, legible. The head is
 the input box's height; the antenna rides in the rail row above it, so the
 footer never grows past the box.
 
+In WezTerm and iTerm2 (the iTerm2 inline-image protocol) the slot shows the
+actual sprite PNG instead — see ART / image_protocol(). CYPHEX_BUDDY=glyph
+or =image forces either.
+
 Degradation: no TTY, a non-POSIX console, TERM=dumb, or a terminal smaller
 than MIN_ROWS x MIN_COLS -> available() is False and every call is a no-op
 returning False; callers keep today's inline behaviour.
 """
 import atexit
+import base64
+import io
 import os
 import sys
 import threading
@@ -90,11 +96,79 @@ def expression(state):
     return state if state in FACES else "neutral"
 
 
+# ── real sprite art (inline-image terminals) ─────────────────────────────
+# WezTerm and iTerm2 can draw a PNG into a block of cells (the iTerm2 inline
+# image protocol), so there the buddy slot shows the actual sprite instead of
+# the glyph redraw. (file, crop height or None): the loop_* and success
+# sprites are full bodies — the crop keeps the head (and success's check
+# bubble), measured on the source art.
+_ART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "mascot")
+ART = {
+    "neutral":  ("expr_neutral", None),
+    "focused":  ("expr_focused", None),
+    "scanning": ("loop_scanning", 104),
+    "thinking": ("expr_thinking", None),
+    "hacking":  ("expr_hacking", None),
+    "loading":  ("loop_loading", 104),
+    "alert":    ("expr_alert", None),
+    "success":  ("success", 100),
+    "error":    ("expr_error", None),
+}
+_png_cache = {}
+
+
+def image_protocol() -> bool:
+    """True where the iTerm2 inline-image protocol will render. Env-only
+    detection (no terminal query). tmux swallows the OSC without passthrough,
+    so it is excluded; CYPHEX_BUDDY=glyph|image overrides either way."""
+    forced = os.environ.get("CYPHEX_BUDDY", "").lower()
+    if forced in ("glyph", "image"):
+        return forced == "image"
+    if os.environ.get("TMUX"):
+        return False
+    return (os.environ.get("TERM_PROGRAM") in ("WezTerm", "iTerm.app")
+            or "WEZTERM_EXECUTABLE" in os.environ or "WEZTERM_PANE" in os.environ)
+
+
+def art_png(expr):
+    """PNG bytes of the sprite for an expression, cropped to the head and
+    trimmed to its opaque bounds; None if Pillow or the asset is missing."""
+    if expr in _png_cache:
+        return _png_cache[expr]
+    data = None
+    try:
+        from PIL import Image
+        name, crop_h = ART[expr]
+        img = Image.open(os.path.join(_ART_DIR, name + ".png")).convert("RGBA")
+        if crop_h:
+            img = img.crop((0, 0, img.width, crop_h))
+        box = img.getbbox()
+        if box:
+            img = img.crop(box)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        data = buf.getvalue()
+    except Exception:
+        data = None
+    _png_cache[expr] = data
+    return data
+
+
+def _image_seq(png):
+    """OSC 1337 inline image filling the BUDDY_W x ROWS buddy slot.
+    doNotMoveCursor: the slot's last row is the screen's last row, and a
+    cursor advanced past it would scroll the whole screen."""
+    args = (f"inline=1;width={BUDDY_W};height={ROWS};preserveAspectRatio=1;"
+            f"doNotMoveCursor=1;size={len(png)}")
+    return f"{_ESC}]1337;File={args}:{base64.b64encode(png).decode()}\a"
+
+
 _lock = threading.RLock()
 _st = {
     "active": False, "owner": False, "size": None,
     "state": "neutral", "frame": 0, "rail": "",
     "task": None, "detail": "", "started": 0.0, "caret": "idle",
+    "drawn": None,      # expression currently shown as an image, if any
 }
 _console_lock = None
 _anim_stop = None
@@ -273,8 +347,19 @@ def buddy_rows(state="neutral", frame=0, ascii_mode=False):
             bezel + bot + _RST]
 
 
-def _paint_buddy():
+def _paint_buddy(force=False):
     top = _dims()[0] - ROWS + 1          # antenna shares the rail row
+    expr = expression(_st["state"])
+    png = art_png(expr) if image_protocol() and not _ascii() else None
+    if png:
+        # A still image per expression: resend only when the face changes
+        # (or a full repaint wiped it), never on the animator's tick.
+        if not force and _st["drawn"] == expr:
+            return ""
+        _st["drawn"] = expr
+        blank = "".join(_cup(top + i, 2) + " " * BUDDY_W for i in range(ROWS))
+        return blank + _cup(top, 2) + _image_seq(png)
+    _st["drawn"] = None
     art = buddy_rows(_st["state"], _st["frame"], _ascii())
     return "".join(_cup(top + i, 2) + r for i, r in enumerate(art))
 
@@ -322,7 +407,7 @@ def _paint_task():
 
 
 def _paint_all():
-    out = _paint_rail() + _paint_buddy()
+    out = _paint_rail() + _paint_buddy(force=True)
     if _st["task"]:
         out += _paint_task()
     _write(out)
@@ -375,7 +460,7 @@ def box_anchor():
     """(top_row, left_col0, width) for the input box. Resize-safe: re-issues
     the region without touching the saved output cursor."""
     if _sync_region(save=False):
-        _raw(_paint_rail() + _paint_buddy())
+        _raw(_paint_rail() + _paint_buddy(force=True))
     rows, cols = _dims()
     return rows - ROWS + 2, GUTTER, cols - GUTTER
 
