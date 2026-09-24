@@ -1,22 +1,16 @@
 """
-CYPHEX footer dock — pinned status rail + input box + buddy, with an optional
-fixed hero header at the top of the screen during a scan.
+CYPHEX footer dock — pinned status rail + input box + buddy at the bottom.
 
-    ┏┅ CYPHEX ┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┓  ← hero header
-    ┋  SCAN ID cli_…   TARGET …/vibemart/                 ┋    (rows 1..h)
-    ┗┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┛
-    ...scan output scrolls here, inside the scroll region...
-        ▄     ╾╴ SYS NOMINAL ╶╌╴ THRT ▲00 ●00 ╶╌╴ DEFCON ▊5        ← rail
+    ...scan output scrolls here, and off the top into scrollback...
+        ▄     ✻ Triangulating…  · cli_… · vibemart/  (42s · ctrl+c)  ← rail
      ▛▀▀▀▀▀▀▜ ╭────────────────────────────────────────────────╮
-    ▐▌ [o]  ▐ │ ⌖ cx ▸ 4/9  DYNAMIC VULNERABILITY SCAN  ·  42s │  ← box
+    ▐▌ [o]  ▐ │ ⌖ cx ▸ 4/9  DYNAMIC VULNERABILITY SCAN         │  ← box
      ▙▄▄▄▄▄▄▟ ╰────────────────────────────────────────────────╯
 
 HOW IT STAYS PINNED
-A DECSTBM scroll region covers every row except the bottom ROWS (and the top
-h header rows, when a hero is pinned). Output printed anywhere between — by
-this process, or by the scan child cx.py spawns — scrolls inside the region
-and never touches the footer or header. The region is
-terminal state, not process state, so the child inherits it for free; it
+A DECSTBM scroll region covers every row except the bottom ROWS. Output
+printed anywhere above — by this process, or by the scan child cx.py spawns —
+scrolls inside the region and never touches the footer. The region is
 only has to repaint the buddy, which it learns it may do from the
 CYPHEX_DOCK env var the owning process sets.
 
@@ -41,17 +35,17 @@ the stills (EFFECT: flash, scanline sweep, glitch, pulse) — see ART /
 art_frames() / image_protocol(). CYPHEX_BUDDY=glyph or =image forces either.
 
 While a task runs, the rail row becomes a Claude-Code-style status line:
-a spinner, a rotating "doing word" (VERBS) and the elapsed time.
+a spinner, a rotating "doing word" (VERBS), the scan id + target (set via
+set_context), and the elapsed time.
 
-THE SCAN HERO IS A FIXED HEADER AT THE TOP OF THE SCREEN
-pin_header() freezes a block (the scan's hero panel) on rows 1..h at the top
-for the rest of the run; the scroll region's TOP margin moves down to h+1 so
-the header never scrolls, while the footer keeps the bottom ROWS. The
-transcript scrolls in the band between them. Trade-off: a terminal DISCARDS
-lines that scroll off a top margin below row 1 (measured in WezTerm: 44 of 60
-lost) — so the transcript above the visible region does not reach scrollback
-while the header is pinned. That is the cost of a fixed top header, and it is
-what the header is for.
+FULL SCROLLBACK IS PRESERVED (NOTHING PINNED AT THE TOP)
+The region starts at row 1, so lines that scroll off the top reach the
+terminal's scrollback and the whole run stays scrollable. A scroll region
+with a top margin below row 1 makes the terminal DISCARD scrolled-off lines
+(measured in WezTerm: 44 of 60 lost) instead of saving them — so the scan
+hero is printed inline (it scrolls into scrollback with the transcript), and
+its key facts (scan id + target) are mirrored on the footer status line, which
+stays visible for the whole run at no cost to scrollback.
 
 Degradation: no TTY, a non-POSIX console, TERM=dumb, or a terminal smaller
 than MIN_ROWS x MIN_COLS -> available() is False and every call is a no-op
@@ -72,7 +66,6 @@ BUDDY_W = 9           # ear + bezel + 6-cell screen + bezel
 GUTTER = BUDDY_W + 2  # " " + buddy + " "  — the box starts at column GUTTER+1
 MIN_ROWS = 14         # below this the region would leave too little to read
 MIN_COLS = 48
-MIN_OUTPUT = 12       # rows the transcript keeps when a header is pinned
 TICK_S = 0.12         # animator cadence: sprite frames flip at ~8 fps
 GLYPH_EVERY = 2       # glyph faces advance every 2nd tick (~4 fps reads better)
 VERB_EVERY = 24       # spinner verb rotates every ~3 s
@@ -280,9 +273,9 @@ _st = {
     "state": "neutral", "frame": 0, "rail": "",
     "task": None, "detail": "", "started": 0.0, "caret": "idle",
     "drawn": None,      # expression currently shown as an image, if any
-    "head": None,       # pin_header's render(cols, max_rows) callable
-    "head_rows": [],    # the pinned block's ANSI lines, as painted
     "verb0": 0,         # where the spinner's verb rotation starts this task
+    "scan_id": "",      # shown on the status line while a scan runs
+    "target": "",       # (short form) shown on the status line while scanning
 }
 _console_lock = None
 _anim_stop = None
@@ -358,34 +351,18 @@ def _cup(row, col=1):
 
 
 # ── region ───────────────────────────────────────────────────────────────
-def _region_top(rows):
-    """First row the transcript scrolls in: below the pinned header, which
-    occupies rows 1..len(head_rows) at the very top of the screen."""
-    return 1 + len(_st["head_rows"])
-
-
 def _region_bottom(rows):
-    """Last row the transcript scrolls in: just above the footer."""
+    """Last row the transcript scrolls in: just above the footer. The region
+    always starts at row 1, so lines that scroll off the top reach the
+    terminal's scrollback — the whole run stays scrollable while the footer is
+    pinned. (A top margin > 1 would make the terminal DISCARD scrolled-off
+    lines, which is why nothing is pinned at the very top.)"""
     return rows - ROWS
 
 
 def _region_seq(rows):
-    # DECSTBM (top;bottom margins) homes the cursor; callers wrap it in
-    # DECSC/DECRC. Top margin sits below the header so the header rows never
-    # scroll. NB: a terminal DISCARDS lines that scroll off a top margin > 1
-    # (they do not reach scrollback) — the cost of a fixed top header.
-    return f"{_ESC}[{_region_top(rows)};{_region_bottom(rows)}r"
-
-
-def _render_head(render, cols, max_rows):
-    """render's lines if they fit in max_rows, else [] — never raises."""
-    if max_rows < 1:
-        return []
-    try:
-        lines = list(render(cols, max_rows) or [])
-    except Exception:
-        return []
-    return lines if len(lines) <= max_rows else []
+    # DECSTBM 1;bottom — homes the cursor; callers wrap it in DECSC/DECRC.
+    return f"{_ESC}[1;{_region_bottom(rows)}r"
 
 
 def _sync_region(save=True):
@@ -397,26 +374,11 @@ def _sync_region(save=True):
     if not size or size == _st["size"]:
         return False
     _st["size"] = size
-    seq = _refit_head(size) + _region_seq(size[0])
     if save:
-        _write(seq)
+        _write(_region_seq(size[0]))
     else:
-        _raw(seq)
+        _raw(_region_seq(size[0]))
     return True
-
-
-def _refit_head(size):
-    """Re-render a pinned header for a resized terminal at the SAME height
-    (a taller one would land on top of the output cursor); if it no longer
-    fits, drop it. Returns the erase sequence for rows it gave back."""
-    old = _st["head_rows"]
-    if not old:
-        return ""
-    lines = _render_head(_st["head"], size[1], len(old))
-    if len(lines) == len(old):
-        _st["head_rows"] = lines
-        return ""
-    return _unpin(size[0])
 
 
 def reserve(rail_ansi=""):
@@ -468,70 +430,17 @@ def release():
     with _lock:
         if not _st["active"]:
             return
-        rows = _dims()[0]
         if _st["owner"]:
+            rows = _dims()[0]
             first = _region_bottom(rows) + 1
             clear = "".join(_cup(r) + _EL0 for r in range(first, rows + 1))
             _write(f"{_ESC}[r" + clear)
             os.environ.pop(ENV, None)
-        elif _st["head_rows"]:
-            # A scan child hands the parent's footer back as it found it.
-            _write(_unpin(rows))
-        _st.update(active=False, owner=False, size=None, head=None, head_rows=[])
+        _st.update(active=False, owner=False, size=None,
+                   scan_id="", target="")
 
 
 atexit.register(release)
-
-
-# ── pinned header (scan hero) ────────────────────────────────────────────
-def pin_header(render, console=None):
-    """Pin render's block as a fixed header at the TOP of the screen until
-    release(). render is called as render(cols, max_rows) -> ANSI lines at
-    most cols wide, or [] when nothing fits; it is re-called at the same
-    height on resize. Returns False — the caller prints inline — when no dock
-    is live or the terminal is too short to keep MIN_OUTPUT transcript rows."""
-    if not _st["active"] and not adopt(console):
-        return False
-    with _lock:
-        if _st["head_rows"]:
-            return False                # one header per run
-        rows, cols = _dims()
-        lines = _render_head(render, cols, rows - ROWS - MIN_OUTPUT)
-        if not lines:
-            return False
-        lock = _console_lock
-        if lock is not None:
-            lock.acquire()
-        try:
-            try:
-                sys.stdout.flush()
-            except (OSError, ValueError):
-                pass
-            # The header claims rows 1..h at the top; the scroll region's top
-            # margin moves down to h+1, so the header rows are frozen. No LFs
-            # to free space — the header overlays the top of the transcript,
-            # which is already in scrollback. DECSTBM homes the cursor, so
-            # _write's DECSC/DECRC returns the output cursor to where it was
-            # (near the bottom, inside the new region).
-            _st.update(head=render, head_rows=lines)
-            _write(_region_seq(rows) + _paint_head())
-        finally:
-            if lock is not None:
-                lock.release()
-    return True
-
-
-def _unpin(rows):
-    """Drop the header (caller holds _lock); returns the sequence that erases
-    its top rows and gives them back to the scroll region."""
-    clear = "".join(_cup(r) + _EL0 for r in range(1, _region_top(rows)))
-    _st.update(head=None, head_rows=[])
-    return clear + _region_seq(rows)
-
-
-def _paint_head():
-    return "".join(_cup(1 + i) + _EL0 + line + _RST
-                   for i, line in enumerate(_st["head_rows"]))
 
 
 # ── painting ─────────────────────────────────────────────────────────────
@@ -598,20 +507,63 @@ SPIN_ASCII = "-\\|/"
 
 
 def _paint_status():
-    """The rail row while a task runs: ✻ Verb… (12s · ctrl+c to stop)."""
+    """The rail row while a task runs: ✻ Verb…  · <scan id> · <target>
+    (12s · ctrl+c to stop). The scan id + target stay here for the whole run
+    (the hero panel itself scrolls with the transcript), so the key facts are
+    always visible without costing scrollback."""
     rows, cols = _dims()
     ascii_mode = _ascii()
+    dot = "-" if ascii_mode else "·"
+    ell = "..." if ascii_mode else "…"
     spin = SPIN_ASCII if ascii_mode else SPIN
     frame = _st["frame"]
     verb = VERBS[(_st["verb0"] + frame // VERB_EVERY) % len(VERBS)]
     started = _st["started"]
-    meta = f"  ({time.time() - started:.0f}s · ctrl+c to stop)" if started else ""
     room = cols - GUTTER - 1
     head = f"{spin[frame % len(spin)]} "
-    text = (verb + ("..." if ascii_mode else "…"))[:max(room - len(head), 0)]
-    meta = meta[:max(room - len(head) - len(text), 0)]
+    verb_s = verb + ell
+    parts = [x for x in (_st["scan_id"], _st["target"]) if x]
+    facts = (f"  {dot} " + f" {dot} ".join(parts)) if parts else ""
+    meta = f"  ({time.time() - started:.0f}s {dot} ctrl+c to stop)" if started else ""
+    # The scan id + target are the priority: keep head+verb+facts, trimming
+    # the target first, and drop the meta tail only if there is no room left.
+    if parts and len(head) + len(verb_s) + len(facts) > room:
+        fixed = len(head) + len(verb_s) + (len(facts) - len(parts[-1]))
+        avail = max(room - fixed, 3)
+        if len(parts[-1]) > avail:
+            parts[-1] = parts[-1][:avail - 1] + ell
+            facts = f"  {dot} " + f" {dot} ".join(parts)
+    verb_s = verb_s[:max(room - len(head), 0)]
+    facts = facts[:max(room - len(head) - len(verb_s), 0)]
+    used = len(head) + len(verb_s) + len(facts)
+    # meta shown whole or not at all — never a dangling "(3s · ctrl+c to sto".
+    short = f"  ({time.time() - started:.0f}s)" if started else ""
+    if used + len(meta) > room:
+        meta = short if used + len(short) <= room else ""
     return (_cup(rows - ROWS + 1, GUTTER + 1) + _EL0 + P.fg(P.REF) + head
-            + P.fg(P.READOUT) + text + P.fg(P.LABEL) + meta + _RST)
+            + P.fg(P.READOUT) + verb_s + P.fg(P.TGT) + facts
+            + P.fg(P.LABEL) + meta + _RST)
+
+
+def _short_target(target):
+    """A compact target for the status line: keep the meaningful tail (repo /
+    endpoint), clipped from the left so the deep path prefix drops first."""
+    t = str(target).strip()
+    return t if len(t) <= 26 else "…" + t[-25:]
+
+
+def set_context(scan_id="", target=""):
+    """Record the scan id + target so the footer status line can show them for
+    the whole run. Safe no-op when no dock is live; the hero panel is still
+    printed inline by the caller so the full run stays in scrollback."""
+    with _lock:
+        if scan_id:
+            _st["scan_id"] = str(scan_id)
+        if target:
+            _st["target"] = _short_target(target)
+        if _st["active"] and _st["task"]:
+            _write(_paint_status())
+    return _st["active"]
 
 
 def _box_parts():
@@ -652,7 +604,7 @@ def _paint_running():
 
 def _paint_all(lead=""):
     rail = _paint_status() if _st["task"] else _paint_rail()
-    _write(lead + _paint_head() + rail + _paint_buddy(force=True)
+    _write(lead + rail + _paint_buddy(force=True)
            + (_paint_task() if _st["task"] else ""))
 
 
@@ -690,13 +642,14 @@ def begin_input(rail_ansi=None):
     with _lock:
         if not _st["active"]:
             return None
-        _st.update(state="neutral", frame=0, task=None, caret="idle")
+        _st.update(state="neutral", frame=0, task=None, caret="idle",
+                   scan_id="", target="")     # idle prompt: last scan's facts clear
         if rail_ansi is not None:
             _st["rail"] = rail_ansi
         # Always re-issue the region, and erase below the output cursor (in
-        # normal flow those rows are blank): a scan child killed mid-run
-        # leaves its smaller region and its pinned header behind. ED0 runs
-        # first — DECSTBM homes the cursor — and the footer repaints after.
+        # normal flow those rows are blank): a scan child killed mid-run can
+        # leave a shrunken region behind. ED0 runs first — DECSTBM homes the
+        # cursor — and the footer repaints after.
         _st["size"] = _size() or _st["size"]
         _paint_all(lead=_ED0 + _region_seq(_dims()[0]))
         _raw(_SAVE)

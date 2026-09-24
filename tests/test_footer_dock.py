@@ -9,6 +9,8 @@ the caller to keep its inline behaviour.
 import os
 import re
 
+from rich.console import Console
+
 import deck_input
 import footer_dock
 
@@ -131,48 +133,43 @@ def test_image_protocol_detection(monkeypatch):
     assert not footer_dock.image_protocol()
 
 
-def test_pinned_header_is_a_fixed_top_bar_and_is_handed_back(monkeypatch):
-    """The scan hero pins at the TOP of the screen (rows 1..h): the scroll
-    region's top margin moves below it, the footer keeps the bottom ROWS, and
-    release() gives the top rows back and resets the region to the footer's."""
+def test_region_is_footer_only_so_scrollback_is_preserved():
+    """The scroll region starts at row 1 (top margin unchanged): lines that
+    scroll off the top reach the terminal's scrollback. Only the bottom ROWS
+    are reserved for the footer — nothing is pinned at the top."""
+    assert footer_dock._region_seq(40) == "\x1b[1;36r"     # rows 1..(40-ROWS)
+    assert footer_dock._region_bottom(40) == 40 - footer_dock.ROWS
+    assert not hasattr(footer_dock, "pin_header")           # header feature removed
+    assert not hasattr(footer_dock, "_region_top")
+
+
+def test_set_context_shows_scan_id_and_target_on_the_status_line(monkeypatch):
+    """The hero's key facts live on the footer status line for the whole run,
+    so they stay visible while the hero panel itself scrolls into scrollback."""
     out = []
-    monkeypatch.setattr(footer_dock, "_raw", out.append)
+    monkeypatch.setattr(footer_dock, "_write", out.append)
     monkeypatch.setattr(footer_dock, "_size", lambda: (40, 100))
+    monkeypatch.setattr(footer_dock, "_ascii", lambda: False)
     monkeypatch.setitem(footer_dock._st, "active", True)
-    monkeypatch.setitem(footer_dock._st, "owner", False)
     monkeypatch.setitem(footer_dock._st, "size", (40, 100))
-    monkeypatch.setitem(footer_dock._st, "head_rows", [])
-    seen = []
-    render = lambda cols, rows: seen.append((cols, rows)) or ["HERO1", "HERO2", "HERO3"]
-    assert footer_dock.pin_header(render)
-    assert seen == [(100, 40 - footer_dock.ROWS - footer_dock.MIN_OUTPUT)]
-    paint = "".join(out)
-    assert "\x1b[4;36r" in paint                     # region top 1+3, bottom 40-4
-    assert "\x1b[1;1H" in paint and "HERO1" in paint   # header on row 1, at the top
-    assert footer_dock.box_anchor()[3] == 36           # popups fill the region, not over it
-    assert not footer_dock.pin_header(render)          # one header per run
-    out.clear()
-    footer_dock.release()
-    assert "\x1b[1;1H" in "".join(out)                 # top rows erased from row 1
-    assert "\x1b[1;36r" in "".join(out)                # region back to the footer's
-    assert footer_dock._st["head_rows"] == []
+    monkeypatch.setitem(footer_dock._st, "task", "4/9  DYNAMIC SCAN")
+    monkeypatch.setitem(footer_dock._st, "started", 0.0)
+    assert footer_dock.set_context("cli_640932ed",
+                                   "/Users/x/Documents/CYPHEX_CLI/vibemart/src/")
+    painted = _SGR.sub("", "".join(out))
+    assert "cli_640932ed" in painted                        # scan id
+    assert "vibemart/src/" in painted                       # target tail (clipped left)
+    assert footer_dock._st["target"].startswith("…")        # deep prefix dropped
 
 
-def test_header_too_tall_prints_inline(monkeypatch):
-    monkeypatch.setattr(footer_dock, "_raw", lambda s: None)
-    monkeypatch.setitem(footer_dock._st, "active", True)
-    monkeypatch.setitem(footer_dock._st, "size", (20, 100))
-    monkeypatch.setitem(footer_dock._st, "head_rows", [])
-    assert not footer_dock.pin_header(lambda cols, rows: ["x"] * (rows + 1))
-    assert not footer_dock.pin_header(lambda cols, rows: 1 / 0)   # never raises
-
-
-def test_hero_lines_degrade_full_compact_none():
+def test_render_hero_is_inline_and_sets_footer_context(monkeypatch):
     import terminal_ui as tu
-    full = tu.hero_lines("cli_1", "/t", 100, 40)
-    compact = tu.hero_lines("cli_1", "/t", 100, len(full) - 1)
-    assert len(compact) < len(full) and "SCAN ID" in _SGR.sub("", "".join(compact))
-    assert tu.hero_lines("cli_1", "/t", 100, 2) == []
-    long = tu.hero_lines("cli_1", "/" + "x" * 400, 80, 40)
-    assert len(long) == len(full)                      # long target cut, not wrapped
-    assert all(len(_SGR.sub("", l)) <= 80 for l in long)
+    seen = {}
+    monkeypatch.setattr(footer_dock, "set_context",
+                        lambda sid, tgt="": seen.update(sid=sid, tgt=tgt))
+    c = Console(record=True, width=100, theme=tu.HUD_THEME)
+    monkeypatch.setattr(tu, "soc", c)
+    tu.render_hero("cli_1", "demo/vibemart")
+    out = _SGR.sub("", c.export_text())
+    assert "SCAN ID" in out and "cli_1" in out and "vibemart" in out   # printed inline
+    assert seen == {"sid": "cli_1", "tgt": "demo/vibemart"}            # facts to footer
