@@ -80,3 +80,46 @@ def test_panels_degrade_on_a_legacy_terminal(monkeypatch):
     out = _capture(tu.render_attack_plan, "DeepSQLiAgent", _plan(), 1)
     assert "🗺" not in out and "→" not in out and "·" not in out   # no non-ASCII glyphs
     assert "->" in out and "ATTACK PLAN" in out                      # ASCII arrow, still readable
+
+
+def _agents(*names):
+    return [type(n, (object,), {})() for n in names]
+
+
+def test_parallel_group_panels_list_agents_and_counts():
+    groups = [_agents("DeepSQLiAgent", "DeepXSSAgent", "DeepAuthAgent"),
+              _agents("DeepCMDiAgent")]
+    plan = _capture(tu.render_deepagents_plan, groups, 13)
+    assert "DEEPAGENTS ATTACK PLAN" in plan
+    assert "13 agents active" in plan and "2 parallel groups" in plan
+    assert "Group 1: DeepSQLiAgent, DeepXSSAgent, DeepAuthAgent" in plan
+    grp = _capture(tu.render_deepagents_group, 1, 2, groups[0])
+    assert "GROUP 1/2  (parallel)" in grp and "DeepAuthAgent" in grp
+    assert "No vulnerabilities found" in _capture(tu.render_deepagents_group_result, 1, 0)
+    assert "3 vuln(s) found" in _capture(tu.render_deepagents_group_result, 2, 3)
+
+
+def test_oracle_per_model_lock_serialises_same_model_inference():
+    """Agents in a parallel group share one oracle; its per-model lock must
+    keep same-model LLM calls one-at-a-time so local VRAM never thrashes."""
+    import asyncio
+    import types
+    from backend.deepagents.oracle_attack import AttackOracle
+
+    oracle = AttackOracle(types.SimpleNamespace(reasoner=None))
+    live = {"n": 0, "peak": 0}
+
+    async def fake_call(model, **k):
+        live["n"] += 1
+        live["peak"] = max(live["peak"], live["n"])
+        await asyncio.sleep(0.02)
+        live["n"] -= 1
+        return {"target_summary": "t", "primary_vulnerability_class": "x", "hypotheses": []}
+
+    oracle.orchestrator._call = fake_call
+
+    async def main():
+        await asyncio.gather(*[oracle.plan("t", "s", "c") for _ in range(4)])
+
+    asyncio.run(main())
+    assert live["peak"] == 1

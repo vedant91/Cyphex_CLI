@@ -273,6 +273,26 @@ class AttackOracle:
 
     def __init__(self, orchestrator: CouncilOrchestrator):
         self.orchestrator = orchestrator
+        # One lock per model, shared by every agent that holds this oracle, so
+        # agents running in parallel groups serialise same-model inference
+        # instead of thrashing local VRAM (planner qwen vs analyst llama can
+        # still overlap; two planners cannot). Created lazily on the loop.
+        self._model_locks: Dict[str, "asyncio.Lock"] = {}
+
+    def _lock_for(self, model: str) -> "asyncio.Lock":
+        lock = self._model_locks.get(model)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._model_locks[model] = lock
+        return lock
+
+    def _announce_lock(self, role: str, model: str) -> None:
+        try:
+            import terminal_ui as _ui
+            if hasattr(_ui, "render_deep_lock"):
+                _ui.render_deep_lock(role, model)
+        except Exception:
+            pass
 
     def _strategy_label(self, task_type: str, severity: str = "", cwe: str = "") -> str:
         """The reasoning strategy the orchestrator would pick — shown in the
@@ -297,12 +317,14 @@ class AttackOracle:
             "Generate a prioritised, hypothesis-driven attack plan with 4-6 "
             "hypotheses (never more than 6). Return complete, compact JSON."
         )
-        response = await self.orchestrator._call(
-            model=model,
-            system=ORACLE_PLAN_SYSTEM,
-            prompt=prompt,
-            task_name="Reasoning",
-        )
+        async with self._lock_for(model):
+            self._announce_lock("planner", model)
+            response = await self.orchestrator._call(
+                model=model,
+                system=ORACLE_PLAN_SYSTEM,
+                prompt=prompt,
+                task_name="Reasoning",
+            )
         plan = AttackPlan.from_json(response)
         plan.model = model
         plan.strategy = self._strategy_label("vuln_analysis", "", "")
@@ -334,12 +356,14 @@ class AttackOracle:
             f"Rejection signal: {hypothesis.reject_signal}\n\n"
             "Decide: confirmed / adapt (provide next probe) / abandoned"
         )
-        response = await self.orchestrator._call(
-            model=model,
-            system=ORACLE_DECIDE_SYSTEM,
-            prompt=prompt,
-            task_name="Reasoning",
-        )
+        async with self._lock_for(model):
+            self._announce_lock("analyst", model)
+            response = await self.orchestrator._call(
+                model=model,
+                system=ORACLE_DECIDE_SYSTEM,
+                prompt=prompt,
+                task_name="Reasoning",
+            )
         decision = Decision.from_json(response)
         decision.model = model
         decision.strategy = self._strategy_label("vuln_analysis",
@@ -357,12 +381,14 @@ class AttackOracle:
             "Generate 5 bypass variants of this payload."
         )
         try:
-            response = await self.orchestrator._call(
-                model=model,
-                system=ORACLE_MUTATE_SYSTEM,
-                prompt=prompt,
-                task_name="Generating",
-            )
+            async with self._lock_for(model):
+                self._announce_lock("mutator", model)
+                response = await self.orchestrator._call(
+                    model=model,
+                    system=ORACLE_MUTATE_SYSTEM,
+                    prompt=prompt,
+                    task_name="Generating",
+                )
             return response.get("variants", [])
         except Exception:
             return []

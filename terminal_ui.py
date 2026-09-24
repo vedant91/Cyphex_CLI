@@ -1688,6 +1688,55 @@ def render_deep_attempt(hyp_id, attempt, action, confidence, thinking=""):
     soc.print(t)
 
 
+def render_deep_lock(role, model):
+    """`[DeepAgent:<role>] ⚡ Acquired <model> lock, running inference...` —
+    the shared per-model lock that serialises same-model calls across the
+    agents running in parallel (so they don't thrash local VRAM)."""
+    t = Text(f"  [DeepAgent:{role}] ", style=LABEL)
+    t.append(_glyph("⚡ ", ""), style=CAUT)
+    t.append(f"Acquired {model} lock, running inference...", style=LABEL)
+    soc.print(t)
+
+
+def _names(group):
+    return [a.__class__.__name__ for a in group]
+
+
+def render_deepagents_plan(groups, total):
+    """The ⬡ DEEPAGENTS ATTACK PLAN overview: how the swarm is split into
+    parallel groups before it runs."""
+    body = Text()
+    body.append(f"{total} agents active", style=f"bold {PHOS}")
+    body.append(f"  {_glyph('·','-')}  {len(groups)} parallel groups\n", style=LABEL)
+    for gi, group in enumerate(groups, 1):
+        body.append(f"  Group {gi}: ", style=f"bold {REF}")
+        body.append(", ".join(_names(group)) + "\n", style=READOUT)
+    title = Text(_glyph("⬡ ", "") + "DEEPAGENTS ATTACK PLAN", style=f"bold {PHOS}")
+    soc.print(Panel(body, title=title, title_align="left",
+                    border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
+
+
+def render_deepagents_group(gi, ngroups, group):
+    """`⬡ GROUP gi/ngroups (parallel)` — the agents about to run concurrently."""
+    body = Text(", ".join(_names(group)), style=READOUT)
+    title = Text(_glyph("⬡ ", "") + f"GROUP {gi}/{ngroups}  (parallel)", style=f"bold {REF}")
+    soc.print(Panel(body, title=title, title_align="left",
+                    border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
+
+
+def render_deepagents_group_result(gi, found):
+    """`[OK] Group gi: N vuln(s) found` — the tally after a parallel group."""
+    if found:
+        t = Text.assemble(("    " + _glyph("✓", "[OK]") + " ", OK),
+                          (f"Group {gi}: ", LABEL),
+                          (f"{found} vuln(s) found", f"bold {WARN}"))
+    else:
+        t = Text.assemble(("    " + _glyph("✓", "[OK]") + " ", OK),
+                          (f"Group {gi}: ", LABEL),
+                          ("No vulnerabilities found", LABEL))
+    soc.print(t)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  ROUTE / ENDPOINT DISCOVERY
 # ══════════════════════════════════════════════════════════════════════════

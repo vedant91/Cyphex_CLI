@@ -2117,46 +2117,82 @@ class CyphexEngine:
                 # probe and Ollama call keeps its own per-request timeout, which
                 # is an inter-chunk stall budget catching a genuinely wedged
                 # socket or hung model — not a cap on how long real work may take.
-                for idx, agent in enumerate(agents_to_run, 1):
+                # The swarm runs in parallel groups (like a real red team fans
+                # out): agents in a group run concurrently, groups run in order.
+                # Within a group their fast HTTP probes overlap while the shared
+                # per-model oracle lock serialises same-model LLM inference, so
+                # they never thrash local VRAM. Grouping is by class name so the
+                # split is stable; any agent not named here runs solo at the end
+                # rather than being dropped.
+                GROUP_PLAN = [
+                    ("DeepSQLiAgent", "DeepXSSAgent", "DeepAuthAgent"),
+                    ("DeepPathTraversalAgent", "DeepCMDiAgent", "DeepSSRFAgent",
+                     "DeepIDORAgent", "DeepSSTIAgent", "DeepXXEAgent"),
+                    ("DeepBusinessLogicAgent",),
+                    ("DeepPromptInjectionAgent", "DeepRaceConditionAgent",
+                     "DeepMassAssignmentAgent"),
+                ]
+                by_name = {a.__class__.__name__: a for a in agents_to_run}
+                groups = [[by_name[n] for n in names if n in by_name]
+                          for names in GROUP_PLAN]
+                placed = {n for names in GROUP_PLAN for n in names}
+                extra = [a for a in agents_to_run if a.__class__.__name__ not in placed]
+                if extra:
+                    groups.append(extra)
+                groups = [g for g in groups if g]
+                idx_of = {id(a): i for i, a in enumerate(agents_to_run, 1)}
+
+                if SOC_UI:
+                    ui.render_deepagents_plan(groups, total)
+
+                async def _run_agent(agent):
                     agent_header(
-                        f"DeepAgent {idx}/{total}",
+                        f"DeepAgent {idx_of[id(agent)]}/{total}",
                         f"{agent.__class__.__name__} — {agent.PRIMARY_VULN_CLASS}",
                         "Oracle-Guided Hypothesis Testing",
                     )
+                    short = agent.__class__.__name__.replace("Deep", "").replace("Agent", "")
                     try:
                         res = await agent.run(context)
-                        self._emit("deepagent_result", agent=agent.__class__.__name__, vulns_found=len(res.vulns))
-                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
-                                        f"{len(res.vulns)} confirmed" if res.vulns else "clean",
+                        self._emit("deepagent_result", agent=agent.__class__.__name__,
+                                   vulns_found=len(res.vulns))
+                        self.trace.note(short, f"{len(res.vulns)} confirmed" if res.vulns else "clean",
                                         _T_OK, {"vulns": len(res.vulns)})
                         context.confirmed_vulns.extend(res.vulns)
                         if res.vulns:
-                            print(
-                                f"  {C.NEON}✓{C.RST} {C.BOLD}{agent.__class__.__name__}{C.RST} "
-                                f"confirmed {C.R}{len(res.vulns)} vuln(s){C.RST}"
-                            )
-                        # Display any new attack chains
-                        if attack_graph.edges:
-                            print(f"  {C.CYAN}▸ Attack chains: {len(attack_graph.edges)} discovered{C.RST}")
+                            print(f"  {C.NEON}✓{C.RST} {C.BOLD}{agent.__class__.__name__}{C.RST} "
+                                  f"confirmed {C.R}{len(res.vulns)} vuln(s){C.RST}")
+                        return len(res.vulns)
                     except Exception as e:
-                        # An agent's confirmed findings accumulate live on
-                        # agent.vulns as it goes, so if it crashes mid-run keep
-                        # whatever it already nailed down instead of discarding a
-                        # real, confirmed vuln. (CancelledError from a real
-                        # Ctrl+C is BaseException, not Exception, so it still
-                        # propagates and aborts the scan.)
+                        # Confirmed findings accumulate live on agent.vulns, so a
+                        # crash mid-run keeps whatever it already nailed down.
+                        # (CancelledError is BaseException, not Exception, so a
+                        # real Ctrl+C still propagates and aborts the scan.)
                         salvaged = list(getattr(agent, "vulns", []) or [])
                         if salvaged:
                             context.confirmed_vulns.extend(salvaged)
                         self._emit("deepagent_error", agent=agent.__class__.__name__,
                                    error=str(e)[:200], salvaged=len(salvaged))
-                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
-                                        f"error: {str(e)[:40]}", _T_FAIL, {"salvaged": len(salvaged)})
-                        salvage_note = (f" (kept {len(salvaged)} confirmed vuln(s) found first)"
-                                        if salvaged else "")
+                        self.trace.note(short, f"error: {str(e)[:40]}", _T_FAIL,
+                                        {"salvaged": len(salvaged)})
+                        note = (f" (kept {len(salvaged)} confirmed vuln(s) found first)"
+                                if salvaged else "")
                         print(f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} failed: "
-                              f"{str(e)[:100]}{salvage_note}")
-                        continue
+                              f"{str(e)[:100]}{note}")
+                        return len(salvaged)
+
+                for gi, group in enumerate(groups, 1):
+                    if SOC_UI:
+                        ui.render_deepagents_group(gi, len(groups), group)
+                    counts = await asyncio.gather(*[_run_agent(a) for a in group],
+                                                  return_exceptions=True)
+                    found = sum(c for c in counts if isinstance(c, int))
+                    if SOC_UI:
+                        ui.render_deepagents_group_result(gi, found)
+                    else:
+                        print(f"    [OK] Group {gi}: {found or 'No'} vuln(s) found")
+                    if attack_graph.edges:
+                        print(f"  {C.CYAN}▸ Attack chains: {len(attack_graph.edges)} discovered{C.RST}")
 
                 # Keep the graph on the context so later steps (Security
                 # Report) can reference it without threading a new param
