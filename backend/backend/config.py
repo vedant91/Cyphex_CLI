@@ -64,18 +64,12 @@ class CyphexConfig:
     COMMAND_TIMEOUT_SECONDS: int = 60  # Per-command default timeout
     MAX_PARALLEL_AGENTS: int = 6
 
-    # ─── DeepAgents swarm (--deep) — bounds ───
-    # Confirmed live: a `cx deep` run against a 1-file dummy app hard-hung
-    # past 10 minutes on agent 4/13 (DeepAuthAgent) — its oracle-guided
-    # adaptive loop is internally bounded (MAX_HYPOTHESES=10 ×
-    # MAX_ATTEMPTS_PER_HYPOTHESIS=5), but each attempt's decide() call can
-    # itself take up to ~90s on local Ollama models, and nothing in
-    # cli_engine.py's `for agent in agents_to_run` loop ever timed out or
-    # capped the phase — a single slow/looping agent could consume the
-    # entire scan with zero backstop, unlike the cognee persist step (which
-    # already uses this exact wait_for-then-skip pattern).
-    DEEPAGENT_PER_AGENT_TIMEOUT_S: float = 150.0   # one agent's full run()
-    DEEPAGENT_PHASE_BUDGET_S: float = 480.0        # whole 13-agent swarm
+    # ─── DeepAgents swarm (--deep) ───
+    # No wall-clock cap: the swarm runs every agent to completion (see the
+    # loop in cli_engine.py). A former per-agent/phase budget starved the
+    # tail agents, so it was removed. Termination rests on each agent's
+    # internal MAX_HYPOTHESES × MAX_ATTEMPTS bound plus the per-request
+    # httpx/Ollama timeouts, not on a timer over the whole phase.
 
     # ─── Immune System / Co-Evolution ───
     GENOME_BLOCK_THRESHOLD: float = 0.7      # Anomaly score above this = BLOCK
@@ -114,8 +108,6 @@ class CyphexConfig:
         self.COGNEE_RECALL_TIMEOUT_S = float(os.getenv("COGNEE_RECALL_TIMEOUT_S", self.COGNEE_RECALL_TIMEOUT_S))
         self.COGNEE_RECALL_COLD_TIMEOUT_S = float(os.getenv("COGNEE_RECALL_COLD_TIMEOUT_S", self.COGNEE_RECALL_COLD_TIMEOUT_S))
         self.COGNEE_REMEMBER_TIMEOUT_S = float(os.getenv("COGNEE_REMEMBER_TIMEOUT_S", self.COGNEE_REMEMBER_TIMEOUT_S))
-        self.DEEPAGENT_PER_AGENT_TIMEOUT_S = float(os.getenv("DEEPAGENT_PER_AGENT_TIMEOUT_S", self.DEEPAGENT_PER_AGENT_TIMEOUT_S))
-        self.DEEPAGENT_PHASE_BUDGET_S = float(os.getenv("DEEPAGENT_PHASE_BUDGET_S", self.DEEPAGENT_PHASE_BUDGET_S))
 
         # Fall back to the main coding model if no cognee-specific model is set
         # — users shouldn't be forced into downloading a separate large model

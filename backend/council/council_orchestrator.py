@@ -204,7 +204,8 @@ class VRAMManager:
 
     async def ensure_loaded(self, model: str):
         if model in self.loaded:
-            return
+            return                       # already resident — no load, no log
+        console.print(f"[dim]VRAM Manager: Loading {model}...[/dim]")
         # If adding this model would exceed budget, unload least-recently-used
         cost = self.VRAM_COST.get(model, 2.0)
         while sum(self.loaded.values()) + cost > self.VRAM_LIMIT and self.loaded:
@@ -311,8 +312,7 @@ ANTI-HALLUCINATION RULES — apply on every response:
         temperature: sampling temperature (default 0.1 for deterministic reasoning).
         Self-consistency uses a higher value to diversify candidate patches.
         """
-        console.print(f"[dim]VRAM Manager: Loading {model}...[/dim]")
-        await self.vram.ensure_loaded(model)
+        await self.vram.ensure_loaded(model)   # logs only when it actually loads
 
         # Determine reasoning task type from task_name
         task_type_map = {

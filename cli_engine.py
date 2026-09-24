@@ -2105,37 +2105,26 @@ class CyphexEngine:
                 ]
 
                 total = len(agents_to_run)
-                # Confirmed live: a `cx deep` run against a trivial dummy app
-                # hard-hung past 10 minutes inside a single agent's
-                # oracle-guided decide() loop (each local-LLM call can itself
-                # take up to ~90s, and the loop is internally bounded but
-                # still large — MAX_HYPOTHESES × MAX_ATTEMPTS_PER_HYPOTHESIS).
-                # Nothing here ever timed out or capped the phase, unlike the
-                # cognee persist step, which uses this exact
-                # wait_for-then-skip pattern. Bound both the phase and each
-                # individual agent so a slow/looping agent degrades the scan
-                # to partial results instead of hanging it indefinitely.
-                phase_deadline = time.time() + cyphex_config.DEEPAGENT_PHASE_BUDGET_S
+                # No wall-clock cap on the swarm: every agent runs its full
+                # oracle-guided loop to completion, so all `total` agents get a
+                # turn no matter how slow the local models are on this hardware.
+                # A previous phase/per-agent budget capped the total time, but a
+                # single cumulative wall let the first ~4 agents consume it and
+                # deterministically starved the last 9 to zero — the opposite of
+                # what a full swarm should do. Termination is still guaranteed
+                # without a timer: each agent is internally bounded
+                # (MAX_HYPOTHESES × MAX_ATTEMPTS_PER_HYPOTHESIS), and every HTTP
+                # probe and Ollama call keeps its own per-request timeout, which
+                # is an inter-chunk stall budget catching a genuinely wedged
+                # socket or hung model — not a cap on how long real work may take.
                 for idx, agent in enumerate(agents_to_run, 1):
-                    if time.time() >= phase_deadline:
-                        skipped = total - idx + 1
-                        print(
-                            f"  {C.Y}[WARN]{C.RST} DeepAgents phase budget "
-                            f"({cyphex_config.DEEPAGENT_PHASE_BUDGET_S:.0f}s) exhausted after "
-                            f"{idx - 1}/{total} agents — skipping remaining {skipped} to keep "
-                            f"the scan bounded (tune via DEEPAGENT_PHASE_BUDGET_S)."
-                        )
-                        break
                     agent_header(
                         f"DeepAgent {idx}/{total}",
                         f"{agent.__class__.__name__} — {agent.PRIMARY_VULN_CLASS}",
                         "Oracle-Guided Hypothesis Testing",
                     )
                     try:
-                        res = await asyncio.wait_for(
-                            agent.run(context),
-                            timeout=cyphex_config.DEEPAGENT_PER_AGENT_TIMEOUT_S,
-                        )
+                        res = await agent.run(context)
                         self._emit("deepagent_result", agent=agent.__class__.__name__, vulns_found=len(res.vulns))
                         self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
                                         f"{len(res.vulns)} confirmed" if res.vulns else "clean",
@@ -2149,37 +2138,24 @@ class CyphexEngine:
                         # Display any new attack chains
                         if attack_graph.edges:
                             print(f"  {C.CYAN}▸ Attack chains: {len(attack_graph.edges)} discovered{C.RST}")
-                    except (asyncio.TimeoutError, TimeoutError):
-                        # wait_for cancels agent.run() mid-flight, so its return
-                        # value (and any attack-graph edges it was about to emit)
-                        # are lost. But an agent's confirmed findings accumulate
-                        # live on agent.vulns — including anything its fast
-                        # preflight already nailed down before the slow oracle
-                        # loop hung. Salvage those instead of discarding a real,
-                        # confirmed vuln just because the deeper phase ran long.
+                    except Exception as e:
+                        # An agent's confirmed findings accumulate live on
+                        # agent.vulns as it goes, so if it crashes mid-run keep
+                        # whatever it already nailed down instead of discarding a
+                        # real, confirmed vuln. (CancelledError from a real
+                        # Ctrl+C is BaseException, not Exception, so it still
+                        # propagates and aborts the scan.)
                         salvaged = list(getattr(agent, "vulns", []) or [])
                         if salvaged:
                             context.confirmed_vulns.extend(salvaged)
-                        self._emit("deepagent_timeout", agent=agent.__class__.__name__,
-                                   salvaged=len(salvaged))
+                        self._emit("deepagent_error", agent=agent.__class__.__name__,
+                                   error=str(e)[:200], salvaged=len(salvaged))
                         self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
-                                        f"timed out ({len(salvaged)} salvaged)" if salvaged else "timed out",
-                                        _T_WARN, {"salvaged": len(salvaged)})
-                        salvage_note = (
-                            f" (kept {len(salvaged)} confirmed vuln(s) found before the hang)"
-                            if salvaged else ""
-                        )
-                        print(
-                            f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} timed out after "
-                            f"{cyphex_config.DEEPAGENT_PER_AGENT_TIMEOUT_S:.0f}s (oracle-guided "
-                            f"loop too slow on this hardware) — skipping to the next agent{salvage_note}."
-                        )
-                        continue
-                    except Exception as e:
-                        self._emit("deepagent_error", agent=agent.__class__.__name__, error=str(e)[:200])
-                        self.trace.note(agent.__class__.__name__.replace("Deep", "").replace("Agent", ""),
-                                        f"error: {str(e)[:40]}", _T_FAIL)
-                        print(f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} failed: {str(e)[:100]}")
+                                        f"error: {str(e)[:40]}", _T_FAIL, {"salvaged": len(salvaged)})
+                        salvage_note = (f" (kept {len(salvaged)} confirmed vuln(s) found first)"
+                                        if salvaged else "")
+                        print(f"  {C.Y}[WARN]{C.RST} {agent.__class__.__name__} failed: "
+                              f"{str(e)[:100]}{salvage_note}")
                         continue
 
                 # Keep the graph on the context so later steps (Security
