@@ -31,8 +31,12 @@ the input box's height; the antenna rides in the rail row above it, so the
 footer never grows past the box.
 
 In WezTerm and iTerm2 (the iTerm2 inline-image protocol) the slot shows the
-actual sprite PNG instead — see ART / image_protocol(). CYPHEX_BUDDY=glyph
-or =image forces either.
+actual sprite PNG instead, animated at ~8 fps with frames synthesised from
+the stills (EFFECT: flash, scanline sweep, glitch, pulse) — see ART /
+art_frames() / image_protocol(). CYPHEX_BUDDY=glyph or =image forces either.
+
+While a task runs, the rail row becomes a Claude-Code-style status line:
+a spinner, a rotating "doing word" (VERBS) and the elapsed time.
 
 THE SCAN HERO PINS ON TOP OF THE FOOTER, NOT AT THE SCREEN TOP
 pin_header() stacks a block (the scan's hero panel) directly above the rail
@@ -61,7 +65,9 @@ GUTTER = BUDDY_W + 2  # " " + buddy + " "  — the box starts at column GUTTER+1
 MIN_ROWS = 14         # below this the region would leave too little to read
 MIN_COLS = 48
 MIN_OUTPUT = 12       # rows the transcript keeps when a header is pinned
-TICK_S = 0.25         # animator cadence; the elapsed clock updates each tick
+TICK_S = 0.12         # animator cadence: sprite frames flip at ~8 fps
+GLYPH_EVERY = 2       # glyph faces advance every 2nd tick (~4 fps reads better)
+VERB_EVERY = 24       # spinner verb rotates every ~3 s
 ENV = "CYPHEX_DOCK"
 
 _ESC = "\033"
@@ -123,7 +129,15 @@ ART = {
     "success":  ("success", 100),
     "error":    ("expr_error", None),
 }
-_png_cache = {}
+_frame_cache = {}
+
+# Stills only ship one pose each, so motion is synthesised from them: a
+# flash for alert/error, a scanline sweeping the screen for scanning/loading/
+# focused, slice glitches for hacking, a slow pulse for thinking. neutral
+# and success stay still — an idle footer should not churn the terminal.
+EFFECT = {"alert": "flash", "error": "flash", "scanning": "sweep",
+          "loading": "sweep", "focused": "sweep", "hacking": "glitch",
+          "thinking": "pulse"}
 
 
 def image_protocol() -> bool:
@@ -139,28 +153,108 @@ def image_protocol() -> bool:
             or "WEZTERM_EXECUTABLE" in os.environ or "WEZTERM_PANE" in os.environ)
 
 
-def art_png(expr):
-    """PNG bytes of the sprite for an expression, cropped to the head and
-    trimmed to its opaque bounds; None if Pillow or the asset is missing."""
-    if expr in _png_cache:
-        return _png_cache[expr]
-    data = None
+def _load_still(expr):
+    from PIL import Image
+    name, crop_h = ART[expr]
+    img = Image.open(os.path.join(_ART_DIR, name + ".png")).convert("RGBA")
+    if crop_h:
+        img = img.crop((0, 0, img.width, crop_h))
+    box = img.getbbox()
+    return img.crop(box) if box else img
+
+
+def _screen_mask(img):
+    """Where a scanline may glow: the screen, which in the art is the
+    transparent hole the bezel encloses. Flood the transparent area from the
+    image border; transparent pixels the flood cannot reach are the screen.
+    Bezel, chassis and the red face are opaque, so they are never lit."""
+    from PIL import Image
+    w, h = img.size
+    alpha = img.getchannel("A").load()
+    clear = lambda x, y: alpha[x, y] <= 128
+    outside = set()
+    stack = [(x, y) for x in range(w) for y in (0, h - 1)] + \
+            [(x, y) for y in range(h) for x in (0, w - 1)]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in outside or not (0 <= x < w and 0 <= y < h) or not clear(x, y):
+            continue
+        outside.add((x, y))
+        stack += ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
+    mask = Image.new("L", img.size, 0)
+    m = mask.load()
+    for y in range(h):
+        for x in range(w):
+            if clear(x, y) and (x, y) not in outside:
+                m[x, y] = 255
+    return mask
+
+
+def _effect_frames(img, effect):
+    from PIL import Image, ImageChops, ImageEnhance
+    alpha = img.getchannel("A")
+
+    def bright(k):
+        out = ImageEnhance.Brightness(img).enhance(k)
+        out.putalpha(alpha)
+        return out
+
+    if effect == "flash":
+        # 2 Hz at TICK_S: fast full-brightness flashing strains the eyes
+        # (WCAG 2.3.1 draws the line at 3 flashes a second).
+        return [img, img, bright(1.9), bright(1.9)]
+    if effect == "pulse":
+        return [img, bright(0.8), bright(0.6), bright(0.8)]
+    if effect == "sweep":
+        mask = _screen_mask(img)
+        box = mask.getbbox() or (0, 0, img.width, img.height)
+        band = max((box[3] - box[1]) // 6, 2)
+        frames = []
+        for i in range(8):
+            y = box[1] + ((box[3] - box[1] - band) * i) // 7
+            rows = Image.new("L", img.size, 0)
+            rows.paste(255, (0, y, img.width, y + band))
+            glow = Image.new("RGBA", img.size, (*P.rgb(P.REF), 0))
+            glow.putalpha(ImageChops.multiply(mask, rows).point(lambda v: v * 100 // 255))
+            frames.append(Image.alpha_composite(img, glow))
+        return frames
+    if effect == "glitch":
+        frames = [img]
+        slice_h = max(img.height // 10, 1)
+        for shifts in ((3, -2, 0, 4, -3), (-4, 0, 3, -2, 2)):
+            f = img.copy()
+            for n, dx in enumerate(shifts):
+                y = (2 * n + 1) * slice_h
+                if y + slice_h > img.height:
+                    break
+                strip = img.crop((0, y, img.width, y + slice_h))
+                f.paste((0, 0, 0, 0), (0, y, img.width, y + slice_h))
+                f.paste(strip, (dx, y))
+            frames += [f, img]
+        return frames
+    return [img]
+
+
+def art_frames(expr):
+    """The sprite for an expression as a list of PNG frames (the still
+    first), cropped to the head; [] if Pillow or the asset is missing."""
+    if expr in _frame_cache:
+        return _frame_cache[expr]
+    frames = []
     try:
+        img = _load_still(expr)
         from PIL import Image
-        name, crop_h = ART[expr]
-        img = Image.open(os.path.join(_ART_DIR, name + ".png")).convert("RGBA")
-        if crop_h:
-            img = img.crop((0, 0, img.width, crop_h))
-        box = img.getbbox()
-        if box:
-            img = img.crop(box)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        data = buf.getvalue()
+        for f in _effect_frames(img, EFFECT.get(expr)):
+            buf = io.BytesIO()
+            # 64-colour palette: pixel art survives it, and it cuts each
+            # frame ~4x — at ~8 fps that is the difference between a few
+            # dozen KB/s of terminal traffic and a few hundred.
+            f.quantize(64, method=Image.Quantize.FASTOCTREE).save(buf, format="PNG", optimize=True)
+            frames.append(buf.getvalue())
     except Exception:
-        data = None
-    _png_cache[expr] = data
-    return data
+        frames = []
+    _frame_cache[expr] = frames
+    return frames
 
 
 def _image_seq(png):
@@ -180,6 +274,7 @@ _st = {
     "drawn": None,      # expression currently shown as an image, if any
     "head": None,       # pin_header's render(cols, max_rows) callable
     "head_rows": [],    # the pinned block's ANSI lines, as painted
+    "verb0": 0,         # where the spinner's verb rotation starts this task
 }
 _console_lock = None
 _anim_stop = None
@@ -450,17 +545,19 @@ def buddy_rows(state="neutral", frame=0, ascii_mode=False):
 def _paint_buddy(force=False):
     top = _dims()[0] - ROWS + 1          # antenna shares the rail row
     expr = expression(_st["state"])
-    png = art_png(expr) if image_protocol() and not _ascii() else None
-    if png:
-        # A still image per expression: resend only when the face changes
-        # (or a full repaint wiped it), never on the animator's tick.
-        if not force and _st["drawn"] == expr:
+    frames = art_frames(expr) if image_protocol() and not _ascii() else []
+    if frames:
+        # Resend only when the shown frame changes (or a full repaint wiped
+        # it): a still expression costs nothing per tick, an animated one
+        # flips a frame every tick.
+        key = (expr, _st["frame"] % len(frames))
+        if not force and _st["drawn"] == key:
             return ""
-        _st["drawn"] = expr
+        _st["drawn"] = key
         blank = "".join(_cup(top + i) + " " * GUTTER for i in range(ROWS))
-        return blank + _cup(top, 2) + _image_seq(png)
+        return blank + _cup(top, 2) + _image_seq(frames[key[1]])
     _st["drawn"] = None
-    art = buddy_rows(_st["state"], _st["frame"], _ascii())
+    art = buddy_rows(_st["state"], _st["frame"] // GLYPH_EVERY, _ascii())
     # The whole gutter, spaces included: they wipe whatever a resize reflowed there.
     return "".join(_cup(top + i) + " " + r + " " for i, r in enumerate(art))
 
@@ -472,6 +569,35 @@ def _paint_rail():
         return ""
     # Starts after the gutter: the buddy's antenna occupies the left of it.
     return _cup(_dims()[0] - ROWS + 1, GUTTER + 1) + _EL0 + _st["rail"]
+
+
+#: Claude-Code-style "doing words" for the line above the box while a task
+#: runs; one rotates in every VERB_EVERY ticks.
+VERBS = ("Fingerprinting", "Triangulating", "Decompiling", "Fuzzing",
+         "Taint-tracing", "Sandboxing", "Hashing", "Deobfuscating",
+         "Correlating", "Cross-referencing", "Enumerating", "Hardening",
+         "Patching", "Calibrating sensors", "Reticulating splines",
+         "Discombobulating", "Defragmenting", "Quantum-tunnelling",
+         "Interrogating packets", "Spelunking the AST")
+SPIN = "·✢✳✶✻✽✻✶✳✢"
+SPIN_ASCII = "-\\|/"
+
+
+def _paint_status():
+    """The rail row while a task runs: ✻ Verb… (12s · ctrl+c to stop)."""
+    rows, cols = _dims()
+    ascii_mode = _ascii()
+    spin = SPIN_ASCII if ascii_mode else SPIN
+    frame = _st["frame"]
+    verb = VERBS[(_st["verb0"] + frame // VERB_EVERY) % len(VERBS)]
+    started = _st["started"]
+    meta = f"  ({time.time() - started:.0f}s · ctrl+c to stop)" if started else ""
+    room = cols - GUTTER - 1
+    head = f"{spin[frame % len(spin)]} "
+    text = (verb + ("..." if ascii_mode else "…"))[:max(room - len(head), 0)]
+    meta = meta[:max(room - len(head) - len(text), 0)]
+    return (_cup(rows - ROWS + 1, GUTTER + 1) + _EL0 + P.fg(P.REF) + head
+            + P.fg(P.READOUT) + text + P.fg(P.LABEL) + meta + _RST)
 
 
 def _box_parts():
@@ -490,13 +616,12 @@ def _paint_task():
     rows, cols = _dims()
     width = cols - GUTTER
     g, segs = _box_parts()
-    label, started = _st["task"], _st["started"]
+    label = _st["task"]
     if _st["detail"]:
         label = f"{label}  ·  {_st['detail']}"
-    tail = f"  ·  {time.time() - started:.0f}s" if started else ""
     prompt = "".join(t for t, _ in segs)
     room = max(width - len(prompt) - 2, 1)
-    text = (label + tail)[:room]
+    text = label[:room]                 # elapsed lives on the status line
     wall = P.fg(P.PHOS_DIM)
     row = ("".join(P.fg(c) + t for t, c in segs) + P.fg(P.READOUT) + text + _RST
            + " " * (room - len(text)) + " " + wall + g["v"] + _RST)
@@ -507,11 +632,14 @@ def _paint_task():
             + _cup(top + 2, col) + _EL0 + wall + g["bl"] + g["h"] * (width - 2) + g["br"] + _RST)
 
 
+def _paint_running():
+    return _paint_task() + _paint_status() if _st["task"] else ""
+
+
 def _paint_all(lead=""):
-    out = lead + _paint_head() + _paint_rail() + _paint_buddy(force=True)
-    if _st["task"]:
-        out += _paint_task()
-    _write(out)
+    rail = _paint_status() if _st["task"] else _paint_rail()
+    _write(lead + _paint_head() + rail + _paint_buddy(force=True)
+           + (_paint_task() if _st["task"] else ""))
 
 
 def repaint(rail_ansi=None):
@@ -536,7 +664,7 @@ def set_state(state, label=None):
         # is probing), not a replacement for it; repeats of the task are noise.
         if label and _st["task"] is not None and str(label) not in _st["task"]:
             _st["detail"] = str(label)
-        _write(_paint_buddy() + (_paint_task() if _st["task"] else ""))
+        _write(_paint_buddy() + _paint_running())
     return True
 
 
@@ -585,6 +713,8 @@ def start_task(label, state="working", animate=True, caret="executing"):
     if not _st["active"] and not adopt(standalone=False):
         return False
     with _lock:
+        if _st["task"] is None:
+            _st["verb0"] = int(time.time()) % len(VERBS)
         _st.update(task=str(label), detail="", caret=caret,
                    state=expression(state))
         if not _st["started"]:
@@ -611,7 +741,7 @@ def _animate(stop):
                 # the REPL repaints its rail at the next prompt.
                 _paint_all(lead=_cup(_dims()[0] - ROWS + 1, GUTTER + 1) + _EL0)
             else:
-                _write(_paint_buddy() + (_paint_task() if _st["task"] else ""))
+                _write(_paint_running() + _paint_buddy())
 
 
 def stop_task():
@@ -623,4 +753,8 @@ def stop_task():
     if t is not None and t is not threading.current_thread():
         t.join(timeout=1.0)
     with _lock:
+        was_running = _st["task"] is not None
         _st.update(task=None, detail="", started=0.0)
+        if was_running and _st["active"]:
+            # Hand the rail row back: our rail, or blank for the REPL's.
+            _write(_cup(_dims()[0] - ROWS + 1, GUTTER + 1) + _EL0 + _paint_rail())

@@ -67,25 +67,53 @@ def test_anchored_editor_paints_absolute_rows_and_spares_gutter():
     assert "/scan" in out
 
 
-def test_image_buddy_is_the_real_sprite_sent_once_per_expression(monkeypatch):
-    """WezTerm/iTerm2: the slot shows the actual PNG, sized to the slot, and
-    is resent only when the expression changes — never on animator ticks."""
+def test_image_buddy_animates_only_expressions_with_motion(monkeypatch):
+    """WezTerm/iTerm2: the slot shows the real sprite, sized to the slot.
+    A still expression is sent once; an animated one flips a frame per
+    tick; a full repaint always redraws."""
     monkeypatch.setattr(footer_dock, "image_protocol", lambda: True)
     monkeypatch.setattr(footer_dock, "_ascii", lambda: False)
     monkeypatch.setitem(footer_dock._st, "size", (30, 100))
     monkeypatch.setitem(footer_dock._st, "drawn", None)
+    monkeypatch.setitem(footer_dock._st, "frame", 0)
     for expr in footer_dock.ART:
-        assert footer_dock.art_png(expr), expr            # every face has art
-    monkeypatch.setitem(footer_dock._st, "state", "alert")
+        frames = footer_dock.art_frames(expr)
+        assert frames, expr                                # every face has art
+        assert (len(frames) > 1) == (expr in footer_dock.EFFECT), expr
+    monkeypatch.setitem(footer_dock._st, "state", "neutral")
     first = footer_dock._paint_buddy()
     assert "\x1b]1337;File=" in first
     assert f"width={footer_dock.BUDDY_W};height={footer_dock.ROWS}" in first
     assert "doNotMoveCursor=1" in first     # else the last-row image scrolls the screen
     monkeypatch.setitem(footer_dock._st, "frame", 5)
-    assert footer_dock._paint_buddy() == ""               # same face: no resend
+    assert footer_dock._paint_buddy() == ""               # still face: no resend
     assert "1337" in footer_dock._paint_buddy(force=True)  # full repaint redraws it
-    monkeypatch.setitem(footer_dock._st, "state", "error")
+    monkeypatch.setitem(footer_dock._st, "state", "alert")
     assert "1337" in footer_dock._paint_buddy()           # new face: resend
+    assert footer_dock._paint_buddy() == ""               # same frame: nothing
+    monkeypatch.setitem(footer_dock._st, "frame", 6)
+    assert "1337" in footer_dock._paint_buddy()           # next frame: the flash
+
+
+def test_status_line_spins_a_verb_with_elapsed_and_hands_the_row_back(monkeypatch):
+    out = []
+    monkeypatch.setattr(footer_dock, "_raw", out.append)
+    monkeypatch.setattr(footer_dock, "_ascii", lambda: False)
+    monkeypatch.setattr(footer_dock, "image_protocol", lambda: False)
+    monkeypatch.setitem(footer_dock._st, "active", True)
+    monkeypatch.setitem(footer_dock._st, "owner", False)
+    monkeypatch.setitem(footer_dock._st, "size", (30, 100))
+    monkeypatch.setitem(footer_dock._st, "rail", "")
+    monkeypatch.setitem(footer_dock._st, "started", 0.0)
+    assert footer_dock.start_task("4/9  DAST", animate=False)
+    status = _SGR.sub("", footer_dock._paint_status())
+    assert "\x1b[27;12H" in status                        # rail row, right of the buddy
+    assert any(v + "…" in status for v in footer_dock.VERBS)
+    assert "s · ctrl+c to stop)" in status
+    assert "4/9  DAST" in _SGR.sub("", "".join(out))       # the box still says what runs
+    out.clear()
+    footer_dock.stop_task()
+    assert "".join(out) == "\x1b7\x1b[?25l\x1b[27;12H\x1b[K\x1b8\x1b[?25h"  # row blanked for the REPL
 
 
 def test_image_protocol_detection(monkeypatch):
