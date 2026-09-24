@@ -286,14 +286,6 @@ class AttackOracle:
             self._model_locks[model] = lock
         return lock
 
-    def _announce_lock(self, role: str, model: str) -> None:
-        try:
-            import terminal_ui as _ui
-            if hasattr(_ui, "render_deep_lock"):
-                _ui.render_deep_lock(role, model)
-        except Exception:
-            pass
-
     def _strategy_label(self, task_type: str, severity: str = "", cwe: str = "") -> str:
         """The reasoning strategy the orchestrator would pick — shown in the
         UI panels. 'Standard' when no enhanced reasoner is loaded (the plain
@@ -318,12 +310,12 @@ class AttackOracle:
             "hypotheses (never more than 6). Return complete, compact JSON."
         )
         async with self._lock_for(model):
-            self._announce_lock("planner", model)
             response = await self.orchestrator._call(
                 model=model,
                 system=ORACLE_PLAN_SYSTEM,
                 prompt=prompt,
                 task_name="Reasoning",
+                show_thinking=False,
             )
         plan = AttackPlan.from_json(response)
         plan.model = model
@@ -357,12 +349,12 @@ class AttackOracle:
             "Decide: confirmed / adapt (provide next probe) / abandoned"
         )
         async with self._lock_for(model):
-            self._announce_lock("analyst", model)
             response = await self.orchestrator._call(
                 model=model,
                 system=ORACLE_DECIDE_SYSTEM,
                 prompt=prompt,
                 task_name="Reasoning",
+                show_thinking=False,
             )
         decision = Decision.from_json(response)
         decision.model = model
@@ -382,12 +374,12 @@ class AttackOracle:
         )
         try:
             async with self._lock_for(model):
-                self._announce_lock("mutator", model)
                 response = await self.orchestrator._call(
                     model=model,
                     system=ORACLE_MUTATE_SYSTEM,
                     prompt=prompt,
                     task_name="Generating",
+                    show_thinking=False,
                 )
             return response.get("variants", [])
         except Exception:

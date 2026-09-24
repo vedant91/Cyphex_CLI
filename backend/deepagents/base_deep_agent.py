@@ -98,9 +98,9 @@ class BaseDeepAgent:
                 vuln_class=self.PRIMARY_VULN_CLASS,
             )
             if ui:
-                # 🧠 planner thinking + 🗺 ATTACK PLAN panel (payload · endpoint
-                # · severity per hypothesis) — the live step-by-step view.
-                ui.render_deep_thinking(name, "planner", plan.target_summary)
+                # ONE ATTACK PLAN panel per agent (payload · endpoint · severity
+                # per hypothesis). The target summary is already the panel's
+                # "Target" line, so no separate thinking line is printed.
                 ui.render_attack_plan(name, plan, (time.time() - t0) * 1000)
             else:
                 console.print(
@@ -260,17 +260,18 @@ class BaseDeepAgent:
 
             ui = _deep_ui()
             if ui:
-                # 🧠 analyst thinking + the compact attempt line, then a 🔬
-                # VERDICT panel when the probe resolves (confirmed/abandoned).
-                ui.render_deep_thinking(self.__class__.__name__, "analyst", decision.thinking)
+                # Keep it terse: one compact attempt line per probe (no repeated
+                # reasoning text), and a VERDICT panel only when a vuln is
+                # CONFIRMED — the outcome worth surfacing. Abandon/adapt are just
+                # the one-liner, so a long run does not bury the screen.
                 ui.render_deep_attempt(hyp.id, attempt + 1, decision.action,
-                                       decision.confidence, decision.thinking)
-                if decision.action in ("confirmed", "abandoned"):
+                                       decision.confidence)
+                if decision.action == "confirmed":
                     ui.render_deep_verdict(self.__class__.__name__, decision, decide_ms)
             else:
                 console.print(
                     f"[dim]  [{hyp.id}] attempt {attempt+1} → {decision.action} "
-                    f"(conf={decision.confidence}%) {decision.thinking}[/dim]"
+                    f"(conf={decision.confidence}%)[/dim]"
                 )
 
             if decision.action == "confirmed" and decision.vuln:

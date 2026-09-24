@@ -68,11 +68,14 @@ def test_verdict_abandoned_hides_evidence_and_next_probe():
     assert "Evidence" not in out and "Next probe" not in out
 
 
-def test_thinking_and_attempt_lines():
-    out = _capture(tu.render_deep_thinking, "DeepAuthAgent", "planner", "probe the login flow")
-    assert "DeepAuthAgent" in out and "planner thinking" in out and "probe the login flow" in out
-    out = _capture(tu.render_deep_attempt, "h1", 2, "confirmed", 85, "sql error surfaced")
-    assert "[h1]" in out and "attempt 2" in out and "confirmed" in out and "85%" in out
+def test_attempt_line_is_terse_no_reasoning_text():
+    # DeepAgents output must stay compact: the per-attempt line carries no
+    # reasoning text (that lives only on the CONFIRMED verdict panel), so a
+    # long run does not bury the screen in repeated thinking.
+    out = _capture(tu.render_deep_attempt, "h1", 2, "abandoned", 85)
+    assert "[h1]" in out and "attempt 2" in out and "abandoned" in out and "85%" in out
+    assert not hasattr(tu, "render_deep_thinking")   # thinking line removed
+    assert not hasattr(tu, "render_deep_lock")        # per-call lock line removed
 
 
 def test_panels_degrade_on_a_legacy_terminal(monkeypatch):

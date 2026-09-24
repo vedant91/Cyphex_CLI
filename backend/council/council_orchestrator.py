@@ -302,7 +302,8 @@ ANTI-HALLUCINATION RULES — apply on every response:
         self._reasoning_calls = 0
 
     async def _call(self, model: str, system: str, prompt: str, task_name: str = "Reasoning",
-                    severity: str = "", cwe: str = "", temperature: float = 0.1) -> dict:
+                    severity: str = "", cwe: str = "", temperature: float = 0.1,
+                    show_thinking: bool = True) -> dict:
         """
         Call a model and return parsed JSON.
         Routes through Oracle agent-reasoning when available (adds CoT/reflection).
@@ -311,6 +312,9 @@ ANTI-HALLUCINATION RULES — apply on every response:
 
         temperature: sampling temperature (default 0.1 for deterministic reasoning).
         Self-consistency uses a higher value to diversify candidate patches.
+        show_thinking: print the per-call strategy/thinking chatter. False for
+        the DeepAgents oracle, which renders its own compact panels — otherwise
+        the same reasoning text is shown three times per probe.
         """
         await self.vram.ensure_loaded(model)   # logs only when it actually loads
 
@@ -328,7 +332,8 @@ ANTI-HALLUCINATION RULES — apply on every response:
         if self.reasoner and self.reasoner.is_enhanced:
             try:
                 strategy = self.reasoner.select_strategy(task_type, severity, cwe)
-                console.print(f"[dim]  ◈ Agent-Reasoning: {strategy} strategy[/dim]")
+                if show_thinking:
+                    console.print(f"[dim]  ◈ Agent-Reasoning: {strategy} strategy[/dim]")
                 result = self.reasoner.generate(
                     model=model,
                     prompt=prompt,
@@ -346,7 +351,8 @@ ANTI-HALLUCINATION RULES — apply on every response:
                     except json.JSONDecodeError:
                         parsed = self._extract_json_robust(clean)
                     if parsed and isinstance(parsed, dict):
-                        console.print(f"[dim]  ◈ Reasoning complete ({result.strategy}, {result.duration_ms:.0f}ms)[/dim]")
+                        if show_thinking:
+                            console.print(f"[dim]  ◈ Reasoning complete ({result.strategy}, {result.duration_ms:.0f}ms)[/dim]")
                         return parsed
             except Exception as e:
                 console.print(f"[dim]  ◈ Agent-reasoning fallback: {str(e)[:60]}[/dim]")
@@ -435,7 +441,7 @@ ANTI-HALLUCINATION RULES — apply on every response:
                 # Extract and display thinking from the JSON
                 if isinstance(parsed, dict) and "thinking" in parsed:
                     thinking_content = str(parsed["thinking"]).strip()
-                    if thinking_content:
+                    if thinking_content and show_thinking:
                         console.print(Panel(thinking_content, title=f"[{model}] Thinking Process", border_style="blue"))
                     
                 # Display the decision if applicable

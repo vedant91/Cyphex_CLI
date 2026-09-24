@@ -1571,18 +1571,6 @@ def render_deep_planner(agent, model, strategy):
     soc.print(t)
 
 
-def render_deep_thinking(agent, role, text):
-    """`◇ <Agent> · <role> thinking  <text>` — the model's own one-line
-    rationale (planner or analyst), as it streams."""
-    if not text:
-        return
-    t = Text("  " + _glyph("◇ ", ""), style=TGT)
-    t.append(f"{_agent_label(agent)} ", style=f"bold {REF}")
-    t.append(f"{_glyph('·','-')} {role} thinking  ", style=LABEL)
-    t.append(str(text).strip()[:200], style=READOUT)
-    soc.print(t)
-
-
 def render_attack_plan(agent, plan, ms=0.0):
     """The ◈ ATTACK PLAN panel: the ordered hypotheses the oracle generated,
     each with its severity, technique, endpoint and payload."""
@@ -1659,25 +1647,14 @@ def render_deep_verdict(agent, decision, ms=0.0):
                     border_style=border, box=_box(), padding=(0, 1)))
 
 
-def render_deep_attempt(hyp_id, attempt, action, confidence, thinking=""):
-    """The compact per-attempt line under a hypothesis."""
+def render_deep_attempt(hyp_id, attempt, action, confidence):
+    """The compact per-attempt line under a hypothesis — no reasoning text
+    (the CONFIRMED verdict panel carries the detail worth keeping)."""
     col = {"confirmed": OK, "adapt": REF, "abandoned": LABEL}.get(
         (action or "").lower(), LABEL)
-    t = Text(f"   [{hyp_id}] attempt {attempt} → ", style=LABEL)
+    t = Text(f"   [{hyp_id}] attempt {attempt} {_glyph('→','->')} ", style=LABEL)
     t.append(f"{action} ", style=col)
-    t.append(f"(conf={confidence}%) ", style=LABEL)
-    if thinking:
-        t.append(str(thinking).strip()[:110], style=READOUT)
-    soc.print(t)
-
-
-def render_deep_lock(role, model):
-    """`[DeepAgent:<role>] ▸ Acquired <model> lock, running inference...` —
-    the shared per-model lock that serialises same-model calls across the
-    agents running in parallel (so they don't thrash local VRAM)."""
-    t = Text(f"  [DeepAgent:{role}] ", style=LABEL)
-    t.append(_glyph("▸ ", ""), style=CAUT)
-    t.append(f"Acquired {model} lock, running inference...", style=LABEL)
+    t.append(f"({confidence}%)", style=LABEL)
     soc.print(t)
 
 
