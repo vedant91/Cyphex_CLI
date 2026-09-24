@@ -32,18 +32,7 @@ from immune.evolution_controller import EvolutionController
 # ═══════════════════════════════════════════════════════════════
 # COLORS FOR TERMINAL OUTPUT
 # ═══════════════════════════════════════════════════════════════
-class C:
-    # MONO SIGNAL RED — names kept, values mirror terminal_ui.py's ramp.
-    RED = "\033[38;2;225;142;145m"      # bright — error / high
-    GREEN = "\033[38;2;217;94;98m"      # PRIMARY — success / engaged
-    YELLOW = "\033[38;2;193;78;91m"     # mid — warning / medium
-    BLUE = "\033[38;2;142;113;116m"     # muted — info / low
-    MAGENTA = "\033[38;2;225;142;145m"  # bright (legacy alias)
-    CYAN = "\033[38;2;217;94;98m"       # PRIMARY (legacy alias)
-    WHITE = "\033[38;2;225;208;210m"    # readout — primary prose
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RESET = "\033[0m"
+from ui_palette import ANSI as C
 
 
 def header(title: str, emoji: str = ""):

@@ -94,16 +94,10 @@ _MAX_CANDIDATE_ROWS = 12     # rows of Tab candidates before we elide
 _MIN_WIDTH = 20              # matches terminal_ui.deck_box_width()
 _DELIMS = " \t\n"            # == readline.set_completer_delims() in cx.py
 
-# Palette fallbacks — only reachable if terminal_ui vanished, in which case
-# supported() is already False and we never paint. Kept so the module is
-# importable and unit-testable on its own.
-_PHOS_DIM = "#6d2c31"
-_LABEL    = "#8e7174"
-_READOUT  = "#e1d0d2"
-
-
-def _pal(name, default):
-    return getattr(ui, name, default) if ui is not None else default
+# Palette comes from the dependency-free ui_palette (the same values
+# terminal_ui uses), so this module stays importable and unit-testable on its
+# own without a hand-copied fallback.
+from ui_palette import PHOS_DIM as _PHOS_DIM, LABEL as _LABEL, READOUT as _READOUT
 
 
 def _fg(hex_colour):
@@ -680,7 +674,7 @@ class _Editor:
     def _wall(self, top):
         g = self._glyphs()
         left, right = (g["tl"], g["tr"]) if top else (g["bl"], g["br"])
-        return (_fg(_pal("PHOS_DIM", _PHOS_DIM))
+        return (_fg(_PHOS_DIM)
                 + left + g["h"] * (self.width - 2) + right + _RST)
 
     def _row(self):
@@ -719,13 +713,13 @@ class _Editor:
             lo = ("<" if ascii_mode else "‹") if self.scroll > 0 else " "
             hi = ((">" if ascii_mode else "›")
                   if self.scroll + view < total else " ")
-            dim = _fg(_pal("LABEL", _LABEL))
+            dim = _fg(_LABEL)
             row.append(dim + lo + _RST)
             row.append(visible)
             row.append(dim + hi + _RST)
         else:
             row.append(visible)
-        row.append(" " + _fg(_pal("PHOS_DIM", _PHOS_DIM)) + g["v"] + _RST)
+        row.append(" " + _fg(_PHOS_DIM) + g["v"] + _RST)
         col = self._pcells + (1 if gutter else 0) + (cw - self.scroll)
         return "".join(row), col
 
@@ -1038,10 +1032,10 @@ class _Editor:
             chunk = matches[i:i + per_row]
             cells = "".join(m + " " * (widest - display_width(m)) for m in chunk)
             rows.append("  " + cells.rstrip())
-        body = "".join(_fg(_pal("READOUT", _READOUT)) + r + _RST + "\r\n"
+        body = "".join(_fg(_READOUT) + r + _RST + "\r\n"
                        for r in rows[:_MAX_CANDIDATE_ROWS])
         if len(rows) > _MAX_CANDIDATE_ROWS:
-            body += (_fg(_pal("LABEL", _LABEL))
+            body += (_fg(_LABEL)
                      + "  … %d matches" % len(matches) + _RST + "\r\n")
         self._w(body)
         self.painted = False

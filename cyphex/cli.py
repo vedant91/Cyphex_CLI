@@ -42,19 +42,18 @@ if _BACKEND_DIR not in sys.path:
 
 def _setup_tools():
     """Auto-install optional security tools for enhanced scanning."""
-    # MONO SIGNAL RED — mirrors terminal_ui.py's ramp. Names kept; severity
-    # and hierarchy are carried by BRIGHTNESS inside the one hue.
-    CY = "\033[38;2;217;94;98m"     # PRIMARY — wordmark / accents
-    P2 = "\033[38;2;225;142;145m"   # bright — high emphasis / active
-    GH = "\033[38;2;142;113;116m"   # muted — captions / dim text
-    SL = "\033[38;2;225;208;210m"   # readout — secondary prose
-    NE = "\033[38;2;217;94;98m"     # PRIMARY — success
-    FL = "\033[38;2;234;188;184m"   # peak — critical (brightest = urgent)
-    BD = "\033[1m"
-    RS = "\033[0m"
-    YL = "\033[38;2;193;78;91m"     # mid — warning / medium
-    RAMP_HI = (217, 94, 98)          # PRIMARY — gradient rule endpoint
-    RAMP_LO = (109, 44, 49)          # dim — gradient rule endpoint
+    import ui_palette as P
+    CY = P.fg(P.PHOS)       # brand — wordmark / accents
+    P2 = P.fg(P.REF)        # active / high emphasis
+    GH = P.fg(P.LABEL)      # captions / dim text
+    SL = P.fg(P.READOUT)    # prose
+    NE = P.fg(P.OK)         # success
+    FL = P.fg(P.WARN)       # critical / failure
+    BD = P.ANSI.BOLD
+    RS = P.ANSI.RST
+    YL = P.fg(P.CAUT)       # warning / medium
+    RAMP_HI = P.rgb(P.PHOS)       # gradient rule endpoints
+    RAMP_LO = P.rgb(P.PHOS_DIM)
 
     def _grad(text, r1, g1, b1, r2, g2, b2):
         out = []

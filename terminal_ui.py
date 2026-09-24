@@ -1,18 +1,9 @@
 """
-CYPHEX Terminal UI — MONO SIGNAL RED
+CYPHEX Terminal UI — BLOOD SIGNAL
 ════════════════════════════════════════════════════════════════════════════
-A monochromatic system: the entire interface lives in ONE hue's light→dark
-ramp (a low-chroma rose-red). Hierarchy and severity are carried by
-BRIGHTNESS within the ramp, not by competing hues, and never by saturation —
-the ramp is deliberately desaturated so long stretches of themed output (the
-14-agent scan block, findings tables) read as shading rather than as alarm.
-
-    #e18e91  bright   — high emphasis / active / critical-high findings
-    #d95e62  PRIMARY  — the wordmark, structure, "safe/engaged"
-    #c14e5b  mid      — medium findings / secondary
-    #6d2c31  dim      — borders, rails, low findings
-    #8e7174  muted    — captions, timestamps, comments
-    #e1d0d2  readout  — primary readable prose / numerics
+Blood red owns the brand and the structure; every other hue is a signal that
+means exactly one thing (active, identifier, severity rank, verified). Colour
+values and their roles live in ui_palette.py — never hard-code a hex here.
 
 Everything degrades to a single clean static frame when stdout is not a TTY
 (CI / pipes) — no escape spam, no alt-screen, no cursor games.
@@ -60,22 +51,10 @@ from rich.progress import Progress, BarColumn, TextColumn
 
 CX_VERSION = "4.4"
 
-# ══════════════════════════════════════════════════════════════════════════
-#  MONO SIGNAL RED  (one hue's ramp — hierarchy & severity by brightness)
-#  Names kept (PHOS/REF/TGT…) so every renderer recolours by value change.
-# ══════════════════════════════════════════════════════════════════════════
-VOID      = "#0a0809"   # near-black — background / negative space
-PANEL     = "#1a1214"   # raised panel fill
-PHOS      = "#d95e62"   # PRIMARY red — wordmark, structure, "safe/engaged"
-PHOS_DIM  = "#6d2c31"   # dim red — borders, rails, low emphasis
-REF       = "#e18e91"   # bright red — high emphasis / active / highlights
-TGT       = "#e18e91"   # bright red — commanded target (mono: = accent)
-CAUT      = "#c14e5b"   # mid red — caution / medium findings
-WARN      = "#e18e91"   # bright red — critical / high (brightest = most urgent)
-WARN_HOT  = "#eabcb8"   # extra-bright red — peak emphasis
-APEX      = "#f4e4e1"   # near-white red — rare apex flash
-LABEL     = "#8e7174"   # muted red-grey — captions, timestamps, comments
-READOUT   = "#e1d0d2"   # light red-grey — primary readable prose / numerics
+# Palette: values + purpose map live in ui_palette.py (dependency-free, shared
+# with cx.py / deck_input.py / mascot.py so they cannot drift apart).
+from ui_palette import (VOID, PANEL, PHOS, PHOS_DIM, WARN_HOT, APEX, REF, TGT,
+                        WARN, HIGH, CAUT, LOW, OK, READOUT, LABEL)
 
 HUD_THEME = Theme({
     "hud.void": VOID, "hud.panel": PANEL,
@@ -83,30 +62,31 @@ HUD_THEME = Theme({
     "hud.reference": REF, "hud.target": TGT,
     "hud.caution": CAUT, "hud.warning": WARN, "hud.warning.hot": WARN_HOT,
     "hud.apex": APEX, "hud.label": LABEL, "hud.readout": READOUT,
+    "hud.ok": OK, "hud.high": HIGH, "hud.low": LOW,
     # ── legacy aliases so any un-touched renderer keeps rendering ──
     "cy.primary": f"bold {PHOS}", "cy.secondary": f"bold {REF}",
-    "cy.success": f"bold {PHOS}", "cy.warning": CAUT,
+    "cy.success": f"bold {OK}", "cy.warning": CAUT,
     "cy.high": WARN, "cy.critical": f"bold {WARN}",
     "cy.muted": LABEL, "cy.border": PHOS_DIM, "cy.dim": f"dim {LABEL}",
     "cy.text": READOUT, "cy.cyan": REF, "cy.purple": TGT,
-    "cy.green": PHOS, "cy.red": WARN,
+    "cy.green": OK, "cy.red": WARN,
     "brand": f"bold {PHOS}", "accent": REF, "muted": LABEL,
-    "ok": f"bold {PHOS}", "warn": CAUT, "err": f"bold {WARN}", "text": READOUT,
-    # ── raw ANSI colour names, re-pointed into the ramp ──
+    "ok": f"bold {OK}", "warn": CAUT, "err": f"bold {WARN}", "text": READOUT,
+    # ── raw ANSI colour names, re-pointed onto their palette role ──
     # ~500 call sites across cli_engine/council/deepagents/doctor still write
     # markup like "[green]OK[/green]". Rich resolves a style NAME against the
     # theme before it ever tries to parse it as a colour, so naming them here
-    # drags every one of those sites onto the ramp without touching them.
+    # drags every one of those sites onto the palette without touching them.
     # Compound forms need their own literal key — Rich looks up "bold green"
     # as a whole string and only word-splits it when the theme has no such
     # key, at which point "green" resolves as a colour again and escapes.
-    "red": WARN, "green": PHOS, "yellow": CAUT, "cyan": PHOS,
-    "magenta": REF, "blue": LABEL, "white": READOUT,
-    "bold red": f"bold {WARN}", "bold green": f"bold {PHOS}",
-    "bold yellow": f"bold {CAUT}", "bold cyan": f"bold {PHOS}",
-    "bold magenta": f"bold {REF}", "bold blue": f"bold {LABEL}",
+    "red": WARN, "green": OK, "yellow": CAUT, "cyan": REF,
+    "magenta": TGT, "blue": LOW, "white": READOUT,
+    "bold red": f"bold {WARN}", "bold green": f"bold {OK}",
+    "bold yellow": f"bold {CAUT}", "bold cyan": f"bold {REF}",
+    "bold magenta": f"bold {TGT}", "bold blue": f"bold {LOW}",
     "bold bright_magenta": f"bold {WARN_HOT}",
-    "bold bright_green": f"bold {REF}", "bold bright_cyan": f"bold {REF}",
+    "bold bright_green": f"bold {OK}", "bold bright_cyan": f"bold {REF}",
 })
 
 soc = Console(theme=HUD_THEME, highlight=False)
@@ -179,11 +159,11 @@ def _ease_out(t):
     return 1 - (1 - t) ** 3
 
 
-_TIER_COLOR = {"warning": WARN, "caution": CAUT, "reference": REF, "phosphor": PHOS}
+_TIER_COLOR = {"warning": WARN, "caution": HIGH, "reference": CAUT, "phosphor": OK}
 
 
 def score_color(v):
-    """Thermal verdict colour — weapons-hot red cools to calm phosphor-green.
+    """Thermal verdict colour — arterial red → ember → amber → verified green.
 
     Band cutoffs come from scoring.score_band() (the single source of truth
     for the 20/40/60/80 presentation thresholds) — this only maps that
@@ -210,9 +190,9 @@ def _grad(text, stops):
 # Severity pips — geometric, single-width, zero emoji
 SEV = {
     "Critical": (WARN,     "▲"),
-    "High":     (WARN,     "●"),
+    "High":     (HIGH,     "●"),
     "Medium":   (CAUT,     "◆"),
-    "Low":      (LABEL,    "○"),
+    "Low":      (LOW,      "○"),
     "Info":     (LABEL,    "·"),
 }
 # ASCII counterpart, same keys/colors — swapped in by sev() below whenever
@@ -220,9 +200,9 @@ SEV = {
 # sev() gets a safe glyph without needing its own ascii_mode check.
 SEV_ASCII = {
     "Critical": (WARN,     "!"),
-    "High":     (WARN,     "*"),
+    "High":     (HIGH,     "*"),
     "Medium":   (CAUT,     "+"),
-    "Low":      (LABEL,    "o"),
+    "Low":      (LOW,      "o"),
     "Info":     (LABEL,    "."),
 }
 
@@ -404,7 +384,7 @@ def sweep_trail_color(distance, length):
 #  CYPHEX LOCKMARK — the padlock brand glyph, drawn procedurally in Braille
 #  (body lit in PRIMARY with a hot top-highlight, bright shackle, carved keyhole)
 # ══════════════════════════════════════════════════════════════════════════
-_LAV = "#eabcb8"   # hot top-highlight (in-ramp — WARN_HOT)
+_LAV = WARN_HOT   # hot top-highlight
 
 
 def _padlock_canvas(cw=24, ch=16, shackle_open=1.0, lit=PHOS, ring=REF):
@@ -545,9 +525,9 @@ def _vector_logo(frac=1.0, beam=True, body=PHOS):
             if d <= 2:
                 col = READOUT                       # white-hot etch spark
             elif d <= 10:
-                col = REF                           # magenta cooling
+                col = WARN_HOT                      # hot blood cooling
             elif d <= 22:
-                col = lerp(body, REF, (22 - d) / 12)
+                col = lerp(body, WARN_HOT, (22 - d) / 12)
             else:
                 col = body
         else:
@@ -609,11 +589,11 @@ def _led_logo(sweep=None, flat=None):
                     elif d == 0:
                         col = READOUT                           # igniting head
                     elif d <= 2:
-                        col = lerp(REF, READOUT, (2 - d) / 2)   # hot magenta edge
+                        col = lerp(WARN_HOT, READOUT, (2 - d) / 2)   # hot edge
                     elif d <= 5:
-                        col = lerp(PHOS, REF, (5 - d) / 3)      # cooling
+                        col = lerp(PHOS, WARN_HOT, (5 - d) / 3)      # cooling
                     else:
-                        col = PHOS                              # settled violet
+                        col = PHOS                              # settled blood
                 t.append(_LED_DOT, style=col)
             else:
                 t.append(" ")
@@ -684,7 +664,7 @@ def _lockup(word_style=None):
                 if ch == " ":
                     t.append(" ")
                 else:
-                    t.append(ch, style=lerp(PHOS, REF, j / max(n - 1, 1)))
+                    t.append(ch, style=lerp(PHOS, WARN_HOT, j / max(n - 1, 1)))
         if i < 5:
             t.append("\n")
     return t
@@ -763,8 +743,8 @@ def _image_logo():
 
 
 def _logo_static(console=None, spaced=True):
-    """The brand logo: the CYPHEX block wordmark rendered in the Mono Electric
-    Blue ramp (left→right PHOS→REF gradient). Collapses to a compact ◼ CYPHEX
+    """The brand logo: the CYPHEX block wordmark in a left→right blood →
+    hot-blood gradient (PHOS→WARN_HOT). Collapses to a compact ◼ CYPHEX
     mark only when the terminal is too narrow to fit the full wordmark."""
     c = console or soc
     # NB: the module-level _LOGO_W is reused by the image-blob logo, so measure
@@ -774,10 +754,10 @@ def _logo_static(console=None, spaced=True):
     if _cols(c) < logo_w + 2:
         word = "C Y P H E X" if spaced else "CYPHEX"
         t = Text()
-        t.append("◼ ", style=f"bold {REF}")
+        t.append("◼ ", style=f"bold {WARN_HOT}")
         t.append(word, style=f"bold {PHOS}")
         return t
-    # Full block wordmark with a horizontal blue gradient.
+    # Full block wordmark with a horizontal blood gradient.
     span = max(logo_w - 1, 1)
     t = Text()
     for i, line in enumerate(_LOGO):
@@ -785,7 +765,7 @@ def _logo_static(console=None, spaced=True):
             if ch == " ":
                 t.append(" ")
             else:
-                t.append(ch, style=f"bold {lerp(PHOS, REF, j / span)}")
+                t.append(ch, style=f"bold {lerp(PHOS, WARN_HOT, j / span)}")
         if i < len(_LOGO) - 1:
             t.append("\n")
     return t
@@ -797,8 +777,7 @@ def _logo_static(console=None, spaced=True):
 def annunciator(text, level="phosphor", lit=True):
     """A lamp tile like ▐ MASTER WARNING ▌ (or [ MASTER WARNING ] in
     _ascii_mode). level: phosphor|reference|caution|warning|target."""
-    color = {"phosphor": PHOS, "reference": REF, "caution": CAUT,
-             "warning": WARN, "target": TGT, "apex": APEX}.get(level, PHOS)
+    color = {**_TIER_COLOR, "target": WARN, "apex": APEX}.get(level, PHOS)
     lwall, rwall = ("[", "]") if _ascii_mode() else ("▐", "▌")
     t = Text()
     if lit:
@@ -818,7 +797,7 @@ def render_annunciator(text, level="phosphor", console=None):
 #  BORESIGHT RETICLE — fixed centre targeting cross, state-carrying hub
 # ══════════════════════════════════════════════════════════════════════════
 def render_boresight(state="idle", console=None):
-    hub = {"idle": ("⊕", PHOS), "scanning": ("⌖", REF), "locked": ("◈", TGT)}.get(state, ("⊕", PHOS))
+    hub = {"idle": ("⊕", PHOS), "scanning": ("⌖", REF), "locked": ("◈", WARN)}.get(state, ("⊕", PHOS))
     c = console or soc
     arm = "━━━━━"
     t = Text()
@@ -920,13 +899,13 @@ def render_masthead(console=None, hint=True):
     # ── Tagline + version ──
     tag = Text()
     tag.append(TAGLINE, style=LABEL)
-    tag.append(f"    v{CX_VERSION}", style=PHOS_DIM)
+    tag.append(f"    v{CX_VERSION}", style=LABEL)
 
     # ── Compact command reference (two command/description pairs per row) ──
     grid = Table.grid(padding=(0, 3, 0, 0))
-    grid.add_column(no_wrap=True, style=f"bold {PHOS}")
+    grid.add_column(no_wrap=True, style=f"bold {REF}")
     grid.add_column(no_wrap=True, style=READOUT)
-    grid.add_column(no_wrap=True, style=f"bold {PHOS}")
+    grid.add_column(no_wrap=True, style=f"bold {REF}")
     grid.add_column(no_wrap=True, style=READOUT)
     grid.add_row("/scan <target>", "Static + DAST scan", "/watch", "RASP auto-heal daemon")
     grid.add_row("/deep <target>", "+ DeepAgents swarm", "/setup", "Install tools")
@@ -935,11 +914,11 @@ def render_masthead(console=None, hint=True):
 
     flags = Text()
     flags.append("flags   ", style=LABEL)
-    flags.append("--network  --deepagents  --full  --no-patch", style=PHOS_DIM)
+    flags.append("--network  --deepagents  --full  --no-patch", style=TGT)
 
     cwd = Text()
     cwd.append("cwd     ", style=LABEL)
-    cwd.append(os.getcwd(), style=REF)
+    cwd.append(os.getcwd(), style=READOUT)
 
     body = Group(tag, Text(), grid, Text(), flags, cwd)
     c.print(Panel(
@@ -976,11 +955,14 @@ def render_help(console=None):
         ("/exit", "/quit", "Power down · canopy dark"),
     ]
     t = Table.grid(padding=(0, 2, 0, 0))
-    t.add_column(no_wrap=True, style=f"bold {PHOS}")
+    t.add_column(no_wrap=True, style=f"bold {REF}")
     t.add_column(no_wrap=True, style=TGT)
     t.add_column(style=READOUT)
     for cmd, arg, desc in rows:
-        t.add_row(cmd, arg, desc)
+        # Text(), not str: a str cell is parsed as markup, so "[path]" /
+        # "[host]" / "[corpus]" vanished as unknown tags and "[s]" turned the
+        # rest of the row into strikethrough.
+        t.add_row(Text(cmd), Text(arg), Text(desc))
     c.print(Panel(t, title=Text("◈ COMMAND DECK", style=f"bold {REF}"),
                   subtitle=Text("type a path, URL, or plain English · every waypoint is traced",
                                 style=LABEL),
@@ -1133,7 +1115,7 @@ def render_tools(tools):
 # ══════════════════════════════════════════════════════════════════════════
 def render_status(text, style="ok", console=None):
     c = console or soc
-    glyph = {"ok": ("✓", PHOS), "warn": ("▲", CAUT), "err": ("✗", WARN),
+    glyph = {"ok": ("✓", OK), "warn": ("▲", CAUT), "err": ("✗", WARN),
              "muted": ("╺╸", LABEL), "text": ("▸", REF)}.get(style, ("▸", REF))
     t = Text("  ")
     t.append(glyph[0] + " ", style=glyph[1])
@@ -1159,7 +1141,7 @@ async def render_progress_task(awaitable, label, console=None, ease_target=92, t
 
     with Progress(
         TextColumn("  [bold]{task.fields[lab]}[/bold]", style=REF),
-        BarColumn(bar_width=34, style=PHOS_DIM, complete_style=REF, finished_style=PHOS),
+        BarColumn(bar_width=34, style=PHOS_DIM, complete_style=REF, finished_style=OK),
         TextColumn("{task.percentage:>3.0f}%", style=LABEL),
         console=c, transient=True,
     ) as progress:
@@ -1295,7 +1277,7 @@ def render_ppi_radar(sweep_deg=0.0, contacts=None, console=None, static=False):
     # contacts
     for brg, rng, kind in (contacts or []):
         a = math.radians(brg)
-        col = TGT if kind == "target" else PHOS
+        col = WARN if kind == "target" else PHOS
         bx, by = cx + r * rng * math.cos(a), cy + r * rng * math.sin(a)
         cv.plot(bx, by, col); cv.plot(bx + 1, by, col)
 
@@ -1305,7 +1287,7 @@ def render_ppi_radar(sweep_deg=0.0, contacts=None, console=None, static=False):
     read.append("  ·  ", style=PHOS_DIM)
     read.append("RNG 0.42", style=LABEL)
     read.append("  ·  ", style=PHOS_DIM)
-    read.append(f"CONTACTS {n:02d}", style=TGT if any(k == 'target' for *_, k in (contacts or [])) else PHOS)
+    read.append(f"CONTACTS {n:02d}", style=WARN if any(k == 'target' for *_, k in (contacts or [])) else PHOS)
     body = Text()
     body.append_text(cv.to_text())
     body.append("\n")
@@ -1340,7 +1322,7 @@ def render_radar_scan(duration=1.6, contacts=None, console=None):
                 cv.line(cx, cy, cx + r * math.cos(a), cy + r * math.sin(a), sweep_trail_color(k * 2, 12))
             for brg, rng, kind in contacts:
                 a = math.radians(brg)
-                col = TGT if kind == "target" else PHOS
+                col = WARN if kind == "target" else PHOS
                 bx, by = cx + r * rng * math.cos(a), cy + r * rng * math.sin(a)
                 cv.plot(bx, by, col); cv.plot(bx + 1, by, col)
             live.update(Panel(cv.to_text(), title=Text("PPI · ACTIVE SWEEP", style=f"bold {REF}"),
@@ -1352,7 +1334,7 @@ def render_radar_scan(duration=1.6, contacts=None, console=None):
 #  COMMAND DECK — the persistent two-line HUD deck for the REPL
 # ══════════════════════════════════════════════════════════════════════════
 def _defcon_style(level):
-    return {5: PHOS, 4: PHOS, 3: CAUT, 2: WARN, 1: WARN}.get(level, PHOS)
+    return {5: OK, 4: OK, 3: CAUT, 2: WARN, 1: WARN}.get(level, PHOS)
 
 
 def render_command_deck(session=None, console=None):
@@ -1372,7 +1354,7 @@ def render_command_deck(session=None, console=None):
     def sep():
         rail.append(" ╶╌╴ ", style=PHOS_DIM)
     rail.append("╾╴ ", style=PHOS_DIM)
-    rail.append(posture, style=PHOS if defcon >= 4 else CAUT)
+    rail.append(posture, style=OK if defcon >= 4 else CAUT)
     sep()
     rail.append("THRT ", style=LABEL)
     rail.append("▲", style=WARN if thrt_c else LABEL)
@@ -1385,7 +1367,7 @@ def render_command_deck(session=None, console=None):
         rail.append(gen, style=REF)
         sep()
         rail.append_text(_ekg_strip("arrhythmia" if defcon <= 2 else "stress" if defcon == 3 else "calm", 8))
-        rail.append(f" {bpm}", style=PHOS if defcon >= 4 else CAUT)
+        rail.append(f" {bpm}", style=OK if defcon >= 4 else CAUT)
     sep()
     rail.append("DEFCON ", style=LABEL)
     rail.append(f"▊{defcon}", style=f"bold {_defcon_style(defcon)}")
@@ -1432,7 +1414,7 @@ def deck_caret(session=None):
     """
     s = session or {}
     return {"idle": ("⊕", PHOS), "executing": ("⌖", REF),
-            "locked": ("◈", TGT)}.get(s.get("caret", "idle"), ("⊕", PHOS))
+            "locked": ("◈", WARN)}.get(s.get("caret", "idle"), ("⊕", PHOS))
 
 
 def deck_prompt_segments(session=None):
@@ -1512,7 +1494,7 @@ def render_agent_header(agent_id, name, objective):
 
 
 def render_agent_result(agent, status, detail=""):
-    glyph = {"ok": ("✓", PHOS), "warn": ("▲", CAUT)}.get(status, ("✗", WARN))
+    glyph = {"ok": ("✓", OK), "warn": ("▲", CAUT)}.get(status, ("✗", WARN))
     soc.print(Text.assemble(("  " + glyph[0] + " ", glyph[1]),
                             (f"[{agent}] ", LABEL), (detail, READOUT)))
 
@@ -1548,7 +1530,7 @@ def render_endpoint_tree(target_url, endpoints, vuln_paths=None):
         branch = tree.add(Text(prefix, style=f"bold {REF}"))
         for p in sorted(paths):
             sub = p.replace(prefix, "", 1).lstrip("/") or "/"
-            risk = Text("▲ ", style=WARN) if p in vuln_paths else Text("● ", style=PHOS)
+            risk = Text("▲ ", style=WARN) if p in vuln_paths else Text("● ", style=OK)
             branch.add(risk + Text(sub, style=READOUT))
     soc.print(Panel(tree, title=Text("ENDPOINT INTELLIGENCE MAP", style=f"bold {PHOS}"),
                     title_align="left", border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
@@ -1599,15 +1581,15 @@ def render_attack_graph(attack_graph):
     creds = getattr(attack_graph, "confirmed_creds", []) or []
     tokens = getattr(attack_graph, "confirmed_tokens", []) or []
     priv = getattr(attack_graph, "privilege_level", "none") or "none"
-    priv_color = WARN if priv == "admin" else CAUT if priv == "user" else PHOS
+    priv_color = WARN if priv == "admin" else CAUT if priv == "user" else OK
     line = Text("  PRIVILEGE ", style=LABEL)
     line.append(f"{priv.upper()}", style=f"bold {priv_color}")
     line.append("   │   ", style=PHOS_DIM)
     line.append("CREDS HARVESTED ", style=LABEL)
-    line.append(f"{len(creds)}", style=WARN if creds else PHOS)
+    line.append(f"{len(creds)}", style=WARN if creds else OK)
     line.append("   │   ", style=PHOS_DIM)
     line.append("TOKENS HARVESTED ", style=LABEL)
-    line.append(f"{len(tokens)}", style=WARN if tokens else PHOS)
+    line.append(f"{len(tokens)}", style=WARN if tokens else OK)
     soc.print(line)
 
 
@@ -1715,17 +1697,17 @@ def render_vulns(vulns, duration=0):
 
     head = Text()
     head.append("  THREAT BOARD   ", style=LABEL)
-    head.append("▲ ", style=WARN); head.append(f"CRIT {crit:02d}   ", style=WARN)
-    head.append("● ", style=WARN); head.append(f"HIGH {high:02d}   ", style=WARN if high else LABEL)
+    head.append("▲ ", style=WARN); head.append(f"CRIT {crit:02d}   ", style=WARN if crit else LABEL)
+    head.append("● ", style=HIGH); head.append(f"HIGH {high:02d}   ", style=HIGH if high else LABEL)
     head.append("◆ ", style=CAUT); head.append(f"MED {med:02d}   ", style=CAUT if med else LABEL)
-    head.append("○ ", style=LABEL); head.append(f"LOW {low:02d}   ", style=LABEL)
+    head.append("○ ", style=LOW); head.append(f"LOW {low:02d}   ", style=LOW if low else LABEL)
     head.append("│  ", style=PHOS_DIM); head.append(f"TOTAL {total:02d}", style=READOUT)
     soc.print(Panel(head, border_style=color, box=_box(), padding=(0, 1),
                     title=Text("◈ TARGET ASSESSMENT", style=f"bold {color}"), title_align="left"))
 
     if not vulns:
         return score
-    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1),
+    t = Table(box=_box(), border_style=PHOS_DIM, padding=(0, 1), expand=True,
               title=Text(f"CONFIRMED CONTACTS ({total})", style=f"bold {PHOS}"),
               title_justify="left")
     t.add_column("#", style=LABEL, width=3)
@@ -1747,7 +1729,7 @@ def render_vulns(vulns, duration=0):
 def render_council_vote(finding, votes, critical=False):
     cards = []
     for model, approved, reason in votes:
-        verdict = Text("◈ ACQUIRED", style=f"bold {TGT}") if approved else Text("○ CLEAR", style=PHOS)
+        verdict = Text("◈ ACQUIRED", style=f"bold {WARN}") if approved else Text("○ CLEAR", style=OK)
         short = (reason or "")[:58]
         card = Panel(Text(short, style=LABEL),
                      title=Text(model, style=f"bold {REF}"), subtitle=verdict,
@@ -1758,7 +1740,7 @@ def render_council_vote(finding, votes, critical=False):
     soc.print(Columns(cards, padding=(0, 1)))
     bar_w = 20
     filled = int(confirmed / total * bar_w) if total else 0
-    color = TGT if confirmed > total // 2 else PHOS
+    color = WARN if confirmed > total // 2 else OK
     bar = Text("  CONSENSUS ", style=LABEL)
     bar.append(f"{confirmed}/{total}  ", style=f"bold {color}")
     bar.append("█" * filled, style=color)
@@ -1777,26 +1759,26 @@ def render_target_lock(bearing, cwe, kind, console=None):
     Four TD brackets converge and snap shut. Non-TTY: the closed-lock frame."""
     c = console or soc
     solution = Text()
-    solution.append(" ◆ TGT LOCK ", style=f"bold reverse {TGT}")
+    solution.append(" ◆ TGT LOCK ", style=f"bold reverse {WARN}")
     solution.append("  BRG ", style=LABEL); solution.append(str(bearing), style=READOUT)
     solution.append("  ·  ", style=PHOS_DIM); solution.append(str(cwe), style=TGT)
     solution.append("  ·  ", style=PHOS_DIM)
     solution.append("SOL: PATCH ARMED", style=f"bold {PHOS}")
 
     if not _tty(c):
-        c.print(Text("  ") + Text("◆", style=TGT) + solution)
+        c.print(Text("  ") + Text("◆", style=WARN) + solution)
         return
 
     stages = [("⌜", "⌝", "⌞", "⌟"), ("⌈", "⌉", "⌊", "⌋"), ("◆", "◆", "◆", "◆")]
     with Live(console=c, refresh_per_second=20, transient=True) as live:
         for tl, tr, bl, br in stages:
             frame = Text("\n  ")
-            frame.append(f"{tl}      {tr}\n  ", style=f"bold {TGT}")
-            frame.append("   ⌖   \n  ", style=f"bold {TGT}")
-            frame.append(f"{bl}      {br}", style=f"bold {TGT}")
+            frame.append(f"{tl}      {tr}\n  ", style=f"bold {WARN}")
+            frame.append("   ⌖   \n  ", style=f"bold {WARN}")
+            frame.append(f"{bl}      {br}", style=f"bold {WARN}")
             live.update(Align.center(frame))
             time.sleep(0.08)
-    c.print(Text("  ") + Text("◆ ", style=TGT) + solution)
+    c.print(Text("  ") + Text("◆ ", style=WARN) + solution)
 
 
 def slam_defcon(level=1, console=None):
@@ -1828,7 +1810,7 @@ def render_genome(gen_count, block_history, endpoints=0, converged=False):
     content.append(f"{gen_count}", style=f"bold {PHOS}")
     content.append("    STATUS ", style=LABEL)
     if converged:
-        content.append("CONVERGED ✓", style=f"bold {PHOS}")
+        content.append("CONVERGED ✓", style=f"bold {OK}")
     else:
         content.append("EVOLVING ⟳", style=CAUT)
     content.append("    ENDPOINTS ", style=LABEL)
@@ -1863,18 +1845,18 @@ def render_attacks(attacks_data, blocked=0, total_mal=0, fp=0):
     t.add_column("AFTER", justify="center", width=9)
     t.add_column("SCORE", justify="right", width=6)
     type_colors = {"sqli": WARN, "xss": WARN, "cmdi": CAUT, "lfi": TGT,
-                   "ssrf": REF, "benign": PHOS}
+                   "ssrf": REF, "benign": OK}
     for row in attacks_data:
         name, payload, ptype, before, after, sv = row
         tc = type_colors.get(ptype, LABEL)
         t.add_row(name, payload[:22], Text(ptype, style=tc), before, after, f"{sv:.3f}")
     soc.print(t)
     rate = (blocked / total_mal * 100) if total_mal else 0
-    color = PHOS if rate >= 80 else CAUT if rate >= 50 else WARN
+    color = OK if rate >= 80 else CAUT if rate >= 50 else WARN
     line = Text("  DEFENSE RATE ", style=LABEL)
     line.append(f"{blocked}/{total_mal} ({rate:.0f}%)", style=f"bold {color}")
     line.append("   │   ", style=PHOS_DIM)
-    line.append(f"FALSE POSITIVES {fp}", style=WARN if fp else PHOS)
+    line.append(f"FALSE POSITIVES {fp}", style=WARN if fp else OK)
     soc.print(line)
 
 
@@ -1886,7 +1868,9 @@ def render_patch_pipeline(generated, reviewed, approved, applied, verified):
               ("APPLIED", applied), ("VERIFIED", verified)]
     cards = []
     for name, count in stages:
-        col = PHOS if count > 0 else LABEL
+        # Only VERIFIED is an outcome; the earlier stages are progress, and
+        # painting them blood made a healthy pipeline read as five errors.
+        col = LABEL if count == 0 else (OK if name == "VERIFIED" else READOUT)
         cards.append(Panel(Text.assemble((name + "\n", col), (str(count), f"bold {col}")),
                            border_style=PHOS_DIM, box=_box(), width=15))
     soc.print(Panel(Columns(cards), title=Text("✚ PATCH PIPELINE", style=f"bold {PHOS}"),
@@ -1903,7 +1887,7 @@ def render_patch_table(patches):
     t.add_column("STATUS", width=10, justify="center")
     for i, (name, cwe, f, method, status) in enumerate(patches, 1):
         m_color = REF if method == "TEMPLATE" else TGT
-        s_color = PHOS if status == "APPLIED" else WARN
+        s_color = OK if status == "APPLIED" else WARN
         t.add_row(str(i), name, cwe, Text(method, style=m_color), Text(status, style=s_color))
     soc.print(t)
 
@@ -1936,7 +1920,7 @@ def render_benchmark(report, console=None):
     c = console or soc
     conf = report["confusion"]
     passed = report["gates"]["passed"]
-    v_col = PHOS if passed else WARN
+    v_col = OK if passed else WARN
     v_lamp = "phosphor" if passed else "warning"
 
     body = Text()
@@ -2018,7 +2002,7 @@ def render_verify_health(report, console=None):
     total = report["total_patches"]
     rate = report["durability_rate"]
     healthy = rate >= 70 and total > 0
-    v_col = PHOS if healthy else (WARN if total else LABEL)
+    v_col = OK if healthy else (WARN if total else LABEL)
     v_lamp = "phosphor" if healthy else ("warning" if total else "reference")
 
     body = Text()
@@ -2033,7 +2017,7 @@ def render_verify_health(report, console=None):
                  "(nosemgrep, eslint-disable, # noqa, @ts-ignore, ...)", style=READOUT)
     body.append("\n\n    toolchain readiness — what each check depends on to run at all\n", style=LABEL)
     for name, info in report["config"]["toolchain"].items():
-        lamp = PHOS if info["ok"] else WARN
+        lamp = OK if info["ok"] else WARN
         mark = "✓" if info["ok"] else "✗"
         body.append(f"      {mark} ", style=f"bold {lamp}")
         body.append(f"{name:<15}", style=READOUT)
@@ -2046,7 +2030,7 @@ def render_verify_health(report, console=None):
             if info["ok"] is None:
                 lamp, mark = LABEL, "·"
             else:
-                lamp, mark = (PHOS, "✓") if info["ok"] else (WARN, "✗")
+                lamp, mark = (OK, "✓") if info["ok"] else (WARN, "✗")
             body.append(f"      {mark} ", style=f"bold {lamp}")
             body.append(f"{name:<15}", style=READOUT)
             body.append(f"{info['detail'][:52]:<54}", style=LABEL)
@@ -2061,7 +2045,7 @@ def render_verify_health(report, console=None):
         body.append_text(_rate_bar(rate / 100, width=32))
         body.append(f"  {rate:5.1f}% durable-verified\n\n", style=f"bold {score_color(rate)}")
 
-        body.append("    PASS ", style=f"bold {PHOS}")
+        body.append("    PASS ", style=f"bold {OK}")
         body.append(f"{verdicts.get('PASS', 0):>4}   ", style=READOUT)
         body.append("FAIL ", style=f"bold {WARN}")
         body.append(f"{verdicts.get('FAIL', 0):>4}   ", style=READOUT)
@@ -2093,7 +2077,7 @@ def render_verify_health(report, console=None):
             body.append("\n    recent verifications\n", style=LABEL)
             for e in report["recent"][:6]:
                 vd = e.get("verdict", "?")
-                vcol = PHOS if vd == "PASS" else (WARN if vd == "FAIL" else CAUT)
+                vcol = OK if vd == "PASS" else (WARN if vd == "FAIL" else CAUT)
                 body.append(f"      {vd:<13}", style=f"bold {vcol}")
                 body.append(f"{e.get('cwe', '?'):<9}", style=TGT)
                 body.append(f"{e.get('file', '?')}:{e.get('line', '?')}\n", style=LABEL)
@@ -2109,14 +2093,14 @@ def render_verify_health(report, console=None):
     if runs:
         body.append("\n  RUN HISTORY\n", style=f"bold {PHOS}")
         body.append(f"    {hist.get('total_runs', 0)} run(s) recorded  ·  ", style=LABEL)
-        body.append(f"{hist.get('completed', 0)} completed", style=PHOS)
+        body.append(f"{hist.get('completed', 0)} completed", style=OK)
         body.append("  ·  ", style=LABEL)
         body.append(f"{hist.get('interrupted', 0)} interrupted\n", style=CAUT if hist.get("interrupted") else LABEL)
 
         reg = hist.get("regression")
         if reg:
             arrow = "▼" if reg["regressed"] else ("▲" if reg["delta"] > 0 else "=")
-            rstyle = WARN if reg["regressed"] else (PHOS if reg["delta"] > 0 else LABEL)
+            rstyle = WARN if reg["regressed"] else (OK if reg["delta"] > 0 else LABEL)
             body.append("    latest vs previous  ", style=LABEL)
             body.append(f"{arrow} {reg['previous']} → {reg['current']} ({reg['delta']:+d})\n",
                          style=f"bold {rstyle}")
@@ -2126,7 +2110,7 @@ def render_verify_health(report, console=None):
                      style=LABEL)
         for r in runs:
             st = r.get("status", "unknown")
-            sstyle = {"completed": PHOS, "interrupted": CAUT}.get(st, LABEL)
+            sstyle = {"completed": OK, "interrupted": CAUT}.get(st, LABEL)
             body.append(f"      {str(r.get('scan_id', '?')).replace('cli_', ''):<12}", style=TGT)
             dur = r.get("duration_s")
             body.append(f"{(f'{dur:.0f}s' if isinstance(dur, (int, float)) else '—'):<8}", style=LABEL)
@@ -2205,7 +2189,7 @@ def render_run_detail(run, console=None):
     d = run.as_dict() if hasattr(run, "as_dict") else dict(run)
     st = d.get("status", "unknown")
     ok = st == "completed"
-    v_col = PHOS if ok else CAUT
+    v_col = OK if ok else CAUT
     body = Text()
 
     # ── identity ──
@@ -2238,7 +2222,7 @@ def render_run_detail(run, console=None):
         if before is not None:
             delta = d.get("score_delta") or 0
             arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "=")
-            dstyle = PHOS if delta > 0 else (WARN if delta < 0 else LABEL)
+            dstyle = OK if delta > 0 else (WARN if delta < 0 else LABEL)
             body.append("    before patching  ", style=LABEL)
             body.append(f"{before}/100  {arrow} {delta:+d}\n", style=f"bold {dstyle}")
         sev = d.get("severities") or {}
@@ -2253,7 +2237,7 @@ def render_run_detail(run, console=None):
     vd = d.get("verdicts") or {}
     if vd:
         body.append("\n  VERIFY GATE\n", style=f"bold {PHOS}")
-        body.append("    PASS ", style=f"bold {PHOS}")
+        body.append("    PASS ", style=f"bold {OK}")
         body.append(f"{vd.get('PASS', 0):>3}   ", style=READOUT)
         body.append("FAIL ", style=f"bold {WARN}")
         body.append(f"{vd.get('FAIL', 0):>3}   ", style=READOUT)
@@ -2269,7 +2253,7 @@ def render_run_detail(run, console=None):
     ag = d.get("agents") or {}
     if any(ag.values()):
         body.append("\n  DEEPAGENTS   ", style=f"bold {PHOS}")
-        body.append(f"{ag.get('ok', 0)} ok", style=PHOS)
+        body.append(f"{ag.get('ok', 0)} ok", style=OK)
         body.append("  ·  ", style=LABEL)
         body.append(f"{ag.get('timeout', 0)} timed out", style=CAUT if ag.get("timeout") else LABEL)
         body.append("  ·  ", style=LABEL)
@@ -2279,7 +2263,7 @@ def render_run_detail(run, console=None):
     wps = d.get("waypoints") or []
     if wps:
         body.append("\n  WAYPOINT TRACE\n", style=f"bold {PHOS}")
-        marks = {"ok": ("✓", PHOS), "warn": ("▲", CAUT), "fail": ("✗", WARN),
+        marks = {"ok": ("✓", OK), "warn": ("▲", CAUT), "fail": ("✗", WARN),
                  "skip": ("·", LABEL), "running": ("◌", REF)}
         for wp in wps:
             m, mstyle = marks.get(wp.get("status", "ok"), ("·", LABEL))
@@ -2323,7 +2307,7 @@ def render_observability(report, console=None):
     bad_waypoints = [w for w in ((last or {}).get("trace") or [])
                      if w.get("status") in ("fail", "warn")]
     healthy = has_history and last and last["completed"] and not errors and not bad_waypoints
-    v_col = PHOS if healthy else (WARN if has_history else LABEL)
+    v_col = OK if healthy else (WARN if has_history else LABEL)
     v_lamp = "phosphor" if healthy else ("warning" if has_history else "reference")
 
     body = Text()
@@ -2338,7 +2322,7 @@ def render_observability(report, console=None):
     if last:
         body.append("    scan_id  ", style=LABEL)
         body.append(f"{last['scan_id']}\n", style=READOUT)
-        state_col = PHOS if last["completed"] else WARN
+        state_col = OK if last["completed"] else WARN
         state = "COMPLETED" if last["completed"] else ("STARTED — no scan_end seen" if last["started"] else "UNKNOWN")
         body.append("    status   ", style=LABEL)
         body.append(f"{state}", style=f"bold {state_col}")
@@ -2356,7 +2340,7 @@ def render_observability(report, console=None):
         ag_total = ag["succeeded"] + ag["timed_out"] + ag["errored"]
         if ag_total:
             body.append("\n    DeepAgents swarm   ", style=LABEL)
-            body.append(f"{ag['succeeded']} ok", style=f"bold {PHOS}")
+            body.append(f"{ag['succeeded']} ok", style=f"bold {OK}")
             body.append("  ·  ", style=LABEL)
             body.append(f"{ag['timed_out']} timed out", style=f"bold {CAUT}" if ag["timed_out"] else LABEL)
             body.append("  ·  ", style=LABEL)
@@ -2383,7 +2367,7 @@ def render_observability(report, console=None):
         trace = last.get("trace") or []
         if trace:
             body.append("\n    waypoint trace\n", style=LABEL)
-            _tmark = {"ok": ("✓", PHOS), "warn": ("▲", CAUT),
+            _tmark = {"ok": ("✓", OK), "warn": ("▲", CAUT),
                       "fail": ("✗", WARN), "skip": ("·", LABEL),
                       "running": ("◌", REF)}
             for wp in trace:
@@ -2521,10 +2505,10 @@ def render_score_reveal(score, crit, high, med, low, elapsed, scan_id,
     # them under a "KILLS" label claimed the scan had killed them — the exact
     # opposite. Kills are the verified-remediated tally, reported separately.
     kc, kh, km, kl = killed or (0, 0, 0, 0)
-    t.add_row("KILLS", Text.assemble(("▲", PHOS if kc else LABEL), (f"{kc:02d} ", PHOS if kc else LABEL),
-              ("●", PHOS if kh else LABEL), (f"{kh:02d} ", PHOS if kh else LABEL),
-              ("◆", PHOS if km else LABEL), (f"{km:02d} ", PHOS if km else LABEL),
-              ("○", PHOS if kl else LABEL), (f"{kl:02d}", PHOS if kl else LABEL)))
+    t.add_row("KILLS", Text.assemble(("▲", OK if kc else LABEL), (f"{kc:02d} ", OK if kc else LABEL),
+              ("●", OK if kh else LABEL), (f"{kh:02d} ", OK if kh else LABEL),
+              ("◆", OK if km else LABEL), (f"{km:02d} ", OK if km else LABEL),
+              ("○", OK if kl else LABEL), (f"{kl:02d}", OK if kl else LABEL)))
     t.add_row("REMAINING", Text.assemble(("▲", WARN), (f"{crit:02d} ", WARN if crit else LABEL), ("●", WARN),
               (f"{high:02d} ", WARN if high else LABEL), ("◆", CAUT), (f"{med:02d} ", CAUT if med else LABEL),
               ("○", LABEL), (f"{low:02d}", LABEL)))

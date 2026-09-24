@@ -53,12 +53,12 @@ import time
 # terminal_ui must degrade this to plain text, never break a scan.
 try:
     from terminal_ui import (
-        PHOS, PHOS_DIM, REF, CAUT, WARN, WARN_HOT, APEX, LABEL, READOUT, TGT,
+        PHOS, PHOS_DIM, REF, CAUT, WARN, WARN_HOT, APEX, LABEL, READOUT, TGT, OK,
         soc as _soc, _tty as _ui_tty, _ascii_mode as _ui_ascii,
     )
     _UI = True
 except Exception:  # pragma: no cover - defensive
-    PHOS = PHOS_DIM = REF = CAUT = WARN = LABEL = READOUT = TGT = ""
+    PHOS = PHOS_DIM = REF = CAUT = WARN = LABEL = READOUT = TGT = OK = ""
     WARN_HOT = APEX = ""
     _soc = None
     _UI = False
@@ -71,11 +71,11 @@ except Exception:  # pragma: no cover - defensive
 
     _ui_ascii = _ascii_fallback
 
-from backend.observability.trace import RUNNING, OK, WARN as ST_WARN, FAIL, SKIP
+from backend.observability.trace import RUNNING, OK as ST_OK, WARN as ST_WARN, FAIL, SKIP
 
 
 _STATUS_GLYPH = {
-    OK: ("✓", "v"),
+    ST_OK: ("✓", "v"),
     ST_WARN: ("▲", "!"),
     FAIL: ("✗", "x"),
     SKIP: ("·", "-"),
@@ -85,7 +85,7 @@ _SPINNER_ASCII = "|/-\\"
 
 
 def _status_style(status):
-    return {OK: PHOS, ST_WARN: CAUT, FAIL: WARN, SKIP: LABEL}.get(status, READOUT)
+    return {ST_OK: OK, ST_WARN: CAUT, FAIL: WARN, SKIP: LABEL}.get(status, READOUT)
 
 
 _ANSI_RE = None
@@ -335,7 +335,7 @@ class TraceDeck:
         status = wp.derived_status() if wp.status != RUNNING else RUNNING
         if status == FAIL:
             return "error"
-        if wp.status != RUNNING and status in (OK, ST_WARN):
+        if wp.status != RUNNING and status in (ST_OK, ST_WARN):
             return "success"
         key = str(wp.num).split("/")[0].strip()
         return STATE_FOR_WAYPOINT.get(key, "working")

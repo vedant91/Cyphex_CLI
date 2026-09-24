@@ -238,20 +238,12 @@ def _print_help():
     print(QUICK_HELP)
 
 
-# ── Colours ── plain-ANSI fallback palette · MONO SIGNAL RED brand ───────────
-# Only used when terminal_ui / rich is unavailable. Mirrors terminal_ui.py's
-# single-hue red ramp so the degraded banner stays on-brand. RED/YEL keep their
-# names as the alert channel, but their VALUES now sit inside the red ramp —
-# a literal red error mark on a red theme reads as body text, so severity is
-# carried by brightness here exactly as it is in terminal_ui.py.
-#
-# The alert marks take the TOP two rungs (APEX for ✗, WARN_HOT for ⚠) plus
-# bold, so the channel is strictly brighter than everything it has to be
-# distinguished from. Placing them mid-ramp does not work: at CAUT the warning
-# mark lands at the same luminance as the muted caption grey (0.172 vs 0.168),
-# and at REF the error mark is byte-identical to NEON, so a failure renders
-# exactly like a command name. Severity ordering here is now strictly
-# monotonic — captions < body < emphasis < warning < error.
+# ── Colours ── plain-ANSI fallback palette ──────────────────────────────────
+# Only used when terminal_ui / rich is unavailable. Values come from
+# ui_palette.py (dependency-free), the same roles terminal_ui uses, so the
+# degraded banner cannot drift from the Rich one. The alert marks are also
+# BOLD: this path has no panels or styled headings, so a bare ⚠ or ✗ in a
+# line of plain text has to carry its own weight.
 #
 # These are raw 24-bit truecolor escapes with no Rich/colorama translation —
 # this class exists specifically for the case where rich itself failed to
@@ -266,31 +258,20 @@ except ImportError:
     pass
 
 
+import ui_palette as _P
+
 C_BOLD = "\033[1m"
 
 
-def _tc(hex_):
-    r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
-    return f"\033[38;2;{r};{g};{b}m"
+_tc = _P.fg
 
 class C:
-    CYAN   = _tc("#D95E62")   # PRIMARY red — wordmark / accents / active
-    NEON   = _tc("#E18E91")   # bright red — command names / high emphasis
-    # Alert channel. Both marks are BOLD, which the rest of the palette is
-    # not, because this path has none of the structure Rich gives the normal
-    # one — no panels, no rules, no styled headings. A bare ⚠ or ✗ sits in a
-    # line of plain terminal text and has to carry its own emphasis, so weight
-    # does the work hue can't in a single-hue theme.
-    #
-    # Bold on the error mark also mirrors terminal_ui's "err": bold WARN. Colour
-    # alone cannot separate it there either: WARN and REF are the same value, so
-    # without the weight an error renders identically to ordinary high-emphasis
-    # text (which is exactly what this fallback did before).
-    RED    = C_BOLD + _tc("#F4E4E1")  # APEX — error mark, peak of the ramp
-    YEL    = C_BOLD + _tc("#EABCB8")  # WARN_HOT — warning mark, one rung below
-    BLUE   = _tc("#D95E62")   # PRIMARY red
-    GREY   = _tc("#8E7174")   # muted red-grey — captions / timestamps
-    MAG    = _tc("#E18E91")   # bright red (legacy alias)
+    CYAN   = _tc(_P.PHOS)             # blood — wordmark / structure
+    NEON   = _tc(_P.REF)              # ice — command names / active
+    RED    = C_BOLD + _tc(_P.WARN)    # arterial — error mark
+    YEL    = C_BOLD + _tc(_P.CAUT)    # amber — warning mark
+    OK     = _tc(_P.OK)               # verified — success
+    GREY   = _tc(_P.LABEL)            # ash — captions / timestamps
     BOLD   = "\033[1m"
     DIM    = "\033[2m"
     RST    = "\033[0m"
@@ -779,7 +760,7 @@ def _cmd_verify(arg: str):
     if ci:
         code = compute_gate_exit_code(report)
         label = {0: "PASS — gate healthy", 1: "DEGRADED", 2: "UNUSABLE"}[code]
-        color = C.NEON if code == 0 else (C.YEL if code == 1 else C.RED)
+        color = C.OK if code == 0 else (C.YEL if code == 1 else C.RED)
         print(f"\n  {color}{C.BOLD}[CI] Verify Gate: {label} (exit {code}){C.RST}")
         return code
     return None

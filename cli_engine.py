@@ -36,6 +36,11 @@ except Exception:         # terminal_ui not importable in this context
     def _themed_console(**kw): return Console(**kw)
 console = _themed_console()
 
+# Severity → colour for plain markup lines. From ui_palette (dependency-free)
+# rather than terminal_ui, which may not be importable here.
+import ui_palette as _pal
+_SEV_HEX = {"Critical": _pal.WARN, "High": _pal.HIGH, "Medium": _pal.CAUT, "Low": _pal.LOW}
+
 # Security posture scoring — zero-dependency module, always importable
 # regardless of whether the rich-based SOC UI below is available. This is
 # the ONLY place the score formula and its 20/40/60/80 presentation bands
@@ -178,41 +183,21 @@ except ImportError:
 # others use PATCH_V2_AVAILABLE; both should reflect the same flag.
 PATCH_PIPELINE_AVAILABLE = PATCH_V2_AVAILABLE
 
-class C:
-    """Premium cyber-themed color palette — turquoise/purple/black."""
-    # ── Core palette ──
-    RST    = "\033[0m"
-    BOLD   = "\033[1m"
-    DIM    = "\033[2m"
-    ITALIC = "\033[3m"
-    ULINE  = "\033[4m"
-    # ── MONO SIGNAL RED — names kept, values mirror terminal_ui.py's ramp ──
-    # One hue; severity/hierarchy carried by BRIGHTNESS, never by a second hue.
-    R  = "\033[38;2;225;142;145m"   # bright — error / high
-    G  = "\033[38;2;217;94;98m"     # PRIMARY — success / engaged
-    Y  = "\033[38;2;193;78;91m"     # mid — warning / medium
-    B  = "\033[38;2;142;113;116m"   # muted — info / low
-    M  = "\033[38;2;225;142;145m"   # bright (legacy alias)
-    CY = "\033[38;2;217;94;98m"     # PRIMARY (legacy alias)
-    W  = "\033[38;2;225;208;210m"   # readout — primary prose
-    # ── True-color ramp ──
-    CYAN   = "\033[38;2;217;94;98m"      # PRIMARY — wordmark / structure
-    CYAN2  = "\033[38;2;193;78;91m"      # mid — caution / secondary
-    PURPLE = "\033[38;2;109;44;49m"      # dim — borders, rails, low emphasis
-    PURP2  = "\033[38;2;225;142;145m"    # bright — high emphasis / active
-    NEON   = "\033[38;2;217;94;98m"      # PRIMARY — success
-    FLAME  = "\033[38;2;234;188;184m"    # peak — critical (brightest = urgent)
-    GHOST  = "\033[38;2;142;113;116m"    # muted — captions / dim text
-    SLATE  = "\033[38;2;225;208;210m"    # readout — secondary prose
-    # Backgrounds
-    BG_DARK   = "\033[48;2;10;8;9m"      # VOID — negative space
-    BG_PURPLE = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
-    BG_CYAN   = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
-    BG_RED    = "\033[48;2;26;18;20m"    # PANEL — raised panel fill
+class C(_pal.ANSI):
+    """Plain-escape palette for the engine's non-Rich output. Values come from
+    ui_palette; the extra names here are this module's older role aliases."""
+    CYAN2  = _pal.fg(_pal.CAUT)       # caution / secondary
+    PURPLE = _pal.fg(_pal.PHOS_DIM)   # borders, rails
+    PURP2  = _pal.fg(_pal.REF)        # active / high emphasis
+    NEON   = _pal.fg(_pal.OK)         # success
+    FLAME  = _pal.fg(_pal.WARN)       # critical
+    GHOST  = _pal.fg(_pal.LABEL)      # captions / dim text
+    SLATE  = _pal.fg(_pal.READOUT)    # secondary prose
+    BG_CYAN = _pal.bg(_pal.PANEL)     # raised panel fill
     # Gradient endpoints for the brand rules/dividers below. Kept as RGB
     # triples (not escapes) because C.gradient() interpolates on the numbers.
-    RAMP_HI = (217, 94, 98)               # PRIMARY
-    RAMP_LO = (109, 44, 49)               # dim
+    RAMP_HI = _pal.rgb(_pal.PHOS)
+    RAMP_LO = _pal.rgb(_pal.PHOS_DIM)
 
     @staticmethod
     def gradient(text, r1, g1, b1, r2, g2, b2):
@@ -354,7 +339,7 @@ class CyphexEngine:
                             confirmed=False,
                             cwe=ef.cwe,
                         ))
-                        c = "#eabcb8" if sev == "Critical" else "#e18e91" if sev == "High" else "#c14e5b"
+                        c = _SEV_HEX[sev]
                         console.print(f"  [[{c}]{sev}[/{c}]] {ef.name} ({ef.cwe})")
                         console.print(f"       {ef.file_path}:{ef.line_number}")
                         console.print(f"       [dim]{ef.code_snippet[:100]}[/dim]")

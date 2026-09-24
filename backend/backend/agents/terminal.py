@@ -27,21 +27,19 @@ if os.name == 'nt':
 
 
 # ANSI color codes for terminal output
-class Colors:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    # MONO SIGNAL RED — names kept, values mirror terminal_ui.py's ramp.
-    RED = "\033[38;2;225;142;145m"        # bright — error / high
-    GREEN = "\033[38;2;217;94;98m"        # PRIMARY — success / engaged
-    YELLOW = "\033[38;2;193;78;91m"       # mid — warning / medium
-    BLUE = "\033[38;2;142;113;116m"       # muted — info / low
-    MAGENTA = "\033[38;2;225;142;145m"    # bright (legacy alias)
-    CYAN = "\033[38;2;217;94;98m"         # PRIMARY (legacy alias)
-    WHITE = "\033[38;2;225;208;210m"      # readout — primary prose
-    GRAY = "\033[38;2;142;113;116m"       # muted — captions / timestamps
-    BG_RED = "\033[48;2;26;18;20m"        # PANEL — raised panel fill
-    BG_GREEN = "\033[48;2;26;18;20m"      # PANEL — raised panel fill
+try:
+    from ui_palette import ANSI as _ANSI, PANEL as _PANEL, bg as _bg
+except ImportError:          # legacy tree run without the repo root on sys.path
+    _ANSI = None
+
+
+class Colors(_ANSI or object):
+    """Role palette from ui_palette; plain text when it can't be imported."""
+    if _ANSI is None:
+        RESET = BOLD = DIM = RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = GRAY = ""
+        BG_RED = BG_GREEN = ""
+    else:
+        BG_RED = BG_GREEN = _bg(_PANEL)   # raised panel fill
 
 
 # Agent color mapping

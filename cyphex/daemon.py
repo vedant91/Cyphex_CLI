@@ -58,18 +58,8 @@ except ImportError:
         def print(msg, **kwargs): print(msg)
 
 # ── ANSI colours for non-rich output ──
-class C:
-    # MONO SIGNAL RED — names kept, values moved into terminal_ui.py's ramp.
-    # Severity is carried by BRIGHTNESS in one hue, not by competing colours.
-    R="\033[38;2;225;142;145m"   # bright — error / high
-    G="\033[38;2;217;94;98m"     # PRIMARY — success / engaged
-    Y="\033[38;2;193;78;91m"     # mid — warning / medium
-    B="\033[38;2;142;113;116m"   # muted — info / low
-    M="\033[38;2;225;142;145m"   # bright (legacy alias)
-    CY="\033[38;2;217;94;98m"    # PRIMARY (legacy alias)
-    W="\033[38;2;225;208;210m"   # readout — primary prose
-    BOLD="\033[1m"
-    DIM="\033[2m"; RST="\033[0m"
+from ui_palette import ANSI as C  # noqa: E402  (shared role palette)
+
 
 # ── Healing event log ──
 HEAL_LOG: list[dict] = []
