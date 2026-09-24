@@ -194,6 +194,8 @@ class AttackPlan:
     target_summary: str
     primary_vulnerability_class: str
     hypotheses: List[Hypothesis]
+    model: str = ""        # which local model produced the plan (for the UI)
+    strategy: str = ""     # reasoning strategy used (Standard, CoT, ...)
 
     @classmethod
     def from_json(cls, data: dict) -> "AttackPlan":
@@ -231,6 +233,8 @@ class Decision:
     confidence: int = 0   # 0-100
     vuln: dict = None
     next_probe: Optional[HttpRequest] = None
+    model: str = ""       # which local model made the call (for the UI)
+    strategy: str = ""    # reasoning strategy used
 
     @classmethod
     def from_json(cls, data: dict) -> "Decision":
@@ -261,8 +265,26 @@ class AttackOracle:
     Routes tasks to the most capable available local model.
     """
 
+    # Preferred model per role (the actual model may fall back if missing);
+    # exposed so the UI can name the model before a call resolves it.
+    PLANNER_MODEL = _ROLE_PLANNER
+    ANALYST_MODEL = _ROLE_ANALYST
+    MUTATOR_MODEL = _ROLE_MUTATOR
+
     def __init__(self, orchestrator: CouncilOrchestrator):
         self.orchestrator = orchestrator
+
+    def _strategy_label(self, task_type: str, severity: str = "", cwe: str = "") -> str:
+        """The reasoning strategy the orchestrator would pick — shown in the
+        UI panels. 'Standard' when no enhanced reasoner is loaded (the plain
+        direct-generation path)."""
+        r = getattr(self.orchestrator, "reasoner", None)
+        if r is not None and getattr(r, "is_enhanced", False):
+            try:
+                return str(r.select_strategy(task_type, severity, cwe)).replace("_", " ").title()
+            except Exception:
+                pass
+        return "Standard"
 
     async def plan(self, target: str, surface_summary: str,
                    vuln_class: str) -> AttackPlan:
@@ -281,7 +303,10 @@ class AttackOracle:
             prompt=prompt,
             task_name="Reasoning",
         )
-        return AttackPlan.from_json(response)
+        plan = AttackPlan.from_json(response)
+        plan.model = model
+        plan.strategy = self._strategy_label("vuln_analysis", "", "")
+        return plan
 
     async def decide(self, hypothesis: Hypothesis, response_status: int,
                      response_body: str, response_time: float,
@@ -315,7 +340,11 @@ class AttackOracle:
             prompt=prompt,
             task_name="Reasoning",
         )
-        return Decision.from_json(response)
+        decision = Decision.from_json(response)
+        decision.model = model
+        decision.strategy = self._strategy_label("vuln_analysis",
+                                                 hypothesis.severity, hypothesis.cwe)
+        return decision
 
     async def mutate(self, payload: str, vuln_class: str,
                      reason: str = "blocked") -> list[str]:

@@ -21,9 +21,17 @@ from backend.deepagents.oracle_attack import AttackOracle, Hypothesis, HttpReque
 
 try:                      # drag legacy [green]/[red] markup onto the ramp
     from terminal_ui import themed_console as _themed_console
+    import terminal_ui as _ui
 except Exception:         # terminal_ui not importable in this context
     def _themed_console(**kw): return Console(**kw)
+    _ui = None
 console = _themed_console()
+
+
+def _deep_ui():
+    """terminal_ui module when its DeepAgents panel renderers are present,
+    else None so callers fall back to a plain print. Guards old installs."""
+    return _ui if (_ui is not None and hasattr(_ui, "render_attack_plan")) else None
 
 
 # How many hypotheses to test in parallel (keep at 3 to avoid hammering target)
@@ -76,20 +84,32 @@ class BaseDeepAgent:
 
         # Oracle generates attack plan
         surface_summary = self.asi.summarise_for_prompt()
-        console.print(f"[dim]DeepAgent {self.__class__.__name__} consulting Oracle...[/dim]")
+        name = self.__class__.__name__
+        ui = _deep_ui()
+        if ui:
+            ui.render_deep_planner(name, self.oracle.PLANNER_MODEL, "Standard")
+        else:
+            console.print(f"[dim]DeepAgent {name} consulting Oracle...[/dim]")
         try:
+            t0 = time.time()
             plan = await self.oracle.plan(
                 target=self.target,
                 surface_summary=surface_summary,
                 vuln_class=self.PRIMARY_VULN_CLASS,
             )
-            console.print(
-                f"[cyan]Oracle[/cyan] generated {len(plan.hypotheses)} hypotheses "
-                f"for {self.__class__.__name__}."
-            )
+            if ui:
+                # 🧠 planner thinking + 🗺 ATTACK PLAN panel (payload · endpoint
+                # · severity per hypothesis) — the live step-by-step view.
+                ui.render_deep_thinking(name, "planner", plan.target_summary)
+                ui.render_attack_plan(name, plan, (time.time() - t0) * 1000)
+            else:
+                console.print(
+                    f"[cyan]Oracle[/cyan] generated {len(plan.hypotheses)} hypotheses "
+                    f"for {name}."
+                )
         except Exception as e:
-            console.print(f"[red]Oracle plan failed for {self.__class__.__name__}: {e}[/red]")
-            return AgentResult(agent=self.__class__.__name__, vulns=self.vulns, context=context)
+            console.print(f"[red]Oracle plan failed for {name}: {e}[/red]")
+            return AgentResult(agent=name, vulns=self.vulns, context=context)
 
         # Execute hypotheses in parallel batches
         hypotheses = plan.hypotheses[:self.MAX_HYPOTHESES]
@@ -224,6 +244,7 @@ class BaseDeepAgent:
 
             # Oracle evaluates
             try:
+                t0 = time.time()
                 decision = await self.oracle.decide(
                     hypothesis=hyp,
                     response_status=status,
@@ -232,14 +253,25 @@ class BaseDeepAgent:
                     attempt=attempt,
                     baseline_time=self._baseline_ms,
                 )
+                decide_ms = (time.time() - t0) * 1000
             except Exception as e:
                 console.print(f"[red]Oracle decide failed: {e}[/red]")
                 break
 
-            console.print(
-                f"[dim]  [{hyp.id}] attempt {attempt+1} → {decision.action} "
-                f"(conf={decision.confidence}%) {decision.thinking}[/dim]"
-            )
+            ui = _deep_ui()
+            if ui:
+                # 🧠 analyst thinking + the compact attempt line, then a 🔬
+                # VERDICT panel when the probe resolves (confirmed/abandoned).
+                ui.render_deep_thinking(self.__class__.__name__, "analyst", decision.thinking)
+                ui.render_deep_attempt(hyp.id, attempt + 1, decision.action,
+                                       decision.confidence, decision.thinking)
+                if decision.action in ("confirmed", "abandoned"):
+                    ui.render_deep_verdict(self.__class__.__name__, decision, decide_ms)
+            else:
+                console.print(
+                    f"[dim]  [{hyp.id}] attempt {attempt+1} → {decision.action} "
+                    f"(conf={decision.confidence}%) {decision.thinking}[/dim]"
+                )
 
             if decision.action == "confirmed" and decision.vuln:
                 if decision.confidence >= _CONFIDENCE_THRESHOLD:

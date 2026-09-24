@@ -1558,6 +1558,137 @@ def render_agent_result(agent, status, detail=""):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  DEEPAGENTS — oracle-guided attack plan / verdict panels (live scan visibility)
+#  Rendered from the oracle's own plan()/decide() output: the hypotheses it
+#  generated (payload · endpoint · severity) and the verdict on each probe
+#  (decision · reasoning · evidence · next probe), so a `cx deep` run shows
+#  step-by-step what each of the 13 agents is thinking and firing.
+# ══════════════════════════════════════════════════════════════════════════
+def _sev(severity):
+    table = SEV_ASCII if _ascii_mode() else SEV
+    return table.get(severity, table.get("Info"))
+
+
+def _glyph(fancy, plain):
+    return plain if _ascii_mode() else fancy
+
+
+def _agent_label(agent):
+    if isinstance(agent, str):
+        return agent
+    return getattr(agent, "__name__", None) or agent.__class__.__name__
+
+
+def render_deep_planner(agent, model, strategy):
+    """`[DeepAgent:planner] <model> + <strategy> strategy` — which model is
+    about to generate the attack plan."""
+    t = Text("  [DeepAgent:planner] ", style=LABEL)
+    t.append(str(model or "local model"), style=REF)
+    t.append(f"  +  {strategy or 'Standard'} strategy", style=LABEL)
+    soc.print(t)
+
+
+def render_deep_thinking(agent, role, text):
+    """`🧠 <Agent> · <role> thinking  <text>` — the model's own one-line
+    rationale (planner or analyst), as it streams."""
+    if not text:
+        return
+    t = Text("  " + _glyph("🧠 ", ""), style=TGT)
+    t.append(f"{_agent_label(agent)} ", style=f"bold {REF}")
+    t.append(f"{_glyph('·','-')} {role} thinking  ", style=LABEL)
+    t.append(str(text).strip()[:200], style=READOUT)
+    soc.print(t)
+
+
+def render_attack_plan(agent, plan, ms=0.0):
+    """The 🗺 ATTACK PLAN panel: the ordered hypotheses the oracle generated,
+    each with its severity, technique, endpoint and payload."""
+    hyps = list(getattr(plan, "hypotheses", []) or [])
+    body = Text()
+    body.append("Target    ", style=LABEL)
+    body.append((getattr(plan, "target_summary", "") or "—")[:96] + "\n", style=READOUT)
+    body.append("Class     ", style=LABEL)
+    body.append((getattr(plan, "primary_vulnerability_class", "") or "—") + "\n", style=TGT)
+    body.append(f"Hypotheses ({len(hyps)} generated)\n", style=f"bold {REF}")
+    for h in hyps[:10]:
+        col, _pip = _sev(getattr(h, "severity", "Info"))
+        req = getattr(h, "test_request", None)
+        path = getattr(req, "path", "") if req else ""
+        payload = getattr(req, "payload", "") if req else ""
+        body.append(f"  {getattr(h, 'id', '?'):<3} ", style=LABEL)
+        body.append(f"[{getattr(h, 'severity', 'Info'):<8}] ", style=col)
+        body.append(f"{(getattr(h, 'vuln_type', '') or '')[:26]:<26} ", style=READOUT)
+        body.append(f"{_glyph('→','->')} {path[:34]}\n", style=LABEL)
+        if payload:
+            body.append("        payload  ", style=LABEL)
+            body.append(payload[:52] + "\n", style=CAUT)
+    via = getattr(plan, "model", "") or ""
+    strat = getattr(plan, "strategy", "") or ""
+    if via or ms:
+        body.append("via ", style=LABEL)
+        body.append(f"{via}", style=REF)
+        if strat:
+            body.append(f"  {_glyph('·','-')}  {strat}", style=LABEL)
+        if ms:
+            body.append(f"   {ms:.0f}ms", style=LABEL)
+    title = Text(_glyph("🗺 ", "") + f"{_agent_label(agent)}  ATTACK PLAN", style=f"bold {REF}")
+    soc.print(Panel(body, title=title, title_align="left",
+                    border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
+
+
+def render_deep_verdict(agent, decision, ms=0.0):
+    """The 🔬 VERDICT panel for one probe: the oracle's decision, reasoning,
+    evidence and (if adapting) the next probe."""
+    action = (getattr(decision, "action", "") or "").lower()
+    conf = getattr(decision, "confidence", 0)
+    if action == "confirmed":
+        verd, vcol, border = f"{_glyph('✔','[OK]')} CONFIRMED  (confidence {conf}%)", OK, OK
+    elif action == "adapt":
+        verd, vcol, border = f"{_glyph('↻','[~]')} ADAPT  (confidence {conf}%)", REF, REF
+    else:
+        verd, vcol, border = f"{_glyph('✖','[X]')} ABANDONED", LABEL, PHOS_DIM
+    body = Text()
+    body.append("Decision   ", style=LABEL)
+    body.append(verd + "\n", style=f"bold {vcol}")
+    if getattr(decision, "thinking", ""):
+        body.append("Reasoning  ", style=LABEL)
+        body.append(str(decision.thinking).strip()[:120] + "\n", style=READOUT)
+    vuln = getattr(decision, "vuln", None) or {}
+    if action == "confirmed" and vuln.get("evidence"):
+        body.append("Evidence   ", style=LABEL)
+        body.append(str(vuln["evidence"]).strip()[:90] + "\n", style=CAUT)
+    np = getattr(decision, "next_probe", None)
+    if np is not None:
+        nxt = np.summary() if hasattr(np, "summary") else str(np)
+        body.append("Next probe ", style=LABEL)
+        body.append(nxt[:70] + "\n", style=TGT)
+    via = getattr(decision, "model", "") or ""
+    strat = getattr(decision, "strategy", "") or ""
+    if via or ms:
+        body.append("via ", style=LABEL)
+        body.append(f"{via}", style=REF)
+        if strat:
+            body.append(f"  {_glyph('·','-')}  {strat}", style=LABEL)
+        if ms:
+            body.append(f"   {ms:.0f}ms", style=LABEL)
+    title = Text(_glyph("🔬 ", "") + f"{_agent_label(agent)}  VERDICT", style=f"bold {vcol}")
+    soc.print(Panel(body, title=title, title_align="left",
+                    border_style=border, box=_box(), padding=(0, 1)))
+
+
+def render_deep_attempt(hyp_id, attempt, action, confidence, thinking=""):
+    """The compact per-attempt line under a hypothesis."""
+    col = {"confirmed": OK, "adapt": REF, "abandoned": LABEL}.get(
+        (action or "").lower(), LABEL)
+    t = Text(f"   [{hyp_id}] attempt {attempt} → ", style=LABEL)
+    t.append(f"{action} ", style=col)
+    t.append(f"(conf={confidence}%) ", style=LABEL)
+    if thinking:
+        t.append(str(thinking).strip()[:110], style=READOUT)
+    soc.print(t)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  ROUTE / ENDPOINT DISCOVERY
 # ══════════════════════════════════════════════════════════════════════════
 def render_routes(routes, count=None):
