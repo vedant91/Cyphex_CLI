@@ -1,16 +1,21 @@
 """
-CYPHEX footer dock — the pinned bottom bar (status rail + input box + buddy).
+CYPHEX footer dock — pinned status rail + input box + buddy, with an optional
+fixed hero header at the top of the screen during a scan.
 
-    ...scan output scrolls up here, inside the scroll region...
+    ┏┅ CYPHEX ┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┓  ← hero header
+    ┋  SCAN ID cli_…   TARGET …/vibemart/                 ┋    (rows 1..h)
+    ┗┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┛
+    ...scan output scrolls here, inside the scroll region...
         ▄     ╾╴ SYS NOMINAL ╶╌╴ THRT ▲00 ●00 ╶╌╴ DEFCON ▊5        ← rail
      ▛▀▀▀▀▀▀▜ ╭────────────────────────────────────────────────╮
     ▐▌ [o]  ▐ │ ⌖ cx ▸ 4/9  DYNAMIC VULNERABILITY SCAN  ·  42s │  ← box
      ▙▄▄▄▄▄▄▟ ╰────────────────────────────────────────────────╯
 
 HOW IT STAYS PINNED
-A DECSTBM scroll region covers every row except the bottom ROWS. Output
-printed anywhere above — by this process, or by the scan child cx.py spawns
-— scrolls inside the region and never touches the footer. The region is
+A DECSTBM scroll region covers every row except the bottom ROWS (and the top
+h header rows, when a hero is pinned). Output printed anywhere between — by
+this process, or by the scan child cx.py spawns — scrolls inside the region
+and never touches the footer or header. The region is
 terminal state, not process state, so the child inherits it for free; it
 only has to repaint the buddy, which it learns it may do from the
 CYPHEX_DOCK env var the owning process sets.
@@ -38,12 +43,15 @@ art_frames() / image_protocol(). CYPHEX_BUDDY=glyph or =image forces either.
 While a task runs, the rail row becomes a Claude-Code-style status line:
 a spinner, a rotating "doing word" (VERBS) and the elapsed time.
 
-THE SCAN HERO PINS ON TOP OF THE FOOTER, NOT AT THE SCREEN TOP
-pin_header() stacks a block (the scan's hero panel) directly above the rail
-for the rest of the run. Bottom-anchored on purpose: a scroll region whose
-top margin is below row 1 makes the terminal DISCARD lines scrolled out of
-it instead of moving them to scrollback (measured in WezTerm: 44 of 60 lines
-lost), so a top-pinned header would eat the scan transcript.
+THE SCAN HERO IS A FIXED HEADER AT THE TOP OF THE SCREEN
+pin_header() freezes a block (the scan's hero panel) on rows 1..h at the top
+for the rest of the run; the scroll region's TOP margin moves down to h+1 so
+the header never scrolls, while the footer keeps the bottom ROWS. The
+transcript scrolls in the band between them. Trade-off: a terminal DISCARDS
+lines that scroll off a top margin below row 1 (measured in WezTerm: 44 of 60
+lost) — so the transcript above the visible region does not reach scrollback
+while the header is pinned. That is the cost of a fixed top header, and it is
+what the header is for.
 
 Degradation: no TTY, a non-POSIX console, TERM=dumb, or a terminal smaller
 than MIN_ROWS x MIN_COLS -> available() is False and every call is a no-op
@@ -350,14 +358,23 @@ def _cup(row, col=1):
 
 
 # ── region ───────────────────────────────────────────────────────────────
+def _region_top(rows):
+    """First row the transcript scrolls in: below the pinned header, which
+    occupies rows 1..len(head_rows) at the very top of the screen."""
+    return 1 + len(_st["head_rows"])
+
+
 def _region_bottom(rows):
-    """Last row the transcript scrolls in: above the footer and any header."""
-    return rows - ROWS - len(_st["head_rows"])
+    """Last row the transcript scrolls in: just above the footer."""
+    return rows - ROWS
 
 
 def _region_seq(rows):
-    # DECSTBM homes the cursor; callers wrap it in DECSC/DECRC.
-    return f"{_ESC}[1;{_region_bottom(rows)}r"
+    # DECSTBM (top;bottom margins) homes the cursor; callers wrap it in
+    # DECSC/DECRC. Top margin sits below the header so the header rows never
+    # scroll. NB: a terminal DISCARDS lines that scroll off a top margin > 1
+    # (they do not reach scrollback) — the cost of a fixed top header.
+    return f"{_ESC}[{_region_top(rows)};{_region_bottom(rows)}r"
 
 
 def _render_head(render, cols, max_rows):
@@ -468,11 +485,11 @@ atexit.register(release)
 
 # ── pinned header (scan hero) ────────────────────────────────────────────
 def pin_header(render, console=None):
-    """Pin render's block directly above the rail until release(). render is
-    called as render(cols, max_rows) -> ANSI lines at most cols wide, or []
-    when nothing fits; it is re-called at the same height on resize. Returns
-    False — the caller prints inline — when no dock is live or the terminal
-    is too short to keep MIN_OUTPUT transcript rows."""
+    """Pin render's block as a fixed header at the TOP of the screen until
+    release(). render is called as render(cols, max_rows) -> ANSI lines at
+    most cols wide, or [] when nothing fits; it is re-called at the same
+    height on resize. Returns False — the caller prints inline — when no dock
+    is live or the terminal is too short to keep MIN_OUTPUT transcript rows."""
     if not _st["active"] and not adopt(console):
         return False
     with _lock:
@@ -482,7 +499,6 @@ def pin_header(render, console=None):
         lines = _render_head(render, cols, rows - ROWS - MIN_OUTPUT)
         if not lines:
             return False
-        h = len(lines)
         lock = _console_lock
         if lock is not None:
             lock.acquire()
@@ -491,11 +507,12 @@ def pin_header(render, console=None):
                 sys.stdout.flush()
             except (OSError, ValueError):
                 pass
-            # Free h rows at the region's bottom the way reserve() frees the
-            # footer's: LFs from the output cursor scroll (into scrollback,
-            # the region still starts at row 1) only as far as needed, and
-            # CUU puts the cursor back on the same line of text.
-            _raw("\n" * h + f"{_ESC}[{h}A")
+            # The header claims rows 1..h at the top; the scroll region's top
+            # margin moves down to h+1, so the header rows are frozen. No LFs
+            # to free space — the header overlays the top of the transcript,
+            # which is already in scrollback. DECSTBM homes the cursor, so
+            # _write's DECSC/DECRC returns the output cursor to where it was
+            # (near the bottom, inside the new region).
             _st.update(head=render, head_rows=lines)
             _write(_region_seq(rows) + _paint_head())
         finally:
@@ -505,18 +522,15 @@ def pin_header(render, console=None):
 
 
 def _unpin(rows):
-    """Drop the header (caller holds _lock); returns the sequence that
-    erases its rows and gives them back to the scroll region."""
-    first = _region_bottom(rows) + 1
-    clear = "".join(_cup(r) + _EL0 for r in range(first, rows - ROWS + 1))
+    """Drop the header (caller holds _lock); returns the sequence that erases
+    its top rows and gives them back to the scroll region."""
+    clear = "".join(_cup(r) + _EL0 for r in range(1, _region_top(rows)))
     _st.update(head=None, head_rows=[])
     return clear + _region_seq(rows)
 
 
 def _paint_head():
-    rows = _dims()[0]
-    top = _region_bottom(rows) + 1
-    return "".join(_cup(top + i) + _EL0 + line + _RST
+    return "".join(_cup(1 + i) + _EL0 + line + _RST
                    for i, line in enumerate(_st["head_rows"]))
 
 

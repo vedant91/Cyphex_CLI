@@ -131,10 +131,10 @@ def test_image_protocol_detection(monkeypatch):
     assert not footer_dock.image_protocol()
 
 
-def test_pinned_header_sits_on_the_footer_and_is_handed_back(monkeypatch):
-    """The scan hero pins directly above the rail (bottom-anchored, so the
-    region still starts at row 1 and scrolled lines reach scrollback),
-    shrinks the region by its height, and release() gives the rows back."""
+def test_pinned_header_is_a_fixed_top_bar_and_is_handed_back(monkeypatch):
+    """The scan hero pins at the TOP of the screen (rows 1..h): the scroll
+    region's top margin moves below it, the footer keeps the bottom ROWS, and
+    release() gives the top rows back and resets the region to the footer's."""
     out = []
     monkeypatch.setattr(footer_dock, "_raw", out.append)
     monkeypatch.setattr(footer_dock, "_size", lambda: (40, 100))
@@ -147,12 +147,13 @@ def test_pinned_header_sits_on_the_footer_and_is_handed_back(monkeypatch):
     assert footer_dock.pin_header(render)
     assert seen == [(100, 40 - footer_dock.ROWS - footer_dock.MIN_OUTPUT)]
     paint = "".join(out)
-    assert "\x1b[1;33r" in paint                     # 40 - 4 footer - 3 header
-    assert "\x1b[34;1H" in paint and "HERO1" in paint  # right above the rail (row 37)
-    assert footer_dock.box_anchor()[3] == 33           # popups stop above it too
+    assert "\x1b[4;36r" in paint                     # region top 1+3, bottom 40-4
+    assert "\x1b[1;1H" in paint and "HERO1" in paint   # header on row 1, at the top
+    assert footer_dock.box_anchor()[3] == 36           # popups fill the region, not over it
     assert not footer_dock.pin_header(render)          # one header per run
     out.clear()
     footer_dock.release()
+    assert "\x1b[1;1H" in "".join(out)                 # top rows erased from row 1
     assert "\x1b[1;36r" in "".join(out)                # region back to the footer's
     assert footer_dock._st["head_rows"] == []
 
