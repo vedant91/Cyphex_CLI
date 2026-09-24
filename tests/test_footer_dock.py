@@ -101,3 +101,49 @@ def test_image_protocol_detection(monkeypatch):
     monkeypatch.setenv("CYPHEX_BUDDY", "glyph")
     monkeypatch.delenv("TMUX")
     assert not footer_dock.image_protocol()
+
+
+def test_pinned_header_sits_on_the_footer_and_is_handed_back(monkeypatch):
+    """The scan hero pins directly above the rail (bottom-anchored, so the
+    region still starts at row 1 and scrolled lines reach scrollback),
+    shrinks the region by its height, and release() gives the rows back."""
+    out = []
+    monkeypatch.setattr(footer_dock, "_raw", out.append)
+    monkeypatch.setattr(footer_dock, "_size", lambda: (40, 100))
+    monkeypatch.setitem(footer_dock._st, "active", True)
+    monkeypatch.setitem(footer_dock._st, "owner", False)
+    monkeypatch.setitem(footer_dock._st, "size", (40, 100))
+    monkeypatch.setitem(footer_dock._st, "head_rows", [])
+    seen = []
+    render = lambda cols, rows: seen.append((cols, rows)) or ["HERO1", "HERO2", "HERO3"]
+    assert footer_dock.pin_header(render)
+    assert seen == [(100, 40 - footer_dock.ROWS - footer_dock.MIN_OUTPUT)]
+    paint = "".join(out)
+    assert "\x1b[1;33r" in paint                     # 40 - 4 footer - 3 header
+    assert "\x1b[34;1H" in paint and "HERO1" in paint  # right above the rail (row 37)
+    assert footer_dock.box_anchor()[3] == 33           # popups stop above it too
+    assert not footer_dock.pin_header(render)          # one header per run
+    out.clear()
+    footer_dock.release()
+    assert "\x1b[1;36r" in "".join(out)                # region back to the footer's
+    assert footer_dock._st["head_rows"] == []
+
+
+def test_header_too_tall_prints_inline(monkeypatch):
+    monkeypatch.setattr(footer_dock, "_raw", lambda s: None)
+    monkeypatch.setitem(footer_dock._st, "active", True)
+    monkeypatch.setitem(footer_dock._st, "size", (20, 100))
+    monkeypatch.setitem(footer_dock._st, "head_rows", [])
+    assert not footer_dock.pin_header(lambda cols, rows: ["x"] * (rows + 1))
+    assert not footer_dock.pin_header(lambda cols, rows: 1 / 0)   # never raises
+
+
+def test_hero_lines_degrade_full_compact_none():
+    import terminal_ui as tu
+    full = tu.hero_lines("cli_1", "/t", 100, 40)
+    compact = tu.hero_lines("cli_1", "/t", 100, len(full) - 1)
+    assert len(compact) < len(full) and "SCAN ID" in _SGR.sub("", "".join(compact))
+    assert tu.hero_lines("cli_1", "/t", 100, 2) == []
+    long = tu.hero_lines("cli_1", "/" + "x" * 400, 80, 40)
+    assert len(long) == len(full)                      # long target cut, not wrapped
+    assert all(len(_SGR.sub("", l)) <= 80 for l in long)

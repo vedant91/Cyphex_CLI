@@ -1186,10 +1186,14 @@ async def render_progress_task(awaitable, label, console=None, ease_target=92, t
 # ══════════════════════════════════════════════════════════════════════════
 #  HERO / SPLASH — scan header inside the canopy
 # ══════════════════════════════════════════════════════════════════════════
-def render_hero(scan_id, target="", score=None):
-    body = Text()
-    body.append_text(_logo_static())
-    body.append("\n")
+def _hero_panel(scan_id, target="", console=None, wordmark=True):
+    # no_wrap: a long target is cut with "…" instead of wrapping, so the
+    # panel's height is fixed — the pinned copy is re-rendered at the same
+    # height on resize.
+    body = Text(no_wrap=True, overflow="ellipsis")
+    if wordmark:
+        body.append_text(_logo_static(console))
+        body.append("\n")
     body.append_text(_telemetry_line())
     body.append("\n\n")
     body.append("  SCAN ID  ", style=LABEL)
@@ -1197,7 +1201,35 @@ def render_hero(scan_id, target="", score=None):
     if target:
         body.append("\n  TARGET   ", style=LABEL)
         body.append(f"{target}", style=READOUT)
-    soc.print(Panel(body, border_style=PHOS_DIM, box=_box(), padding=(0, 2)))
+    return Panel(body, border_style=PHOS_DIM, box=_box(console), padding=(0, 2))
+
+
+def hero_lines(scan_id, target, cols, max_rows):
+    """The hero as ANSI lines for footer_dock.pin_header: the full panel if
+    it fits in max_rows, else the panel without the wordmark, else []."""
+    import io
+    for wordmark in (True, False):
+        c = Console(file=io.StringIO(), width=cols, force_terminal=True,
+                    color_system=soc.color_system or "truecolor")
+        c.print(_hero_panel(scan_id, target, c, wordmark))
+        lines = c.file.getvalue().splitlines()
+        if len(lines) <= max_rows:
+            return lines
+    return []
+
+
+def render_hero(scan_id, target=""):
+    """Scan header. Pinned on top of the footer for the whole run when the
+    dock is live (it would otherwise scroll away within seconds), else
+    printed inline."""
+    try:
+        import footer_dock
+        pinned = footer_dock.pin_header(
+            lambda cols, rows: hero_lines(scan_id, target, cols, rows), console=soc)
+    except Exception:
+        pinned = False
+    if not pinned:
+        soc.print(_hero_panel(scan_id, target))
 
 
 # ══════════════════════════════════════════════════════════════════════════

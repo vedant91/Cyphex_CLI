@@ -34,6 +34,13 @@ In WezTerm and iTerm2 (the iTerm2 inline-image protocol) the slot shows the
 actual sprite PNG instead — see ART / image_protocol(). CYPHEX_BUDDY=glyph
 or =image forces either.
 
+THE SCAN HERO PINS ON TOP OF THE FOOTER, NOT AT THE SCREEN TOP
+pin_header() stacks a block (the scan's hero panel) directly above the rail
+for the rest of the run. Bottom-anchored on purpose: a scroll region whose
+top margin is below row 1 makes the terminal DISCARD lines scrolled out of
+it instead of moving them to scrollback (measured in WezTerm: 44 of 60 lines
+lost), so a top-pinned header would eat the scan transcript.
+
 Degradation: no TTY, a non-POSIX console, TERM=dumb, or a terminal smaller
 than MIN_ROWS x MIN_COLS -> available() is False and every call is a no-op
 returning False; callers keep today's inline behaviour.
@@ -53,6 +60,7 @@ BUDDY_W = 9           # ear + bezel + 6-cell screen + bezel
 GUTTER = BUDDY_W + 2  # " " + buddy + " "  — the box starts at column GUTTER+1
 MIN_ROWS = 14         # below this the region would leave too little to read
 MIN_COLS = 48
+MIN_OUTPUT = 12       # rows the transcript keeps when a header is pinned
 TICK_S = 0.25         # animator cadence; the elapsed clock updates each tick
 ENV = "CYPHEX_DOCK"
 
@@ -60,6 +68,7 @@ _ESC = "\033"
 _SAVE, _RESTORE = _ESC + "7", _ESC + "8"
 _HIDE, _SHOW = _ESC + "[?25l", _ESC + "[?25h"
 _EL0 = _ESC + "[K"                      # erase cursor..end of line
+_ED0 = _ESC + "[J"                      # erase cursor..end of screen
 _RST = _ESC + "[0m"
 
 # Four rows: antenna (in the rail row), bezel top, screen, bezel bottom.
@@ -169,6 +178,8 @@ _st = {
     "state": "neutral", "frame": 0, "rail": "",
     "task": None, "detail": "", "started": 0.0, "caret": "idle",
     "drawn": None,      # expression currently shown as an image, if any
+    "head": None,       # pin_header's render(cols, max_rows) callable
+    "head_rows": [],    # the pinned block's ANSI lines, as painted
 }
 _console_lock = None
 _anim_stop = None
@@ -244,9 +255,25 @@ def _cup(row, col=1):
 
 
 # ── region ───────────────────────────────────────────────────────────────
+def _region_bottom(rows):
+    """Last row the transcript scrolls in: above the footer and any header."""
+    return rows - ROWS - len(_st["head_rows"])
+
+
 def _region_seq(rows):
     # DECSTBM homes the cursor; callers wrap it in DECSC/DECRC.
-    return f"{_ESC}[1;{rows - ROWS}r"
+    return f"{_ESC}[1;{_region_bottom(rows)}r"
+
+
+def _render_head(render, cols, max_rows):
+    """render's lines if they fit in max_rows, else [] — never raises."""
+    if max_rows < 1:
+        return []
+    try:
+        lines = list(render(cols, max_rows) or [])
+    except Exception:
+        return []
+    return lines if len(lines) <= max_rows else []
 
 
 def _sync_region(save=True):
@@ -258,11 +285,26 @@ def _sync_region(save=True):
     if not size or size == _st["size"]:
         return False
     _st["size"] = size
+    seq = _refit_head(size) + _region_seq(size[0])
     if save:
-        _write(_region_seq(size[0]))
+        _write(seq)
     else:
-        _raw(_region_seq(size[0]))
+        _raw(seq)
     return True
+
+
+def _refit_head(size):
+    """Re-render a pinned header for a resized terminal at the SAME height
+    (a taller one would land on top of the output cursor); if it no longer
+    fits, drop it. Returns the erase sequence for rows it gave back."""
+    old = _st["head_rows"]
+    if not old:
+        return ""
+    lines = _render_head(_st["head"], size[1], len(old))
+    if len(lines) == len(old):
+        _st["head_rows"] = lines
+        return ""
+    return _unpin(size[0])
 
 
 def reserve(rail_ansi=""):
@@ -314,15 +356,73 @@ def release():
     with _lock:
         if not _st["active"]:
             return
+        rows = _dims()[0]
         if _st["owner"]:
-            rows = (_dims() or (24, 80))[0]
-            clear = "".join(_cup(r) + _EL0 for r in range(rows - ROWS + 1, rows + 1))
+            first = _region_bottom(rows) + 1
+            clear = "".join(_cup(r) + _EL0 for r in range(first, rows + 1))
             _write(f"{_ESC}[r" + clear)
             os.environ.pop(ENV, None)
-        _st.update(active=False, owner=False, size=None)
+        elif _st["head_rows"]:
+            # A scan child hands the parent's footer back as it found it.
+            _write(_unpin(rows))
+        _st.update(active=False, owner=False, size=None, head=None, head_rows=[])
 
 
 atexit.register(release)
+
+
+# ── pinned header (scan hero) ────────────────────────────────────────────
+def pin_header(render, console=None):
+    """Pin render's block directly above the rail until release(). render is
+    called as render(cols, max_rows) -> ANSI lines at most cols wide, or []
+    when nothing fits; it is re-called at the same height on resize. Returns
+    False — the caller prints inline — when no dock is live or the terminal
+    is too short to keep MIN_OUTPUT transcript rows."""
+    if not _st["active"] and not adopt(console):
+        return False
+    with _lock:
+        if _st["head_rows"]:
+            return False                # one header per run
+        rows, cols = _dims()
+        lines = _render_head(render, cols, rows - ROWS - MIN_OUTPUT)
+        if not lines:
+            return False
+        h = len(lines)
+        lock = _console_lock
+        if lock is not None:
+            lock.acquire()
+        try:
+            try:
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+            # Free h rows at the region's bottom the way reserve() frees the
+            # footer's: LFs from the output cursor scroll (into scrollback,
+            # the region still starts at row 1) only as far as needed, and
+            # CUU puts the cursor back on the same line of text.
+            _raw("\n" * h + f"{_ESC}[{h}A")
+            _st.update(head=render, head_rows=lines)
+            _write(_region_seq(rows) + _paint_head())
+        finally:
+            if lock is not None:
+                lock.release()
+    return True
+
+
+def _unpin(rows):
+    """Drop the header (caller holds _lock); returns the sequence that
+    erases its rows and gives them back to the scroll region."""
+    first = _region_bottom(rows) + 1
+    clear = "".join(_cup(r) + _EL0 for r in range(first, rows - ROWS + 1))
+    _st.update(head=None, head_rows=[])
+    return clear + _region_seq(rows)
+
+
+def _paint_head():
+    rows = _dims()[0]
+    top = _region_bottom(rows) + 1
+    return "".join(_cup(top + i) + _EL0 + line + _RST
+                   for i, line in enumerate(_st["head_rows"]))
 
 
 # ── painting ─────────────────────────────────────────────────────────────
@@ -357,11 +457,12 @@ def _paint_buddy(force=False):
         if not force and _st["drawn"] == expr:
             return ""
         _st["drawn"] = expr
-        blank = "".join(_cup(top + i, 2) + " " * BUDDY_W for i in range(ROWS))
+        blank = "".join(_cup(top + i) + " " * GUTTER for i in range(ROWS))
         return blank + _cup(top, 2) + _image_seq(png)
     _st["drawn"] = None
     art = buddy_rows(_st["state"], _st["frame"], _ascii())
-    return "".join(_cup(top + i, 2) + r for i, r in enumerate(art))
+    # The whole gutter, spaces included: they wipe whatever a resize reflowed there.
+    return "".join(_cup(top + i) + " " + r + " " for i, r in enumerate(art))
 
 
 def _paint_rail():
@@ -406,8 +507,8 @@ def _paint_task():
             + _cup(top + 2, col) + _EL0 + wall + g["bl"] + g["h"] * (width - 2) + g["br"] + _RST)
 
 
-def _paint_all():
-    out = _paint_rail() + _paint_buddy(force=True)
+def _paint_all(lead=""):
+    out = lead + _paint_head() + _paint_rail() + _paint_buddy(force=True)
     if _st["task"]:
         out += _paint_task()
     _write(out)
@@ -450,8 +551,12 @@ def begin_input(rail_ansi=None):
         _st.update(state="neutral", frame=0, task=None, caret="idle")
         if rail_ansi is not None:
             _st["rail"] = rail_ansi
-        _sync_region()
-        _paint_all()
+        # Always re-issue the region, and erase below the output cursor (in
+        # normal flow those rows are blank): a scan child killed mid-run
+        # leaves its smaller region and its pinned header behind. ED0 runs
+        # first — DECSTBM homes the cursor — and the footer repaints after.
+        _st["size"] = _size() or _st["size"]
+        _paint_all(lead=_ED0 + _region_seq(_dims()[0]))
         _raw(_SAVE)
     return box_anchor
 
@@ -464,7 +569,7 @@ def box_anchor():
     if _sync_region(save=False):
         _raw(_paint_rail() + _paint_buddy(force=True))
     rows, cols = _dims()
-    return rows - ROWS + 2, GUTTER, cols - GUTTER, rows - ROWS
+    return rows - ROWS + 2, GUTTER, cols - GUTTER, _region_bottom(rows)
 
 
 def end_input():
@@ -499,8 +604,14 @@ def _animate(stop):
             if not _st["active"]:
                 return
             _st["frame"] += 1
-            _sync_region()
-            _write(_paint_buddy() + (_paint_task() if _st["task"] else ""))
+            if _sync_region():
+                # Resized: everything moved. Blank the rail row first — an
+                # adopting child has no rail of its own to repaint, and the
+                # reflowed leftovers there are worse than an empty row until
+                # the REPL repaints its rail at the next prompt.
+                _paint_all(lead=_cup(_dims()[0] - ROWS + 1, GUTTER + 1) + _EL0)
+            else:
+                _write(_paint_buddy() + (_paint_task() if _st["task"] else ""))
 
 
 def stop_task():
