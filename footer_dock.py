@@ -2,10 +2,10 @@
 CYPHEX footer dock — the pinned bottom bar (status rail + input box + buddy).
 
     ...scan output scrolls up here, inside the scroll region...
-    ╾╴ SYS NOMINAL ╶╌╴ THRT ▲00 ●00 ╶╌╴ DEFCON ▊5 ╶╌╴ WPN SAFE      ← rail
-    ▛▀▀▀▀▜  ╭──────────────────────────────────────────────────╮
-    ▌▘  ▘▐  │ ⌖ cx ▸ 3/9 DEPLOYING SANDBOX  ·  42s             │    ← box
-    ▙▄▄▄▄▟  ╰──────────────────────────────────────────────────╯
+        ▄     ╾╴ SYS NOMINAL ╶╌╴ THRT ▲00 ●00 ╶╌╴ DEFCON ▊5        ← rail
+     ▛▀▀▀▀▀▀▜ ╭────────────────────────────────────────────────╮
+    ▐▌ [o]  ▐ │ ⌖ cx ▸ 4/9  DYNAMIC VULNERABILITY SCAN  ·  42s │  ← box
+     ▙▄▄▄▄▄▄▟ ╰────────────────────────────────────────────────╯
 
 HOW IT STAYS PINNED
 A DECSTBM scroll region covers every row except the bottom ROWS. Output
@@ -21,9 +21,14 @@ thread also take the bound Rich console's lock, because Rich flushes large
 renders in several syscalls and a paint landing between two of them could
 split an escape sequence.
 
-WHY THE BUDDY IS THREE ROWS
-It is exactly the height of the input box it sits beside, so the footer
-never grows past the box — the same footprint as the input bar alone.
+THE BUDDY IS THE SPRITE ART, REDRAWN AT FOOTER SIZE
+assets/mascot/expr_*.png is a TV head: antenna, left ear, thick red bezel,
+and a face drawn ON the screen — "!", "x_x", ">_", "> <", "...", "CYPHEX".
+Downsampling those pixels to 3 rows leaves mush, but the faces are text,
+and terminal text stays crisp at any size. So the head is block glyphs and
+the face is real characters: the same expressions, legible. The head is
+the input box's height; the antenna rides in the rail row above it, so the
+footer never grows past the box.
 
 Degradation: no TTY, a non-POSIX console, TERM=dumb, or a terminal smaller
 than MIN_ROWS x MIN_COLS -> available() is False and every call is a no-op
@@ -38,7 +43,7 @@ import time
 import ui_palette as P
 
 ROWS = 4              # rail + the 3-row input box
-BUDDY_W = 6
+BUDDY_W = 9           # ear + bezel + 6-cell screen + bezel
 GUTTER = BUDDY_W + 2  # " " + buddy + " "  — the box starts at column GUTTER+1
 MIN_ROWS = 14         # below this the region would leave too little to read
 MIN_COLS = 48
@@ -51,34 +56,44 @@ _HIDE, _SHOW = _ESC + "[?25l", _ESC + "[?25h"
 _EL0 = _ESC + "[K"                      # erase cursor..end of line
 _RST = _ESC + "[0m"
 
-# Three rows: head top, face, head bottom. Faces are 4 cells; every glyph is
-# unambiguously narrow except the chassis blocks, which the rest of the UI
-# already depends on being narrow.
-_TOP, _L, _R, _BOT = "▛▀▀▀▀▜", "▌", "▐", "▙▄▄▄▄▟"
-_TOP_A, _L_A, _R_A, _BOT_A = "+----+", "|", "|", "+----+"
+# Four rows: antenna (in the rail row), bezel top, screen, bezel bottom.
+# Every face is 6 cells — the screen's width, which is exactly "CYPHEX", the
+# neutral face in the art. Only unambiguously narrow glyphs go on the screen
+# (the chassis blocks are ambiguous-width, but the rest of the UI already
+# depends on them being narrow), so the box never desynchronises.
+_ANT, _TOP, _L, _R, _BOT = "    ▄    ", " ▛▀▀▀▀▀▀▜", "▌", "▐", " ▙▄▄▄▄▄▄▟"
+_ANT_A, _TOP_A, _L_A, _R_A, _BOT_A = "    o    ", " +------+", "|", "|", " +------+"
+_EAR, _EAR_A = "▐", "|"
+_BADGE, _BADGE_A = "✓", "v"           # success: the check bubble in success.png
+_BADGE_COL = 6
+
+#: One entry per expression in assets/mascot; frames cycle on the animator.
 FACES = {
-    "idle":      ["▘  ▘", "▂  ▂"],
-    "searching": ["▘ ▸▸", "▘▸▸ ", "▘▸  "],
-    "thinking":  ["▪   ", "▪▪  ", "▪▪▪ "],
-    "working":   ["▘  ▘", "▝  ▝"],
-    "uploading": ["▴  ▴", "▘  ▘"],
-    "success":   ["◜  ◝"],
-    "error":     ["✕  ✕", "▘  ▘"],
+    "neutral":  ["CYPHEX"],
+    "focused":  [" >_   ", " >    "],
+    "scanning": [" [o]  ", "  [o] "],
+    "thinking": [" .    ", " ..   ", " ...  "],
+    "hacking":  [" > <  ", " >_<  "],
+    "loading":  [" ━    ", " ━━   ", " ━━━  ", " ━━━━ "],
+    "alert":    ["  !   "],
+    "success":  ["CYPHEX"],
+    "error":    [" x_x  "],
 }
-FACES_ASCII = {
-    "idle":      ["o  o", "-  -"],
-    "searching": ["o  >", "o >>", "o>> "],
-    "thinking":  [".   ", "..  ", "... "],
-    "working":   ["o  o", "O  O"],
-    "uploading": ["^  ^", "o  o"],
-    "success":   ["\\  /"],
-    "error":     ["x  x", "o  o"],
-}
+FACES_ASCII = dict(FACES, loading=[" =    ", " ==   ", " ===  ", " ==== "])
+#: The mascot.py / trace vocabulary, mapped onto the art's expressions.
+ALIASES = {"idle": "neutral", "searching": "scanning",
+           "working": "hacking", "uploading": "loading"}
+
+
+def expression(state):
+    state = ALIASES.get(state, state)
+    return state if state in FACES else "neutral"
+
 
 _lock = threading.RLock()
 _st = {
     "active": False, "owner": False, "size": None,
-    "state": "idle", "frame": 0, "rail": "",
+    "state": "neutral", "frame": 0, "rail": "",
     "task": None, "detail": "", "started": 0.0, "caret": "idle",
 }
 _console_lock = None
@@ -213,7 +228,7 @@ def adopt(console=None, standalone=True):
         return False
     try:
         import terminal_ui
-        rail = terminal_ui.rail_ansi({}, _size()[1])
+        rail = terminal_ui.rail_ansi({}, _size()[1] - GUTTER)
     except Exception:
         rail = ""
     return reserve(rail)
@@ -237,21 +252,29 @@ atexit.register(release)
 
 
 # ── painting ─────────────────────────────────────────────────────────────
-def buddy_rows(state="idle", frame=0, ascii_mode=False):
-    """The 3-row buddy as ANSI strings, each exactly BUDDY_W cells."""
-    faces = (FACES_ASCII if ascii_mode else FACES).get(state) or FACES["idle"]
+def buddy_rows(state="neutral", frame=0, ascii_mode=False):
+    """The buddy as 4 ANSI rows (antenna, bezel, screen, bezel), each exactly
+    BUDDY_W cells."""
+    state = expression(state)
+    faces = (FACES_ASCII if ascii_mode else FACES)[state]
     face = faces[frame % len(faces)]
-    top, lw, rw, bot = (_TOP_A, _L_A, _R_A, _BOT_A) if ascii_mode else (_TOP, _L, _R, _BOT)
-    chassis = P.fg(P.PHOS)
-    face_c = P.fg({"error": P.WARN, "success": P.OK}.get(state, P.REF))
-    return [chassis + top + _RST,
-            chassis + lw + face_c + face + chassis + rw + _RST,
-            chassis + bot + _RST]
+    ant, top, lw, rw, bot = ((_ANT_A, _TOP_A, _L_A, _R_A, _BOT_A) if ascii_mode
+                             else (_ANT, _TOP, _L, _R, _BOT))
+    bezel, screen = P.fg(P.PHOS), P.fg(P.WARN)
+    antenna = bezel + ant + _RST
+    if state == "success":
+        badge = _BADGE_A if ascii_mode else _BADGE
+        antenna = (bezel + ant[:_BADGE_COL] + P.fg(P.OK) + badge
+                   + bezel + ant[_BADGE_COL + 1:] + _RST)
+    return [antenna,
+            bezel + top + _RST,
+            P.fg(P.CHASSIS) + (_EAR_A if ascii_mode else _EAR)
+            + bezel + lw + screen + face + bezel + rw + _RST,
+            bezel + bot + _RST]
 
 
 def _paint_buddy():
-    rows = _dims()[0]
-    top = rows - ROWS + 2
+    top = _dims()[0] - ROWS + 1          # antenna shares the rail row
     art = buddy_rows(_st["state"], _st["frame"], _ascii())
     return "".join(_cup(top + i, 2) + r for i, r in enumerate(art))
 
@@ -261,8 +284,8 @@ def _paint_rail():
     # leave the row alone: erasing it would wipe the parent's rail.
     if not _st["rail"]:
         return ""
-    rows = _dims()[0]
-    return _cup(rows - ROWS + 1) + _EL0 + _st["rail"]
+    # Starts after the gutter: the buddy's antenna occupies the left of it.
+    return _cup(_dims()[0] - ROWS + 1, GUTTER + 1) + _EL0 + _st["rail"]
 
 
 def _box_parts():
@@ -322,7 +345,7 @@ def set_state(state, label=None):
     if not _st["active"] and not adopt(standalone=False):
         return False
     with _lock:
-        _st["state"] = state if state in FACES else "idle"
+        _st["state"] = expression(state)
         # A caller's label is detail UNDER the running task (e.g. which agent
         # is probing), not a replacement for it; repeats of the task are noise.
         if label and _st["task"] is not None and str(label) not in _st["task"]:
@@ -339,7 +362,7 @@ def begin_input(rail_ansi=None):
     with _lock:
         if not _st["active"]:
             return None
-        _st.update(state="idle", frame=0, task=None, caret="idle")
+        _st.update(state="neutral", frame=0, task=None, caret="idle")
         if rail_ansi is not None:
             _st["rail"] = rail_ansi
         _sync_region()
@@ -371,7 +394,7 @@ def start_task(label, state="working", animate=True, caret="executing"):
         return False
     with _lock:
         _st.update(task=str(label), detail="", caret=caret,
-                   state=state if state in FACES else "working")
+                   state=expression(state))
         if not _st["started"]:
             _st["started"] = time.time()
         _paint_all()

@@ -15,15 +15,26 @@ import footer_dock
 _SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def test_buddy_is_box_height_and_fixed_width_in_every_state():
+def test_buddy_fits_the_footer_and_fixed_width_in_every_state():
+    states = list(footer_dock.FACES) + list(footer_dock.ALIASES)
     for ascii_mode in (False, True):
         faces = footer_dock.FACES_ASCII if ascii_mode else footer_dock.FACES
-        for state, frames in faces.items():
-            for frame in range(len(frames)):
+        for state in states:
+            for frame in range(len(faces[footer_dock.expression(state)])):
                 rows = footer_dock.buddy_rows(state, frame, ascii_mode)
-                assert len(rows) == 3, state          # == input box height
+                # antenna rides the rail row; the head is the input box's height
+                assert len(rows) == footer_dock.ROWS, state
                 for r in rows:
                     assert len(_SGR.sub("", r)) == footer_dock.BUDDY_W, (state, r)
+
+
+def test_faces_are_the_sprite_expressions():
+    face = lambda s: _SGR.sub("", footer_dock.buddy_rows(s)[2])[2:-1].strip()
+    assert face("alert") == "!"            # assets/mascot/expr_alert.png
+    assert face("error") == "x_x"          # expr_error.png
+    assert face("idle") == "CYPHEX"        # expr_neutral.png
+    assert face("working") == "> <"        # expr_hacking.png
+    assert "✓" in footer_dock.buddy_rows("success")[0]   # success.png bubble
 
 
 def test_no_terminal_means_noop_and_inline_fallback(monkeypatch):
@@ -39,7 +50,7 @@ def test_no_terminal_means_noop_and_inline_fallback(monkeypatch):
 def test_anchored_editor_paints_absolute_rows_and_spares_gutter():
     r, w = os.pipe()
     try:
-        ed = deck_input._Editor(0, w, anchor=lambda: (10, 8, 60))
+        ed = deck_input._Editor(0, w, anchor=lambda: (10, 11, 60))
         ed._prompt()
         ed.buf = list("/scan")
         ed.pos = len(ed.buf)
@@ -50,7 +61,7 @@ def test_anchored_editor_paints_absolute_rows_and_spares_gutter():
         os.close(r)
         os.close(w)
     for row in (10, 11, 12):                      # top wall, text, bottom wall
-        assert f"\x1b[{row};9H" in out            # column = gutter + 1
+        assert f"\x1b[{row};12H" in out           # column = gutter + 1
     assert "\x1b[2K" not in out                   # whole-line erase would wipe the buddy
     assert "\r\n" not in out                      # nothing may scroll the footer
     assert "/scan" in out

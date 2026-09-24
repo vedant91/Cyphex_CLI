@@ -197,7 +197,10 @@ def _dock_rail():
     if not BOOT_UI:
         return ""
     try:
-        return ui.rail_ansi(_session, shutil.get_terminal_size().columns)
+        width = shutil.get_terminal_size().columns
+        if footer_dock is not None:
+            width -= footer_dock.GUTTER      # the buddy's antenna shares the row
+        return ui.rail_ansi(_session, width)
     except Exception:
         return ""
 

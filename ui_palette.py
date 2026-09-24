@@ -56,6 +56,9 @@ LOW      = "#7f9bc0"   # slate — Low
 # outcome
 OK       = "#3ddc97"   # verified — PASS, healthy, secure, patched
 
+# mascot
+CHASSIS  = "#3a3436"   # the buddy's dark-grey body (its ear), as in the sprite art
+
 # text
 READOUT  = "#e9e4df"   # bone — readable prose / numerics
 LABEL    = "#8f8985"   # ash — captions, timestamps, comments

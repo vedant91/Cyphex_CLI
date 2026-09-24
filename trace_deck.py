@@ -76,17 +76,17 @@ def _status_style(status):
 #: Step rows shown under the goal — the box stays a fixed, glanceable size.
 _STEP_TAIL = 3
 
-#: Which buddy state (footer_dock.FACES key) each waypoint drives.
+#: Which buddy expression (footer_dock.FACES key) each waypoint drives.
 STATE_FOR_WAYPOINT = {
-    "1": "uploading",    # fetching source
-    "2": "searching",    # static analysis
-    "3": "working",      # sandbox deploy
-    "3b": "searching",   # network sweep
-    "4": "searching",    # dynamic scan
+    "1": "loading",      # fetching source
+    "2": "focused",      # static analysis — reading code, ">_"
+    "3": "loading",      # sandbox deploy
+    "3b": "scanning",    # network sweep
+    "4": "scanning",     # dynamic scan
     "5": "thinking",     # genome build — the highlighted one
-    "6": "working",      # attack simulation
+    "6": "hacking",      # attack simulation, "> <"
     "7": "thinking",     # report
-    "8": "working",      # patch + verify
+    "8": "focused",      # patch + verify — writing code
 }
 
 
@@ -98,7 +98,9 @@ def buddy_state(wp):
     status = wp.derived_status() if wp.status != RUNNING else RUNNING
     if status == FAIL:
         return "error"
-    if wp.status != RUNNING and status in (ST_OK, ST_WARN):
+    if wp.status != RUNNING and status == ST_WARN:
+        return "alert"        # finished, but with warnings: the "!" face
+    if wp.status != RUNNING and status == ST_OK:
         return "success"
     key = str(wp.num).split("/")[0].strip()
     return STATE_FOR_WAYPOINT.get(key, "working")
