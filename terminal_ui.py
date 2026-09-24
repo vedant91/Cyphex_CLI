@@ -1572,11 +1572,11 @@ def render_deep_planner(agent, model, strategy):
 
 
 def render_deep_thinking(agent, role, text):
-    """`🧠 <Agent> · <role> thinking  <text>` — the model's own one-line
+    """`◇ <Agent> · <role> thinking  <text>` — the model's own one-line
     rationale (planner or analyst), as it streams."""
     if not text:
         return
-    t = Text("  " + _glyph("🧠 ", ""), style=TGT)
+    t = Text("  " + _glyph("◇ ", ""), style=TGT)
     t.append(f"{_agent_label(agent)} ", style=f"bold {REF}")
     t.append(f"{_glyph('·','-')} {role} thinking  ", style=LABEL)
     t.append(str(text).strip()[:200], style=READOUT)
@@ -1584,7 +1584,7 @@ def render_deep_thinking(agent, role, text):
 
 
 def render_attack_plan(agent, plan, ms=0.0):
-    """The 🗺 ATTACK PLAN panel: the ordered hypotheses the oracle generated,
+    """The ◈ ATTACK PLAN panel: the ordered hypotheses the oracle generated,
     each with its severity, technique, endpoint and payload."""
     hyps = list(getattr(plan, "hypotheses", []) or [])
     body = Text()
@@ -1614,22 +1614,22 @@ def render_attack_plan(agent, plan, ms=0.0):
             body.append(f"  {_glyph('·','-')}  {strat}", style=LABEL)
         if ms:
             body.append(f"   {ms:.0f}ms", style=LABEL)
-    title = Text(_glyph("🗺 ", "") + f"{_agent_label(agent)}  ATTACK PLAN", style=f"bold {REF}")
+    title = Text(_glyph("◈ ", "") + f"{_agent_label(agent)}  ATTACK PLAN", style=f"bold {REF}")
     soc.print(Panel(body, title=title, title_align="left",
                     border_style=PHOS_DIM, box=_box(), padding=(0, 1)))
 
 
 def render_deep_verdict(agent, decision, ms=0.0):
-    """The 🔬 VERDICT panel for one probe: the oracle's decision, reasoning,
+    """The ◈ VERDICT panel for one probe: the oracle's decision, reasoning,
     evidence and (if adapting) the next probe."""
     action = (getattr(decision, "action", "") or "").lower()
     conf = getattr(decision, "confidence", 0)
     if action == "confirmed":
-        verd, vcol, border = f"{_glyph('✔','[OK]')} CONFIRMED  (confidence {conf}%)", OK, OK
+        verd, vcol, border = f"{_glyph('✓','[OK]')} CONFIRMED  (confidence {conf}%)", OK, OK
     elif action == "adapt":
         verd, vcol, border = f"{_glyph('↻','[~]')} ADAPT  (confidence {conf}%)", REF, REF
     else:
-        verd, vcol, border = f"{_glyph('✖','[X]')} ABANDONED", LABEL, PHOS_DIM
+        verd, vcol, border = f"{_glyph('✗','[X]')} ABANDONED", LABEL, PHOS_DIM
     body = Text()
     body.append("Decision   ", style=LABEL)
     body.append(verd + "\n", style=f"bold {vcol}")
@@ -1654,7 +1654,7 @@ def render_deep_verdict(agent, decision, ms=0.0):
             body.append(f"  {_glyph('·','-')}  {strat}", style=LABEL)
         if ms:
             body.append(f"   {ms:.0f}ms", style=LABEL)
-    title = Text(_glyph("🔬 ", "") + f"{_agent_label(agent)}  VERDICT", style=f"bold {vcol}")
+    title = Text(_glyph("◈ ", "") + f"{_agent_label(agent)}  VERDICT", style=f"bold {vcol}")
     soc.print(Panel(body, title=title, title_align="left",
                     border_style=border, box=_box(), padding=(0, 1)))
 
@@ -1672,11 +1672,11 @@ def render_deep_attempt(hyp_id, attempt, action, confidence, thinking=""):
 
 
 def render_deep_lock(role, model):
-    """`[DeepAgent:<role>] ⚡ Acquired <model> lock, running inference...` —
+    """`[DeepAgent:<role>] ▸ Acquired <model> lock, running inference...` —
     the shared per-model lock that serialises same-model calls across the
     agents running in parallel (so they don't thrash local VRAM)."""
     t = Text(f"  [DeepAgent:{role}] ", style=LABEL)
-    t.append(_glyph("⚡ ", ""), style=CAUT)
+    t.append(_glyph("▸ ", ""), style=CAUT)
     t.append(f"Acquired {model} lock, running inference...", style=LABEL)
     soc.print(t)
 

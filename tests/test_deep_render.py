@@ -78,7 +78,7 @@ def test_thinking_and_attempt_lines():
 def test_panels_degrade_on_a_legacy_terminal(monkeypatch):
     monkeypatch.setattr(tu, "_ascii_mode", lambda console=None: True)
     out = _capture(tu.render_attack_plan, "DeepSQLiAgent", _plan(), 1)
-    assert "🗺" not in out and "→" not in out and "·" not in out   # no non-ASCII glyphs
+    assert "◈" not in out and "→" not in out and "·" not in out   # no non-ASCII glyphs
     assert "->" in out and "ATTACK PLAN" in out                      # ASCII arrow, still readable
 
 
