@@ -457,12 +457,14 @@ def begin_input(rail_ansi=None):
 
 
 def box_anchor():
-    """(top_row, left_col0, width) for the input box. Resize-safe: re-issues
-    the region without touching the saved output cursor."""
+    """(top_row, left_col0, width, menu_bottom) for the input box; the popup
+    menu may use rows up to menu_bottom — the scroll region's last row, just
+    above the rail. Resize-safe: re-issues the region without touching the
+    saved output cursor."""
     if _sync_region(save=False):
         _raw(_paint_rail() + _paint_buddy(force=True))
     rows, cols = _dims()
-    return rows - ROWS + 2, GUTTER, cols - GUTTER
+    return rows - ROWS + 2, GUTTER, cols - GUTTER, rows - ROWS
 
 
 def end_input():

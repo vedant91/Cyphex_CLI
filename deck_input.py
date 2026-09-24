@@ -43,6 +43,7 @@ No prompt_toolkit, no curses, no wcwidth.
 from __future__ import annotations
 
 import codecs
+import collections
 import errno
 import fcntl
 import os
@@ -94,6 +95,8 @@ _MAX_STRING_SEQ = 4096
 _PASTE_TIMEOUT = 2.0         # s to wait for the end of a bracketed paste
 _MAX_COMPLETIONS = 512       # hard stop on a runaway completer
 _MAX_CANDIDATE_ROWS = 12     # rows of Tab candidates before we elide
+_MENU_ROWS = 8               # popup items visible at once (it scrolls past this)
+_MENU_LABEL_MAX = 30         # label column cap, so descriptions stay visible
 _MIN_WIDTH = 20              # matches terminal_ui.deck_box_width()
 _DELIMS = " \t\n"            # == readline.set_completer_delims() in cx.py
 
@@ -101,6 +104,16 @@ _DELIMS = " \t\n"            # == readline.set_completer_delims() in cx.py
 # terminal_ui uses), so this module stays importable and unit-testable on its
 # own without a hand-copied fallback.
 from ui_palette import PHOS_DIM as _PHOS_DIM, LABEL as _LABEL, READOUT as _READOUT
+from ui_palette import REF as _REF
+
+#: One popup-menu entry, as returned by a read_line(suggest=...) provider.
+#:   label  — what the row shows          desc   — dim text after it
+#:   insert — what Enter puts in place of buf[start:end]
+#:   submit — Enter also submits the line (a command that needs no argument)
+#:   drill  — what Tab inserts instead, keeping the menu open on it (e.g.
+#:            "@src/" to step into a directory); None = Tab inserts `insert`
+Suggestion = collections.namedtuple(
+    "Suggestion", "label desc insert submit drill", defaults=(False, None))
 
 
 def _fg(hex_colour):
@@ -173,6 +186,17 @@ def cell_widths(text):
 def display_width(text):
     """Terminal cells `text` occupies."""
     return sum(cell_widths(text))
+
+
+def _clip(text, cells):
+    """Longest prefix of text that fits in `cells` terminal cells."""
+    out, used = [], 0
+    for ch, w in zip(text, cell_widths(text)):
+        if used + w > cells:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out)
 
 
 def _window(text, widths, start, count):
@@ -292,7 +316,7 @@ def pending_lines():
 
 
 def read_line(session=None, *, completer=None, history=None, console=None,
-              anchor=None):
+              anchor=None, suggest=None):
     """Read one line with all four walls of the input field drawn.
 
     session   — the cx.py _session dict; only "caret" is read, for the glyph.
@@ -311,6 +335,11 @@ def read_line(session=None, *, completer=None, history=None, console=None,
                 footer) instead of at the cursor, starting after a left gutter
                 the buddy occupies. Called on every full repaint, so a resize
                 re-anchors. None keeps the inline behaviour byte for byte.
+    suggest   — optional provider(text, cursor) -> (start, end, [Suggestion])
+                or None. With an anchor, its result is shown as a live popup
+                above the footer (Up/Down select, Enter accept, Tab complete,
+                Esc close) — the Claude Code "/" and "@" menus. Without an
+                anchor it is ignored and Tab keeps listing candidates inline.
 
     Returns the line without its trailing newline (no stripping).
     Raises KeyboardInterrupt on Ctrl+C, EOFError on Ctrl+D at an empty buffer.
@@ -327,7 +356,8 @@ def read_line(session=None, *, completer=None, history=None, console=None,
     try:
         editor = _Editor(sys.stdin.fileno(), sys.stdout.fileno(),
                          session=session, completer=completer,
-                         history=history, console=console, anchor=anchor)
+                         history=history, console=console, anchor=anchor,
+                         suggest=suggest)
     except Exception:
         return _fallback_read(session)
     try:
@@ -401,7 +431,7 @@ class _Editor:
     every bit of terminal state it touched in run()'s finally arm."""
 
     def __init__(self, in_fd, out_fd, session=None, completer=None,
-                 history=None, console=None, anchor=None):
+                 history=None, console=None, anchor=None, suggest=None):
         self.in_fd = in_fd
         self.out_fd = out_fd
         self.session = session or {}
@@ -411,6 +441,13 @@ class _Editor:
         self.anchor = anchor
         self._top = None        # anchored: absolute row of the top wall
         self._x0 = 0            # anchored: cells left of the box (buddy gutter)
+        self.suggest = suggest
+        self._menu = None       # (start, end, [Suggestion]) while the popup is up
+        self._sel = 0           # highlighted item
+        self._off = 0           # first visible item (the popup scrolls)
+        self._lifted = 0        # transcript rows scrolled up to make popup room
+        self._dismissed = None  # buffer text Esc closed the popup on
+        self._menu_bottom = 0   # anchored: last row the popup may occupy
 
         self.buf = []           # list[str] — one entry per codepoint
         self.pos = 0            # cursor index into self.buf
@@ -467,6 +504,12 @@ class _Editor:
         """Unconditional teardown — normal return, Enter, Ctrl+C, Ctrl+D,
         or an unexpected exception all land here."""
         try:
+            if self._lifted:
+                # The popup scrolled the transcript up; move the caller's
+                # saved output cursor up with it, or the next output lands
+                # `lifted` rows below the last line.
+                self._w(self._menu_erase() + _RESTORE
+                        + _CSI + "%dA" % self._lifted + _SAVE)
             if self.painted and self.anchor is None:
                 # Park below the closed box so command output renders under
                 # the field, exactly like the readline path leaves it. An
@@ -672,8 +715,12 @@ class _Editor:
     def _geometry(self):
         if self.anchor is not None:
             try:
-                top, x0, width = self.anchor()
+                vals = self.anchor()
+                top, x0, width = vals[:3]
                 self._top, self._x0 = int(top), int(x0)
+                # Last row the popup may use: an anchor can reserve rows above
+                # the box (footer_dock's rail); by default it sits right on top.
+                self._menu_bottom = int(vals[3]) if len(vals) > 3 else self._top - 1
                 self.width = max(int(width), _MIN_WIDTH)
                 self.field = max(1, self.width - self._pcells - 2)
                 return
@@ -770,6 +817,8 @@ class _Editor:
                     + self._at(2) + _EL0 + self._wall(False)
                     + self._at(1, col) + _SHOW)
             self.painted = True
+            if self._menu is not None:
+                self._paint_menu()
             return
         if initial or not self.painted:
             self._w(_HIDE + "\r" + _EL + self._wall(True) + "\r\n"
@@ -852,8 +901,8 @@ class _Editor:
         entirely — never partially inserted as literal junk."""
         while len(self.pending) < 2:
             if not self._pump(_ESC_TIMEOUT):
-                self.pending = self.pending[1:]     # lone ESC — ignore
-                return ("none", None)
+                self.pending = self.pending[1:]     # lone ESC — the Esc key
+                return ("key", "escape")
         b1 = self.pending[1]
         if b1 == 0x5b:                              # CSI  ESC [
             i = 2
@@ -1087,6 +1136,115 @@ class _Editor:
         self.painted = False
         self._paint_all(initial=True)
 
+    # ── popup menu ("/" commands, "@" files) ─────────────────────────────
+    def _refresh_menu(self):
+        """Ask the provider what fits the text at the cursor; show, update or
+        close the popup to match. Anchored (pinned footer) mode only."""
+        if self.suggest is None or self.anchor is None:
+            return
+        text = "".join(self.buf)
+        if self._dismissed is not None:
+            if text == self._dismissed:
+                return
+            self._dismissed = None           # typing again re-arms it
+        try:
+            res = self.suggest(text, self.pos)
+        except Exception:
+            res = None
+        items = list(res[2]) if res and res[2] else []
+        if not items:
+            if self._menu is not None:
+                self._menu = None
+                self._w(self._menu_erase() + self._cursor_home())
+            return
+        prev = self._menu
+        self._menu = (res[0], res[1], items)
+        if prev is None or [i.label for i in prev[2]] != [i.label for i in items]:
+            self._sel = self._off = 0        # new list: start at the top
+        self._paint_menu()
+
+    def _cursor_home(self):
+        return self._at(1, self._row()[1]) + _SHOW
+
+    def _menu_erase(self):
+        if not self._lifted:
+            return ""
+        first = self._menu_bottom - self._lifted + 1
+        return "".join(_CSI + "%d;1H" % r + _EL
+                       for r in range(first, self._menu_bottom + 1))
+
+    def _paint_menu(self):
+        """Draw the popup in the rows just above the footer. The first time it
+        needs N rows it scrolls the transcript up N (LF at the region's bottom
+        margin) — the way Claude Code's live area pushes output up — so no
+        transcript line is ever overwritten."""
+        _, _, items = self._menu
+        k = min(_MENU_ROWS, len(items))
+        rows = k + 1                         # + the key-hint row
+        bottom = self._menu_bottom
+        out = [_HIDE]
+        if rows > self._lifted:
+            out.append(_CSI + "%d;1H" % bottom + "\n" * (rows - self._lifted))
+            self._lifted = rows
+        self._sel = max(0, min(self._sel, len(items) - 1))
+        if self._sel < self._off:
+            self._off = self._sel
+        if self._sel >= self._off + k:
+            self._off = self._sel - k + 1
+        ascii_mode = self._glyphs()["v"] == "|"
+        lab_w = min(max(display_width(i.label) for i in items), _MENU_LABEL_MAX)
+        room = max(self.width - lab_w - 6, 0)
+        r = bottom - self._lifted + 1
+        for _ in range(self._lifted - rows):          # rows a longer list used
+            out.append(_CSI + "%d;1H" % r + _EL)
+            r += 1
+        for idx in range(self._off, self._off + k):
+            it = items[idx]
+            on = idx == self._sel
+            label = _clip(it.label, lab_w)
+            label += " " * (lab_w - display_width(label))
+            mark = (">" if ascii_mode else "›") if on else " "
+            out.append(_CSI + "%d;1H" % r + _EL + _CSI + "%d;%dH" % (r, self._x0 + 1)
+                       + (_fg(_REF) + "\033[1m" if on else _fg(_READOUT))
+                       + " " + mark + " " + label + _RST
+                       + "  " + _fg(_LABEL) + _clip(it.desc, room) + _RST)
+            r += 1
+        keys = ("up/dn select  enter accept  tab complete  esc close" if ascii_mode
+                else "↑↓ select  ⏎ accept  ⇥ complete  esc close")
+        count = "  %d/%d" % (self._sel + 1, len(items)) if len(items) > k else ""
+        out.append(_CSI + "%d;1H" % r + _EL + _CSI + "%d;%dH" % (r, self._x0 + 1)
+                   + _fg(_LABEL) + "   " + _clip(keys + count, self.width - 3) + _RST)
+        out.append(self._cursor_home())
+        self._w("".join(out))
+
+    def _menu_key(self, value):
+        """Handle a key while the popup is open. Returns ("submit", line),
+        True when the key was consumed, or False to fall through."""
+        start, end, items = self._menu
+        if value == "hist-prev":
+            self._sel = (self._sel - 1) % len(items)
+        elif value == "hist-next":
+            self._sel = (self._sel + 1) % len(items)
+        elif value == "escape":
+            self._dismissed = "".join(self.buf)
+            self._menu = None
+            self._w(self._menu_erase() + self._cursor_home())
+            return True
+        elif value in ("tab", "submit"):
+            it = items[self._sel]
+            text = it.drill if (value == "tab" and it.drill) else it.insert
+            self.buf[start:end] = list(text)
+            self.pos = start + len(text)
+            if value == "submit" and it.submit:
+                self._menu = None
+                self._w(self._menu_erase())
+                return ("submit", self._submit())
+        else:
+            return False
+        self._paint_row()
+        self._refresh_menu()
+        return True
+
     # ── main loop ────────────────────────────────────────────────────────
     def _loop(self):
         while True:
@@ -1124,6 +1282,12 @@ class _Editor:
                     return self._submit()
 
             elif kind == "key":
+                if self._menu is not None:
+                    handled = self._menu_key(value)
+                    if isinstance(handled, tuple):
+                        return handled[1]
+                    if handled:
+                        continue
                 if value == "submit":
                     return self._submit()
                 if value == "interrupt":
@@ -1167,6 +1331,7 @@ class _Editor:
                     self._paint_all()
 
             self._paint_row()
+            self._refresh_menu()
 
     def _submit(self):
         line = "".join(self.buf)

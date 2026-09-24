@@ -80,7 +80,7 @@ UTF-8 forcing must key off `sys.stdout.encoding`, not the platform — a POSIX b
 | Change what counts as a verified fix | `backend/patch/verifier.py` — then update `tests/test_verifier.py` |
 | Add a maintainer-facing metric | `backend/patch/verify_health.py` → `terminal_ui.py::render_verify_health()` |
 | Add a telemetry event | `self._emit("name", **fields)` in `cli_engine.py`; consume in `backend/observability/health.py` |
-| Add a slash command | `cx.py`: `_cmd_X()` + `COMMANDS` list + `_handle()` case + `main()` argv branch + both help texts. If it should also be a `cyphex <cmd>`, add it to `cyphex/cli.py` — see invariant 8 |
+| Add a slash command | `cx.py`: `_cmd_X()` + `COMMANDS` list + `_handle()` case + `main()` argv branch + a row in `terminal_ui.COMMAND_DECK` (drives both `/help` and the `/` popup; `<arg>` = required, `[arg]` = optional) + `QUICK_HELP`. Path-taking commands also go in `cx._PATH_CMDS` so their argument gets the file picker. If it should also be a `cyphex <cmd>`, add it to `cyphex/cli.py` — see invariant 8 |
 | Add a Rich panel | `terminal_ui.py` — follow `render_verify_health()`'s shape; use `_box(c)` |
 | Change the score | `scoring.py` only |
 | Add a patch template | `backend/patch/templates.py` |

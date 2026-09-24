@@ -931,29 +931,40 @@ def render_masthead(console=None, hint=True):
     c.print()
 
 
+#: Every REPL command as (command, argument, description). One table for the
+#: /help deck AND the "/" popup menu in deck_input, so the two can't disagree.
+#: An argument in <angle brackets> is required, [square] optional; a "flags"
+#: row with an empty command documents the command above it.
+COMMAND_DECK = [
+    ("/scan", "<path|url>", "Acquire & scan a target (local dir or GitHub repo)"),
+    ("/deep", "<path>", "Add the full DeepAgents attack swarm"),
+    ("/full", "<path>", "DeepAgents + network sweep (everything)"),
+    ("", "flags", "--network  --deepagents  --full  --no-patch  --verbose"),
+    ("/net", "[host]", "Network discovery, or audit a specific host"),
+    ("/watch", "", "Arm the RASP auto-healing daemon"),
+    ("/setup", "", "Install Semgrep, Nuclei; check Ollama & Docker"),
+    ("/doctor", "", "Built-In-Test — models, tools & dependencies"),
+    ("/benchmark", "[corpus]", "Score the Immune System — precision/recall/F1"),
+    ("/verify", "[path]", "Verify Gate maintainability panel — config/status/health"),
+    ("", "flags", "--selftest  --ci  --watch [s]  --json <file>"),
+    ("/verify", "<scan_id>", "Replay ONE run — score, verdicts, full waypoint trace"),
+    ("/status", "[path]", "System Observability — event log, last scan, errors"),
+    ("/runs", "[N]", "Recorded runs, newest first — status, score, verified"),
+    ("/netwatch", "", "Behavioural network flow monitor (Ctrl+C to stop)"),
+    ("/netaudit", "<host>", "Oracle-guided audit of one network host"),
+    ("/models", "", "List available local Ollama models"),
+    ("/history", "", "Recent intercepts this session"),
+    ("/clear", "", "Repaint the canopy"),
+    ("/help", "", "This command deck"),
+    ("/version", "", "Show the masthead and version"),
+    ("/exit", "/quit", "Power down · canopy dark"),
+]
+
+
 def render_help(console=None):
     """Command deck reference — avionics styled."""
     c = console or soc
-    rows = [
-        ("/scan", "<path|url>", "Acquire & scan a target (local dir or GitHub repo)"),
-        ("/deep", "<path>", "Add the full DeepAgents attack swarm"),
-        ("/full", "<path>", "DeepAgents + network sweep (everything)"),
-        ("", "flags", "--network  --deepagents  --full  --no-patch  --verbose"),
-        ("/net", "[host]", "Network discovery, or audit a specific host"),
-        ("/watch", "", "Arm the RASP auto-healing daemon"),
-        ("/setup", "", "Install Semgrep, Nuclei; check Ollama & Docker"),
-        ("/doctor", "", "Built-In-Test — models, tools & dependencies"),
-        ("/benchmark", "[corpus]", "Score the Immune System — precision/recall/F1"),
-        ("/verify", "[path]", "Verify Gate maintainability panel — config/status/health"),
-        ("", "flags", "--selftest  --ci  --watch [s]  --json <file>"),
-        ("/verify", "<scan_id>", "Replay ONE run — score, verdicts, full waypoint trace"),
-        ("/status", "[path]", "System Observability — event log, last scan, errors"),
-        ("/runs", "[N]", "Recorded runs, newest first — status, score, verified"),
-        ("/models", "", "List available local Ollama models"),
-        ("/history", "", "Recent intercepts this session"),
-        ("/clear", "", "Repaint the canopy"),
-        ("/exit", "/quit", "Power down · canopy dark"),
-    ]
+    rows = COMMAND_DECK
     t = Table.grid(padding=(0, 2, 0, 0))
     t.add_column(no_wrap=True, style=f"bold {REF}")
     t.add_column(no_wrap=True, style=TGT)

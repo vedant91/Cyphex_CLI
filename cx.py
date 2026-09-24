@@ -11,6 +11,7 @@ Usage:
 import asyncio
 import os
 import sys
+import shlex
 import shutil
 import subprocess
 try:
@@ -251,7 +252,8 @@ def _read_command(raw: bool = False, anchor=None) -> str:
     if raw:
         try:
             return deck_input.read_line(_session, completer=_completer,
-                                        history=_input_history, anchor=anchor)
+                                        history=_input_history, anchor=anchor,
+                                        suggest=_suggest if anchor else None)
         except (KeyboardInterrupt, EOFError):
             raise                     # the REPL's own arms own these
         except Exception:
@@ -397,6 +399,167 @@ def _completer(text, state):
     if state < len(options):
         return options[state]
     return None
+
+# ── "/" and "@" popup menus — the deck_input read_line(suggest=...) provider ──
+# "/" at the start of the line lists commands (from terminal_ui.COMMAND_DECK,
+# the same table /help renders); "@" anywhere, or the argument of a command
+# that takes a path, lists files under the working directory.
+_PATH_CMDS = {"/scan", "/deep", "/deepagents", "/full", "/verify", "/status",
+              "/benchmark", "/bench"}
+#: Never indexed for "@": VCS/tooling/dependency trees and scan sandboxes —
+#: thousands of files nobody means to pick, and slow to walk.
+_INDEX_SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__",
+               ".mypy_cache", ".pytest_cache", "dist", "build", ".cyphex",
+               ".claude", ".graphify", "graphify-out", "sandboxes", ".next"}
+_INDEX_MAX = 5000          # entries; a bigger tree is still reachable by typing a dir/
+_INDEX_BUDGET_S = 0.3      # wall-clock cap on one walk, so the popup never stalls
+_INDEX_TTL_S = 30.0        # re-walk after this, so new files show up
+_MENU_LIMIT = 50           # matches handed to the popup (it scrolls within them)
+_index_cache = {"cwd": None, "at": 0.0, "items": []}
+
+
+def _file_index():
+    """Relative paths under cwd, breadth-first (shallow entries first, so the
+    cap and the time budget cut the deep tail, not the top level); dirs end
+    with "/"."""
+    cwd = os.getcwd()
+    now = time.monotonic()
+    c = _index_cache
+    if c["cwd"] == cwd and now - c["at"] < _INDEX_TTL_S:
+        return c["items"]
+    items, queue, deadline = [], [""], now + _INDEX_BUDGET_S
+    while queue and len(items) < _INDEX_MAX and time.monotonic() < deadline:
+        rel = queue.pop(0)
+        try:
+            entries = sorted(os.scandir(os.path.join(cwd, rel) if rel else cwd),
+                             key=lambda e: e.name.lower())
+        except OSError:
+            continue
+        for e in entries:
+            if e.name.startswith("."):
+                continue
+            try:
+                is_dir = e.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                if e.name in _INDEX_SKIP:
+                    continue
+                items.append(rel + e.name + "/")
+                queue.append(rel + e.name + "/")
+            else:
+                items.append(rel + e.name)
+    c.update(cwd=cwd, at=now, items=items)
+    return items
+
+
+def _subsequence(q, s):
+    it = iter(s)
+    return all(ch in it for ch in q)
+
+
+def _path_items(q, at):
+    """File suggestions for a partial path `q`. A path-like q ("src/", "./x",
+    "~/Doc") lists that directory; a bare word fuzzy-searches the index."""
+    Sug = deck_input.Suggestion
+    if q == "" or "/" in q or q.startswith(("~", ".")):
+        typed_dir = q[:len(q) - len(os.path.basename(q))]
+        base = os.path.basename(q).lower()
+        target = os.path.expanduser(typed_dir) or "."
+        found = []
+        try:
+            for e in os.scandir(target):
+                if e.name.startswith(".") and not base.startswith("."):
+                    continue
+                if not e.name.lower().startswith(base):
+                    continue
+                try:
+                    is_dir = e.is_dir()
+                except OSError:
+                    continue
+                if is_dir and e.name in _INDEX_SKIP and base != e.name.lower():
+                    continue                  # still reachable by typing it in full
+                found.append(typed_dir + e.name + ("/" if is_dir else ""))
+                if len(found) >= 500:
+                    break
+        except OSError:
+            return []
+        paths = sorted(found, key=lambda p: (not p.endswith("/"), p.lower()))
+    else:
+        ql = q.lower()
+        ranked = []
+        for p in _file_index():
+            name = os.path.basename(p.rstrip("/")).lower()
+            pl = p.lower()
+            if name.startswith(ql):
+                rank = 0
+            elif ql in name:
+                rank = 1
+            elif ql in pl:
+                rank = 2
+            elif _subsequence(ql, pl):
+                rank = 3
+            else:
+                continue
+            ranked.append((rank, len(p), p))
+        paths = [p for _, _, p in sorted(ranked)]
+    out = []
+    for p in paths[:_MENU_LIMIT]:
+        is_dir = p.endswith("/")
+        final = shlex.quote(p) if any(ch.isspace() for ch in p) else p
+        out.append(Sug(p, "directory" if is_dir else "file", final + " ",
+                       False, (("@" if at else "") + p) if is_dir else None))
+    return out
+
+
+def _command_items(q):
+    Sug = deck_input.Suggestion
+    rows = getattr(ui, "COMMAND_DECK", None) if BOOT_UI else None
+    if not rows:
+        rows = [(c, "", "") for c in COMMANDS]
+    ql = q.lower()
+    ranked = []
+    for i, (cmd, arg, desc) in enumerate(rows):
+        if not cmd:
+            continue                          # a "flags" note row, not a command
+        if cmd.startswith(ql):
+            rank = 0
+        elif ql[1:] and ql[1:] in cmd:
+            rank = 1
+        elif len(ql) > 3 and ql[1:] in desc.lower():
+            rank = 2                          # 3+ letters: fewer accidental hits
+        else:
+            continue
+        alias = arg.startswith("/")            # e.g. /exit's "/quit"
+        takes_arg = bool(arg) and not alias
+        required = arg.startswith("<")
+        label = cmd if not takes_arg else f"{cmd} {arg}"
+        # A required argument inserts "cmd " and keeps editing (the file popup
+        # opens for path commands); anything else runs on Enter.
+        ranked.append((rank, i, Sug(label, desc + (f"  (also {arg})" if alias else ""),
+                                    cmd + (" " if required else ""), not required,
+                                    cmd + " " if takes_arg else None)))
+    return [it for _, _, it in sorted(ranked, key=lambda r: (r[0], r[1]))]
+
+
+def _suggest(text, pos):
+    """deck_input suggest= provider: (start, end, [Suggestion]) or None."""
+    before = text[:pos]
+    if before.startswith("/") and not any(ch.isspace() for ch in before):
+        end = len(text.split(None, 1)[0]) if text.strip() else pos
+        return 0, max(end, pos), _command_items(before)
+    start = max(before.rfind(" "), before.rfind("\t")) + 1
+    nxt = text.find(" ", pos)
+    end = len(text) if nxt < 0 else nxt
+    token = text[start:pos]
+    if token.startswith("@"):
+        return start, end, _path_items(token[1:], at=True)
+    first = before.split(None, 1)[0] if before.strip() else ""
+    if (first.lower() in _PATH_CMDS and before[:start].strip() == first
+            and not token.startswith("-")):
+        return start, end, _path_items(token, at=False)
+    return None
+
 
 if readline:
     readline.set_completer(_completer)
