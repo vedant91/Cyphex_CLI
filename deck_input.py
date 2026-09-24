@@ -80,6 +80,9 @@ _WRAP_OFF = "\033[?7l"       # DECAWM off — a full-width row can't wrap/scroll
 _WRAP_ON  = "\033[?7h"       # DECAWM on
 _EL       = "\033[2K"        # erase the whole line (never scrolls)
 _ED       = "\033[0J"        # erase cursor..end of screen (never scrolls)
+_EL0      = "\033[K"         # erase cursor..end of line — spares a left gutter
+_SAVE     = "\0337"          # DECSC / DECRC: the REPL's saved output cursor
+_RESTORE  = "\0338"
 _UP       = "\033[A"         # CUU — clamped at the margin, never scrolls
 _DOWN     = "\033[B"         # CUD — clamped at the margin, never scrolls
 
@@ -288,7 +291,8 @@ def pending_lines():
     return len(_pending_lines)
 
 
-def read_line(session=None, *, completer=None, history=None, console=None):
+def read_line(session=None, *, completer=None, history=None, console=None,
+              anchor=None):
     """Read one line with all four walls of the input field drawn.
 
     session   — the cx.py _session dict; only "caret" is read, for the glyph.
@@ -302,6 +306,11 @@ def read_line(session=None, *, completer=None, history=None, console=None):
                 "history disabled" instead of corrupting it.
     console   — Rich console to measure/style against (defaults to
                 terminal_ui.soc, the same one the rest of the deck uses).
+    anchor    — optional callable -> (top_row, left_col0, width). When given,
+                the box is painted at those ABSOLUTE rows (footer_dock's pinned
+                footer) instead of at the cursor, starting after a left gutter
+                the buddy occupies. Called on every full repaint, so a resize
+                re-anchors. None keeps the inline behaviour byte for byte.
 
     Returns the line without its trailing newline (no stripping).
     Raises KeyboardInterrupt on Ctrl+C, EOFError on Ctrl+D at an empty buffer.
@@ -318,7 +327,7 @@ def read_line(session=None, *, completer=None, history=None, console=None):
     try:
         editor = _Editor(sys.stdin.fileno(), sys.stdout.fileno(),
                          session=session, completer=completer,
-                         history=history, console=console)
+                         history=history, console=console, anchor=anchor)
     except Exception:
         return _fallback_read(session)
     try:
@@ -392,13 +401,16 @@ class _Editor:
     every bit of terminal state it touched in run()'s finally arm."""
 
     def __init__(self, in_fd, out_fd, session=None, completer=None,
-                 history=None, console=None):
+                 history=None, console=None, anchor=None):
         self.in_fd = in_fd
         self.out_fd = out_fd
         self.session = session or {}
         self.completer = completer
         self.console = console
         self.hist = history if isinstance(history, list) else []
+        self.anchor = anchor
+        self._top = None        # anchored: absolute row of the top wall
+        self._x0 = 0            # anchored: cells left of the box (buddy gutter)
 
         self.buf = []           # list[str] — one entry per codepoint
         self.pos = 0            # cursor index into self.buf
@@ -455,9 +467,11 @@ class _Editor:
         """Unconditional teardown — normal return, Enter, Ctrl+C, Ctrl+D,
         or an unexpected exception all land here."""
         try:
-            if self.painted:
+            if self.painted and self.anchor is None:
                 # Park below the closed box so command output renders under
-                # the field, exactly like the readline path leaves it.
+                # the field, exactly like the readline path leaves it. An
+                # anchored box lives in the pinned footer instead; the caller
+                # restores its saved output cursor.
                 self._w(_DOWN + "\r\r\n")
         except Exception:
             pass
@@ -656,6 +670,15 @@ class _Editor:
         return {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|"}
 
     def _geometry(self):
+        if self.anchor is not None:
+            try:
+                top, x0, width = self.anchor()
+                self._top, self._x0 = int(top), int(x0)
+                self.width = max(int(width), _MIN_WIDTH)
+                self.field = max(1, self.width - self._pcells - 2)
+                return
+            except Exception:
+                self.anchor = None      # fail back to the inline box
         width = None
         if ui is not None:
             try:
@@ -723,15 +746,31 @@ class _Editor:
         col = self._pcells + (1 if gutter else 0) + (cw - self.scroll)
         return "".join(row), col
 
+    def _at(self, r, col=0):
+        """CUP to box row r (0 = top wall) at box-relative column col."""
+        return _CSI + "%d;%dH" % (self._top + r, self._x0 + col + 1)
+
     def _paint_row(self):
         """Repaint ONLY the text row — the common case, one keystroke."""
         row, col = self._row()
+        if self.anchor is not None:
+            self._w(_HIDE + self._at(1) + _EL0 + row + self._at(1, col) + _SHOW)
+            return
         self._w(_HIDE + "\r" + _EL + row + _CSI + str(col + 1) + "G" + _SHOW)
 
     def _paint_all(self, initial=False):
         """Repaint all three rows — first paint, Ctrl+L, resize, post-Tab."""
         self._geometry()
         row, col = self._row()
+        if self.anchor is not None:
+            # Absolute rows, erase-to-EOL from the box edge: the buddy in the
+            # gutter to the left is never touched, and nothing can scroll.
+            self._w(_HIDE + self._at(0) + _EL0 + self._wall(True)
+                    + self._at(1) + _EL0 + row
+                    + self._at(2) + _EL0 + self._wall(False)
+                    + self._at(1, col) + _SHOW)
+            self.painted = True
+            return
         if initial or not self.painted:
             self._w(_HIDE + "\r" + _EL + self._wall(True) + "\r\n"
                     + _EL + row + "\r\n"
@@ -1023,8 +1062,13 @@ class _Editor:
 
     def _show_candidates(self, matches):
         """Print the candidate list without destroying the box: wipe the three
-        box rows, emit the list, then repaint a clean box beneath it."""
-        self._w(_HIDE + _UP + "\r" + _ED)
+        box rows, emit the list, then repaint a clean box beneath it.
+
+        Anchored (pinned footer): there is no room below the box, so the list
+        goes into the scrolling transcript at the caller's saved output cursor
+        (DECRC … DECSC), the way a shell prints completions above the prompt."""
+        if self.anchor is None:
+            self._w(_HIDE + _UP + "\r" + _ED)
         widest = max(display_width(m) for m in matches) + 2
         per_row = max(1, (self.width - 2) // widest)
         rows = []
@@ -1037,6 +1081,8 @@ class _Editor:
         if len(rows) > _MAX_CANDIDATE_ROWS:
             body += (_fg(_LABEL)
                      + "  … %d matches" % len(matches) + _RST + "\r\n")
+        if self.anchor is not None:
+            body = _HIDE + _RESTORE + body + _SAVE
         self._w(body)
         self.painted = False
         self._paint_all(initial=True)

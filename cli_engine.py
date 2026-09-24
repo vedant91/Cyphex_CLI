@@ -535,6 +535,14 @@ class CyphexEngine:
                 self._deck.tty = False  # static repaint; no Live takeover
             self._deck._frame_idx += 1
             console.print(self._deck._renderable())
+            # The buddy and a live status line sit in the pinned footer
+            # (footer_dock) beside the input box; the box above scrolls with
+            # the output, the footer does not.
+            import footer_dock
+            wp = self.trace.current
+            if footer_dock.adopt(console):
+                footer_dock.start_task(f"{wp.num}  {wp.title}",
+                                       state=trace_deck.buddy_state(wp))
         except Exception:
             pass
 
@@ -548,11 +556,6 @@ class CyphexEngine:
         import re as _re
         done = int(_re.sub(r"[^0-9]", "", step_num) or "0")
         total = int(step_total)
-
-        # Mascot cameo announcing the phase transition — brief, self-cleaning,
-        # never held open (each phase's own work handles its own feedback).
-        if MASCOT:
-            mascot.thinking(label=title, flourish=True)
 
         if SOC_UI:
             ui.render_step(done, total, title, elapsed, mode)
@@ -4270,6 +4273,17 @@ class CyphexEngine:
             if getattr(self.trace, "waypoints", None):
                 import trace_deck
                 trace_deck.render_trace_summary(self.trace)
+        except Exception:
+            pass
+        # Settle the footer buddy on the outcome; the REPL repaints the idle
+        # footer on its next turn (standalone runs release it at exit).
+        try:
+            import footer_dock
+            from backend.observability.trace import FAIL as _TRACE_FAIL
+            failed = any(w.derived_status() == _TRACE_FAIL
+                         for w in getattr(self.trace, "waypoints", []))
+            footer_dock.stop_task()
+            footer_dock.set_state("error" if failed else "success")
         except Exception:
             pass
         # Cleanup Docker Compose if used

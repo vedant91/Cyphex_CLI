@@ -1340,8 +1340,23 @@ def _defcon_style(level):
 def render_command_deck(session=None, console=None):
     """Print the status rail (line 1). The armed caret (line 2) is supplied by
     deck_prompt() as the readline prompt so it never fights the cursor."""
-    s = session or {}
     c = console or soc
+    c.print(command_rail(session, _cols(c)))
+
+
+def rail_ansi(session=None, width=80):
+    """The rail as one ANSI line, for footer_dock to paint at a fixed row."""
+    import io
+    buf = io.StringIO()
+    c = Console(file=buf, force_terminal=True, color_system="truecolor",
+                width=max(int(width), 20), theme=HUD_THEME, highlight=False)
+    c.print(command_rail(session, width), end="", overflow="crop", no_wrap=True)
+    return buf.getvalue()
+
+
+def command_rail(session=None, width=80):
+    """Status rail (posture · threats · genome · EKG · DEFCON · weapons)."""
+    s = session or {}
     defcon = int(s.get("defcon", 5))
     thrt_c = int(s.get("crit", 0)); thrt_h = int(s.get("high", 0))
     wpn = s.get("wpn", "SAFE")
@@ -1349,7 +1364,7 @@ def render_command_deck(session=None, console=None):
     gen = s.get("genome", "⟳v14")
     bpm = int(s.get("bpm", 68))
 
-    wide = _cols(c) >= 96          # room for GENOME + live EKG segments
+    wide = width >= 96             # room for GENOME + live EKG segments
     rail = Text("  ")
     def sep():
         rail.append(" ╶╌╴ ", style=PHOS_DIM)
@@ -1375,7 +1390,7 @@ def render_command_deck(session=None, console=None):
     rail.append("WPN ", style=LABEL)
     wpn_style = {"SAFE": LABEL, "ARMED": CAUT, "HOT": f"bold reverse {WARN}"}.get(wpn, LABEL)
     rail.append(f" {wpn} " if wpn == "HOT" else wpn, style=wpn_style)
-    c.print(rail)
+    return rail
 
 
 def _fg(hex):

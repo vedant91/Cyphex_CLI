@@ -1010,23 +1010,44 @@ class Mascot:
 _singleton = Mascot()
 
 
+def _docked(state, label=""):
+    """Route to the pinned footer buddy when one is live (footer_dock), so the
+    buddy stays next to the input box instead of animating inline and
+    scrolling away with the output. False -> caller renders inline as before."""
+    try:
+        import footer_dock
+        return footer_dock.set_state(state, label or None)
+    except Exception:
+        return False
+
+
 def idle(*, size=DEFAULT_TARGET_COLS):
+    if _docked("idle"):
+        return _NOOP
     return _singleton.idle(size=size)
 
 
 def searching(label="", *, flourish=False, size=DEFAULT_TARGET_COLS):
+    if _docked("searching", label):
+        return _NOOP
     return _singleton.searching(label, flourish=flourish, size=size)
 
 
 def thinking(label="", *, flourish=False, size=DEFAULT_TARGET_COLS):
+    if _docked("thinking", label):
+        return _NOOP
     return _singleton.thinking(label, flourish=flourish, size=size)
 
 
 def success(msg="", *, size=DEFAULT_TARGET_COLS):
+    if _docked("success", msg):
+        return None
     return _singleton.success(msg, size=size)
 
 
 def error(msg="", *, size=DEFAULT_TARGET_COLS):
+    if _docked("error", msg):
+        return None
     return _singleton.error(msg, size=size)
 
 

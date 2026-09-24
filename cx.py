@@ -83,6 +83,14 @@ except Exception:
     deck_input = None
     RAW_INPUT = False
 
+# Pinned footer (rail + input box + buddy), Claude-Code style. Only used when
+# the raw-mode editor drives input; any other terminal keeps the inline box.
+try:
+    import footer_dock
+except ImportError:
+    footer_dock = None
+
+
 # ── Terminal mascot (optional — _spinner() below just stays a plain line if
 #    unavailable; no-ops itself on non-tty/NO_COLOR either way) ──────────────
 try:
@@ -185,7 +193,47 @@ def _input_box_bottom(raw: bool = False):
             pass
 
 
-def _read_command(raw: bool = False) -> str:
+def _dock_rail():
+    if not BOOT_UI:
+        return ""
+    try:
+        return ui.rail_ansi(_session, shutil.get_terminal_size().columns)
+    except Exception:
+        return ""
+
+
+def _dock_live(raw: bool) -> bool:
+    """Pin the footer for this turn? Needs the raw editor (it is what paints
+    the box at fixed rows) and a terminal footer_dock accepts. Released again
+    if a turn ever runs without it, so a stale region can't outlive the box."""
+    if footer_dock is None:
+        return False
+    try:
+        if raw and footer_dock.reserve(_dock_rail()):
+            return True
+        footer_dock.release()
+    except Exception:
+        pass
+    return False
+
+
+def _echo_command(line: str):
+    """The box is pinned, so the submitted line would vanish from history on
+    the next turn — echo it into the transcript the way Claude Code does."""
+    if not line:
+        return
+    if BOOT_UI:
+        try:
+            caret, ccol = ui.deck_caret(_session)
+            ui.soc.print(f"[{ccol}]{caret}[/] [{ui.LABEL}]cx ▸[/] [{ui.READOUT}]{line}[/]",
+                         markup=True, highlight=False)
+            return
+        except Exception:
+            pass
+    print(f"{C.GREY}> {line}{C.RST}")
+
+
+def _read_command(raw: bool = False, anchor=None) -> str:
     """Read one command line from the user.
 
     raw=True  → deck_input's raw-mode editor: a complete box while typing,
@@ -200,7 +248,7 @@ def _read_command(raw: bool = False) -> str:
     if raw:
         try:
             return deck_input.read_line(_session, completer=_completer,
-                                        history=_input_history)
+                                        history=_input_history, anchor=anchor)
         except (KeyboardInterrupt, EOFError):
             raise                     # the REPL's own arms own these
         except Exception:
@@ -411,6 +459,15 @@ def _run_cyphex(args: list[str]):
     """Delegate to the existing cyphex_cli.py with the given args."""
     script = os.path.join(os.path.dirname(__file__), "cyphex_cli.py")
     cmd = [sys.executable, script] + args
+    if footer_dock is not None:
+        # Static here; a scan child adopts the footer and animates it itself
+        # (two processes animating the same rows would interleave paints).
+        what = next((a for a in args if not a.startswith("-")), "")
+        try:
+            footer_dock.start_task(f"running {os.path.basename(what) or what}".strip(),
+                                   state="working", animate=False)
+        except Exception:
+            pass
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:
@@ -1086,30 +1143,56 @@ def _repl():
     _show_header()
 
     while True:
-        # Persistent deck: repaint the status rail before each prompt so posture
-        # is always honest. Static snapshot per turn — the animated deck only
-        # runs inside rich.Live during operations, never against readline.
-        _deck()
         # ONE decision per turn, threaded through all four calls below: either
         # deck_input's editor paints the whole box (walls up while typing), or
         # _input_box_top/_input_box_bottom do (walls up after Enter). The
         # submitted field looks the same either way; only the live one differs.
         raw = _raw_input_live()
-        _input_box_top(raw)
+        docked = _dock_live(raw)
+        anchor = None
+        if docked:
+            # Pinned footer: rail + buddy + box live below the scroll region,
+            # so output scrolls above them instead of carrying them away.
+            try:
+                anchor = footer_dock.begin_input(_dock_rail())
+            except Exception:
+                anchor = None
+            if anchor is None:          # footer failed: this turn goes inline
+                docked = False
+                try:
+                    footer_dock.release()
+                except Exception:
+                    pass
+        if not docked:
+            # Persistent deck: repaint the status rail before each prompt so
+            # posture is always honest. Static snapshot per turn.
+            _deck()
+            _input_box_top(raw)
         try:
-            line = _read_command(raw).strip()
+            line = _read_command(raw, anchor).strip()
         except KeyboardInterrupt:
             # Ctrl+C → new line, don't quit
-            _input_box_bottom(raw)
-            print()
+            if docked:
+                footer_dock.end_input()
+            else:
+                _input_box_bottom(raw)
+                print()
             continue
         except EOFError:
             # Ctrl+D → quit
-            _input_box_bottom(raw)
+            if docked:
+                footer_dock.end_input()
+                footer_dock.release()
+            else:
+                _input_box_bottom(raw)
             _goodbye()
             break
 
-        _input_box_bottom(raw)
+        if docked:
+            footer_dock.end_input()
+            _echo_command(line)
+        else:
+            _input_box_bottom(raw)
         _handle(line)
 
 

@@ -68,6 +68,10 @@ py-modules = [
     # ui_palette  dependency-free colour roles; imported by terminal_ui, cx,
     #             deck_input, mascot and cli_engine.
     "ui_palette",
+    # footer_dock  pinned bottom footer (rail + input box + buddy) via a
+    #              terminal scroll region; used by cx.py, deck_input, mascot
+    #              and cli_engine, all defensively.
+    "footer_dock",
     # deck_input  raw-mode single-line editor for the REPL's boxed input field.
     #             cx.py imports it defensively at runtime; without it installed
     #             the workspace silently drops back to readline, which can only

@@ -32,6 +32,8 @@ The default pytest config deselects `-m integration` (those need a live Ollama).
 | `trace_deck.py` | Live per-phase trace deck + end-of-scan summary. |
 | `nl_router.py` | Plain English → slash command, guardrailed, local Ollama. |
 | `deck_input.py` | Raw-mode single-line editor behind the REPL's boxed input field. |
+| `footer_dock.py` | Pinned bottom footer (status rail + input box + 3-row buddy) via a terminal scroll region; the scan child adopts it through `CYPHEX_DOCK`. No-op without a POSIX TTY. |
+| `ui_palette.py` | **Sole** source of every UI colour (BLOOD SIGNAL roles). `tests/test_palette.py` fails on a hex or truecolor literal anywhere else. |
 | `mascot*.py` | Tiered terminal pixel-art mascot (8 modules). Always imported defensively. |
 | `terminal_ui.py` | All Rich rendering. Every `render_*` function. |
 | `scoring.py` | **Sole** source of truth for the 0-100 posture score. |
