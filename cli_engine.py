@@ -216,6 +216,19 @@ WORK_DIR = os.path.join(os.path.dirname(__file__), "backend", "sandboxes")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 
+def _partition_for_council(vulns):
+    """Split findings for the council's false-positive debate into
+    (static_keep, to_validate). STATIC findings ([STATIC] prefix) are
+    deterministic Semgrep/scanner source matches — the ones the patch phase
+    repairs — so they bypass the local-model vote and are always kept; only
+    dynamic/network findings are debated. Keeping static findings out of the
+    vote is what stops a wrong verdict from deleting a patchable vuln and
+    zeroing the after-patch score."""
+    def _static(v):
+        return str(getattr(v, "name", "")).startswith("[STATIC]")
+    return [v for v in vulns if _static(v)], [v for v in vulns if not _static(v)]
+
+
 class CyphexEngine:
     def __init__(self):
         self.scan_id = f"cli_{uuid.uuid4().hex[:8]}"
@@ -2205,17 +2218,25 @@ class CyphexEngine:
                     for i, e in enumerate(attack_graph.edges, 1):
                         print(f"  {i:>2}. [{e.priority}] {e.source}  ──{e.action}──▶  {e.target}")
 
-            if COUNCIL_AVAILABLE and context.confirmed_vulns:
+            # The council debates only DYNAMIC findings (probe/LLM-inferred, so
+            # false-positive-prone). STATIC findings are deterministic source-
+            # pattern matches from Semgrep + the built-in scanner — the exact
+            # findings the patch phase repairs — so they are NEVER put to a
+            # local-model vote: a wrong "false positive" verdict there would
+            # delete a real, patchable vuln and silently zero out the after-patch
+            # score. (This is what the header always said — "validating dynamic
+            # findings" — the code just used to debate the static ones too.)
+            static_keep, to_validate = _partition_for_council(context.confirmed_vulns)
+            if COUNCIL_AVAILABLE and to_validate:
                 try:
                     agent_header("Council", "Multi-Model Debate", "Validating dynamic findings against false positives")
                     debater = DebateProtocol()
-                    original_count = len(context.confirmed_vulns)
-                    validated_vulns = await debater.debate_batch(context.confirmed_vulns)
-
-                    discarded = original_count - len(validated_vulns)
-                    context.confirmed_vulns = validated_vulns
-                    print(f"\n  {C.G}[COUNCIL][OK]{C.RST} Validated {len(validated_vulns)} findings. {C.Y}Discarded {discarded} false positives.{C.RST}")
-                except Exception as e:
+                    validated_vulns = await debater.debate_batch(to_validate)
+                    discarded = len(to_validate) - len(validated_vulns)
+                    context.confirmed_vulns = static_keep + validated_vulns
+                    print(f"\n  {C.G}[COUNCIL][OK]{C.RST} Validated {len(validated_vulns)} dynamic finding(s), "
+                          f"kept {len(static_keep)} static. {C.Y}Discarded {discarded} false positive(s).{C.RST}")
+                except Exception:
                     print(f"\n  {C.Y}[COUNCIL][SKIP]{C.RST} Ollama not available — keeping all {len(context.confirmed_vulns)} findings unvalidated")
                     print(f"  {C.DIM}Start Ollama for AI false-positive filtering: ollama serve{C.RST}")
 
