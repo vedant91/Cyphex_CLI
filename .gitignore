@@ -64,3 +64,8 @@ cyber-security.pdf
 # cx.py's help text still suggests `/scan ./vibemart`, so keep the directory
 # locally — just don't commit it.
 /vibemart/
+
+# graphify viewer outputs (from upstream updates_p1)
+.graphify/
+graphify-studio-output/
+custom-viewer-bundle/

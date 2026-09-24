@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Dark Graph Viewer</title>
+    <!-- Include vis-network library -->
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #tour-panel {
+            display: none;
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(30, 30, 30, 0.95);
+            border: 2px solid #bb86fc;
+            border-radius: 8px;
+            padding: 20px;
+            width: 450px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.7);
+            z-index: 50;
+            text-align: center;
+        }
+        #tour-title {
+            color: #03dac6;
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        #tour-desc {
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+        #tour-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .tour-btn {
+            background-color: #bb86fc;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tour-btn:hover {
+            background-color: #9965f4;
+        }
+        .tour-btn:disabled {
+            background-color: #555;
+            color: #888;
+            cursor: not-allowed;
+        }
+        #tour-step-counter {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        #header {
+            padding: 15px 20px;
+            background-color: #1e1e1e;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        #header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            color: #bb86fc;
+        }
+        #controls {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            background-color: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #444;
+        }
+        #main-container {
+            display: flex;
+            flex: 1;
+            position: relative;
+        }
+        #network-container {
+            flex: 1;
+            height: 100%;
+        }
+        #info-panel {
+            width: 350px;
+            background-color: #1e1e1e;
+            border-left: 1px solid #333;
+            padding: 20px;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.5);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        #info-panel h2 {
+            margin-top: 0;
+            font-size: 1.1rem;
+            color: #03dac6;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        .info-row {
+            margin-bottom: 15px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #9e9e9e;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 0.95rem;
+            line-height: 1.4;
+            word-break: break-all;
+        }
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(18, 18, 18, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            font-size: 1.5rem;
+            flex-direction: column;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #bb86fc;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #info-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+        #info-panel::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        #info-panel::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        #info-panel::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h1>Codebase Knowledge Graph</h1>
+        <div id="controls">
+            <button id="btn-tour" style="background-color: #03dac6; color: #000; font-weight: bold;">Start Tour</button>
+            <button id="btn-fit">Fit to Screen</button>
+            <input type="file" id="file-input" accept=".json" style="display: none;" />
+            <button id="btn-load" onclick="document.getElementById('file-input').click()">Load graph.json</button>
+        </div>
+    </div>
+
+    <div id="tour-panel">
+        <div id="tour-title">Tour Step</div>
+        <div id="tour-desc">Description of the step goes here.</div>
+        <div id="tour-controls">
+            <button id="tour-prev" class="tour-btn">Previous</button>
+            <span id="tour-step-counter">1 / 10</span>
+            <button id="tour-next" class="tour-btn">Next</button>
+            <button id="tour-close" class="tour-btn" style="background-color: #cf6679; color: #fff;">End Tour</button>
+        </div>
+    </div>
+
+    <div id="main-container">
+        <div id="loading" style="display: none;">
+            <div class="spinner"></div>
+            <div id="loading-text">Rendering graph...</div>
+        </div>
+        <div id="network-container"></div>
+        <div id="info-panel">
+            <h2>Node Details</h2>
+            <div id="info-content">
+                <p style="color: #777; font-style: italic;">Select a node to view its details.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let network = null;
+        const container = document.getElementById('network-container');
+        const infoContent = document.getElementById('info-content');
+        const loading = document.getElementById('loading');
+
+        const typeColors = {
+            'file': '#bb86fc', // Purple
+            'code': '#03dac6', // Teal (most nodes are code)
+            'class': '#bb86fc',
+            'function': '#cf6679', // Pink
+            'method': '#ffb74d', // Orange
+            'concept': '#e1bee7', // Light Purple
+            'rationale': '#757575', // Grey (though filtered out)
+            'default': '#a0a0a0'
+        };
+
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            loading.style.display = 'flex';
+            document.getElementById('loading-text').innerText = 'Loading file...';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    processGraphData(data);
+                } catch (err) {
+                    alert('Error parsing JSON file: ' + err.message);
+                    loading.style.display = 'none';
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function processGraphData(graphData) {
+            document.getElementById('loading-text').innerText = 'Processing nodes...';
+
+            setTimeout(() => {
+                const nodes = new vis.DataSet();
+                const edges = new vis.DataSet();
+                let actualNodes = 0;
+                let actualEdges = 0;
+
+                // Handle nested graphify JSON structure
+                const graphRef = graphData.graph || graphData;
+
+                let sourceNodes = graphData.nodes || graphRef.nodes || [];
+                // Support dictionary-based node list if it happens to be exported that way
+                if (!Array.isArray(sourceNodes) && typeof sourceNodes === 'object') {
+                    sourceNodes = Object.values(sourceNodes);
+                }
+
+                // Create a set of kept node IDs to filter edges properly
+                const keptNodeIds = new Set();
+
+                sourceNodes.forEach(n => {
+                    const type = n.file_type || n.type || 'default';
+                    // Filtering out "rationale" nodes to reduce clutter
+                    if (type === 'rationale') return;
+
+                    const color = typeColors[type] || typeColors['default'];
+                    // ID can sometimes be missing or in 'key' in older graphify versions
+                    const nodeId = n.id || n.key;
+
+                    if (nodeId) {
+                        keptNodeIds.add(nodeId);
+                        nodes.add({
+                            id: nodeId,
+                            label: n.name || n.label || nodeId.split('/').pop(),
+                            title: nodeId, // Tooltip
+                            color: {
+                                background: color,
+                                border: darkenColor(color, 20),
+                                highlight: { background: lightenColor(color, 20), border: '#fff' }
+                            },
+                            font: { color: '#ffffff', strokeWidth: 0 },
+                            shape: type === 'code' ? 'box' : 'dot',
+                            size: type === 'code' ? 25 : 15,
+                            _rawData: n
+                        });
+                        actualNodes++;
+                    }
+                });
+
+                document.getElementById('loading-text').innerText = `Processing ${actualNodes} nodes and extracting edges...`;
+
+                setTimeout(() => {
+                    // Look for both edges and links (graphify output uses links)
+                    let sourceEdges = graphData.edges || graphRef.edges || graphData.links || graphRef.links || [];
+
+                    sourceEdges.forEach(e => {
+                        const source = e.source || e.from;
+                        const target = e.target || e.to;
+                        if (source && target && keptNodeIds.has(source) && keptNodeIds.has(target)) {
+                            edges.add({
+                                from: source,
+                                to: target,
+                                label: e.type || e.label || '',
+                                font: { size: 10, color: '#888', align: 'middle' },
+                                color: { color: '#555', highlight: '#bb86fc', hover: '#03dac6' },
+                                arrows: 'to',
+                                smooth: { type: 'continuous' }
+                            });
+                            actualEdges++;
+                        }
+                    });
+
+                    document.getElementById('loading-text').innerText = `Rendering ${actualNodes} nodes and ${actualEdges} edges...`;
+                    renderNetwork(nodes, edges);
+                }, 50);
+            }, 50);
+        }
+
+        function renderNetwork(nodes, edges) {
+            setTimeout(() => {
+                const data = { nodes: nodes, edges: edges };
+                const options = {
+                    interaction: {
+                        hover: true,
+                        navigationButtons: true,
+                        keyboard: true
+                    },
+                    physics: {
+                        enabled: true,
+                        barnesHut: {
+                            gravitationalConstant: -4000,
+                            centralGravity: 0.1,
+                            springLength: 150,
+                            springConstant: 0.04,
+                            damping: 0.09,
+                            avoidOverlap: 0.1
+                        },
+                        stabilization: {
+                            enabled: true,
+                            iterations: 200, // Reduced iterations for faster loading
+                            updateInterval: 50,
+                            onlyDynamicEdges: false,
+                            fit: true
+                        }
+                    },
+                    layout: {
+                        improvedLayout: false // Better performance for large graphs
+                    }
+                };
+
+                if (network) {
+                    network.destroy();
+                }
+
+                network = new vis.Network(container, data, options);
+
+                network.on("stabilizationProgress", function(params) {
+                    document.getElementById('loading-text').innerText = 'Physics stabilization: ' + Math.round((params.iterations/params.total) * 100) + '%';
+                });
+
+                network.on("stabilizationIterationsDone", function() {
+                    loading.style.display = 'none';
+                    // Disable physics after stabilization for better performance
+                    network.setOptions({ physics: false });
+                    network.fit();
+                });
+
+                network.on("click", function (params) {
+                    if (params.nodes.length > 0) {
+                        const nodeId = params.nodes[0];
+                        const nodeData = nodes.get(nodeId)._rawData;
+                        updateInfoPanel(nodeData);
+                    } else {
+                        infoContent.innerHTML = '<p style="color: #777; font-style: italic;">Select a node to view its details.</p>';
+                    }
+                });
+
+                // Fail-safe hide loading and disable physics
+                setTimeout(() => {
+                    loading.style.display = 'none';
+                    if(network) {
+                        network.setOptions({ physics: false });
+                        network.fit();
+                    }
+                }, 8000); // reduced from 10000
+            }, 50);
+        }
+
+        function updateInfoPanel(data) {
+            let html = '';
+
+            const renderField = (label, value) => {
+                if (value === undefined || value === null || value === '') return;
+                html += `<div class="info-row">
+                            <div class="info-label">${label}</div>
+                            <div class="info-value">${value}</div>
+                         </div>`;
+            };
+
+            const nodeId = data.id || data.key;
+            renderField('ID', nodeId);
+            renderField('Name', data.name || data.label);
+            renderField('Type', `<span style="color: ${typeColors[data.type] || '#ccc'}">${data.type || 'unknown'}</span>`);
+            renderField('File', data.file);
+            renderField('Line', data.line);
+
+            if (data.description) {
+                renderField('Description', data.description);
+            }
+            if (data.communities && data.communities.length > 0) {
+                renderField('Communities', data.communities.join(', '));
+            }
+
+            html += `<div class="info-row" style="margin-top: 20px;">
+                        <div class="info-label">Raw Data</div>
+                        <div class="info-value"><pre style="background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; border: 1px solid #333; margin:0; max-height: 400px;">${JSON.stringify(data, null, 2)}</pre></div>
+                     </div>`;
+
+            infoContent.innerHTML = html;
+        }
+
+        document.getElementById('btn-fit').addEventListener('click', () => {
+            if (network) network.fit({ animation: true });
+        });
+
+        function darkenColor(color, percent) {
+            var num = parseInt(color.replace("#",""),16),
+            amt = Math.round(2.55 * percent),
+            R = (num >> 16) - amt,
+            B = (num >> 8 & 0x00FF) - amt,
+            G = (num & 0x0000FF) - amt;
+            return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (B<255?B<1?0:B:255)*0x100 + (G<255?G<1?0:G:255)).toString(16).slice(1);
+        }
+        function lightenColor(color, percent) {
+            var num = parseInt(color.replace("#",""),16),
+            amt = Math.round(2.55 * percent),
+            R = (num >> 16) + amt,
+            B = (num >> 8 & 0x00FF) + amt,
+            G = (num & 0x0000FF) + amt;
+            return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (B<255?B<1?0:B:255)*0x100 + (G<255?G<1?0:G:255)).toString(16).slice(1);
+        }
+
+        // Disable physics immediately on start to show nodes faster
+        if (network) {
+            network.setOptions({ physics: false });
+        }
+
+        // --- Tour Logic ---
+        let currentTourStep = 0;
+        const tourSteps = [
+            {
+                title: "1. CLI Interaction",
+                desc: "The entry point of Cyphex. The user runs 'cyphex scan --path ./target', initializing the core orchestration pipeline inside cyphex_cli.py.",
+                targetNodes: ["cyphex_cli"] // Match part of ID
+            },
+            {
+                title: "2. Target Identification",
+                desc: "Cyphex identifies the target application context, reading files, parsing configs, and finding endpoints.",
+                targetNodes: ["agent_01_recon", "cyphex_cli_safe_extract_zip"]
+            },
+            {
+                title: "3. Sandbox Making",
+                desc: "Isolated deployment. Docker sandboxes are spun up to safely detonate exploits without risking the host.",
+                targetNodes: ["backend_sandbox_manager"]
+            },
+            {
+                title: "4. SAST (Static Analysis)",
+                desc: "Semgrep and the Custom Regex Engine scan the source code directly for vulnerabilities across 20+ languages.",
+                targetNodes: ["cyphex_scanner_run_semgrep"]
+            },
+            {
+                title: "5. DAST Agents",
+                desc: "Dynamic testing tools like Nuclei and ZAP interact with the running sandboxed application to find live vulnerabilities.",
+                targetNodes: ["cyphex_dynamic_scanner_run_nuclei", "cyphex_dynamic_scanner"]
+            },
+            {
+                title: "6. Red Team Deep Agents",
+                desc: "14 specialized autonomous agents (SQLi, XSS, SSRF, Auth) dynamically exploit the app in real-time.",
+                targetNodes: ["agents_agent_03_sqli", "deepagents_attack_graph"]
+            },
+            {
+                title: "7. Blue Team & Immune System",
+                desc: "The Isolation Forest ML builds a behavioral genome to detect anomalies, defending against the red team attacks.",
+                targetNodes: ["immune_behavioral_genome"]
+            },
+            {
+                title: "8. AI Simulation Attack",
+                desc: "The multi-model AI Council reviews the attacks, filters out false positives, and reaches a verdict on what is real.",
+                targetNodes: ["council_patch_council"] // using patch council as proxy for council
+            },
+            {
+                title: "9. Patching Phase",
+                desc: "The Patch Agent uses vectorless RAG and models like Qwen 2.5 Coder to generate deterministic fixes and apply them safely.",
+                targetNodes: ["agents_agent_10_patch"]
+            },
+            {
+                title: "10. Push to GitHub",
+                desc: "Finally, the verified patches are submitted directly as a Pull Request via GitHub webhooks.",
+                targetNodes: ["cyphex_github_hook"]
+            }
+        ];
+
+        function startTour() {
+            if (!network) {
+                alert("Please load a graph first.");
+                return;
+            }
+            currentTourStep = 0;
+            document.getElementById('tour-panel').style.display = 'block';
+            showTourStep();
+        }
+
+        function endTour() {
+            document.getElementById('tour-panel').style.display = 'none';
+            if (network) network.fit({ animation: true });
+            network.setSelection({ nodes: [] });
+        }
+
+        function showTourStep() {
+            const step = tourSteps[currentTourStep];
+            document.getElementById('tour-title').innerText = step.title;
+            document.getElementById('tour-desc').innerText = step.desc;
+            document.getElementById('tour-step-counter').innerText = `${currentTourStep + 1} / ${tourSteps.length}`;
+
+            document.getElementById('tour-prev').disabled = currentTourStep === 0;
+            document.getElementById('tour-next').disabled = currentTourStep === tourSteps.length - 1;
+
+            if (network && step.targetNodes) {
+                const nodesData = network.body.data.nodes.get();
+                let foundNodes = [];
+
+                step.targetNodes.forEach(target => {
+                    const matched = nodesData.find(n => n.id.includes(target) || (n.label && n.label.includes(target)));
+                    if (matched) foundNodes.push(matched.id);
+                });
+
+                if (foundNodes.length > 0) {
+                    network.setSelection({ nodes: foundNodes }, { unselectAll: true });
+                    network.focus(foundNodes[0], {
+                        scale: 1.2,
+                        animation: { duration: 1000, easingFunction: "easeInOutQuad" }
+                    });
+
+                    // Show details in info panel
+                    const nodeData = network.body.data.nodes.get(foundNodes[0])._rawData;
+                    updateInfoPanel(nodeData);
+                }
+            }
+        }
+
+        document.getElementById('btn-tour').addEventListener('click', startTour);
+        document.getElementById('tour-close').addEventListener('click', endTour);
+
+        document.getElementById('tour-prev').addEventListener('click', () => {
+            if (currentTourStep > 0) {
+                currentTourStep--;
+                showTourStep();
+            }
+        });
+
+        document.getElementById('tour-next').addEventListener('click', () => {
+            if (currentTourStep < tourSteps.length - 1) {
+                currentTourStep++;
+                showTourStep();
+            }
+        });
+
+        window.onload = () => {
+            loading.style.display = 'flex';
+            document.getElementById('loading-text').innerText = 'Attempting to load graph.json automatically...';
+
+            // Try multiple paths just in case
+            fetch('graph.json')
+                .then(response => {
+                    if (!response.ok) return fetch('.graphify/graph.json');
+                    return response;
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error('Not found');
+                    return response.json();
+                })
+                .then(data => {
+                    processGraphData(data);
+                })
+                .catch(err => {
+                    loading.style.display = 'none';
+                    console.log('Could not auto-load graph.json, user must load manually.', err);
+                });
+        };
+    </script>
+</body>
+</html>
