@@ -34,6 +34,7 @@
 > |---|---|
 > | **[▸ The Verify Gate](#the-verify-gate)** | **The guarantee.** Five independent checks, one tri-state verdict. `UNVERIFIABLE` is never rounded up to `PASS`, and a failed patch is rolled back to the original bytes. |
 > | **[▸ The Maintainability Panel](#the-maintainability-panel)** | **Proof the guarantee still holds.** A gate can rot silently — `cyphex verify` shows whether every check can still actually run, and `--ci` turns that into an exit code. |
+> | **[▸ Problem Statement Answered](#problem-statement-answered-the-maintainability-panel)** | **The full write-up.** How the verification capability was chosen, what shipped, both panels captured from this repo, the buddy's memory loop, and every maintainer surface described. |
 > | **[▸ Waypoint Tracing](#waypoint-tracing--and-the-cyphex-buddy)** | **What it was trying to do.** Every phase carries an explicit goal and records its sub-steps. Recorded even with no terminal attached, so a past run stays inspectable. |
 >
 > Everything below — the attack swarm, the immune system, the council — exists to **feed** that
@@ -41,6 +42,7 @@
 
 <p align="center">
   <b><a href="#the-verify-gate">◈ Verify Gate</a></b> · <b><a href="#the-maintainability-panel">◈ Maintainability Panel</a></b> ·
+  <b><a href="#problem-statement-answered-the-maintainability-panel">◈ Problem Statement Answered</a></b> ·
   <b><a href="#waypoint-tracing--and-the-cyphex-buddy">◈ Waypoint Tracing</a></b> ·
   <a href="#see-it-in-60-seconds">60-Second Demo</a> ·
   <a href="#quick-start">Quick Start</a> · <a href="#what-a-scan-actually-does">Sample Run</a> ·
@@ -58,11 +60,13 @@
 | **[Why CYPHEX exists](#why-cyphex-exists)** | The gap it fills |
 | ◈ **[THE VERIFY GATE](#the-verify-gate)** | ★ **The honesty guarantee — the reason this project exists** |
 | ◈ **[THE MAINTAINABILITY PANEL](#the-maintainability-panel)** · [full docs](docs/VERIFICATION_MAINTAINABILITY_PANEL.md) | ★ **Proof that guarantee is still working** |
+| ◈ **[PROBLEM STATEMENT ANSWERED](#problem-statement-answered-the-maintainability-panel)** | ★ **Verification: Maintainability Panel — approach, both panels, the buddy's agent memory, every surface** |
 | ◈ **[WAYPOINT TRACING](#waypoint-tracing--and-the-cyphex-buddy)** | ★ **What each phase was trying to do — and the buddy that shows it** |
 | **[See it in 60 seconds](#see-it-in-60-seconds)** | Run the guarantee yourself |
 | **[Quick Start](#quick-start)** · [Prerequisites](#prerequisites) · [Hardware tiers](#hardware-tiers) | Getting running |
 | **[What a scan actually does](#what-a-scan-actually-does)** · [Artifacts](#artifacts-it-leaves-behind) | Measured output |
 | **[Architecture](#architecture)** · [Patch ladder](#the-patch-ladder) · [FP scoring](#false-positive-scoring) | End-to-end mechanics |
+| **[Web interface](#web-interface--dashboard--api)** · [HTML report](#the-html-report) | Browser dashboard + FastAPI backend |
 | **[DeepAgents](#1-deepagents--an-oracle-guided-attack-swarm)** · [Oracle](#2-the-oracle--local-model-reasoning-spent-where-it-pays) · [RAG](#3-vectorless-rag--knowledge-tree--context-without-a-vector-db) · [Council](#4-the-council--multi-model-validation) | The four subsystems |
 | **[Immune system](#the-behavioural-immune-system)** · [Benchmark](#benchmarked-quality) | Anomaly detection |
 | **[Network scanning](#network-scanning-optional)** · [RASP + auto-heal](#rasp--auto-heal-daemon) | Beyond the codebase |
@@ -187,7 +191,399 @@ Both panels are read-only, degrade to plain text without Rich, and degrade again
 
 ---
 
+## Problem Statement Answered: the Maintainability Panel
+
+> **The problem statement, verbatim:**
+> *"Improve the part of your existing MVP most related to verification so that it can show
+> maintainers the configuration, status, or health of the modified capability. The experience
+> should clearly show success, failure, current status, and next steps."*
+
+**Answer in one line:** the part of CYPHEX most related to verification is the **[Verify Gate](#the-verify-gate)** — the component that decides whether an AI-written patch counts as a fix. We made that gate legible to a maintainer with two read-only panels, `cyphex verify` and `cyphex status`, plus a live self-test and a CI exit code. Both panels are shown below, captured from this repository.
+
+---
+
+### 1 · How we tackled it
+
+**Step one — pick the right capability.** CYPHEX has nine pipeline phases, but only one of them makes a *claim*. Everything upstream produces candidates; the Verify Gate decides which candidates are real. Five independent checks must all clear before a patch is called fixed:
+
+| # | Check | Fails when |
+|---|---|---|
+| 1 | **finding gone on re-scan** | the vulnerability still matches after the patch |
+| 2 | **file still compiles** | `node --check` / `py_compile` / `tsc --noEmit` rejects it |
+| 3 | **no suppression comments** | the model added `nosemgrep`, `eslint-disable`, `# noqa`, `@ts-ignore`, `@ts-expect-error`, `noinspection`, `pragma: no cover` (7 patterns tracked) |
+| 4 | **≤ 70% of the file deleted** | the "fix" is really a deletion |
+| 5 | **diff inside the blast radius** | Critical 80 lines · High 60 · Medium 40 · Low 30 |
+
+The verdict is tri-state — `PASS` · `FAIL` · `UNVERIFIABLE` — and `finding_gone`/`builds` are `True`/`False`/**`None`**. `None` means *unmeasured* and is never coerced upward. A check that ran and failed always outranks a check that never ran.
+
+**Step two — name the failure mode we were actually fixing.** The gate was already correct. Its verdicts were already durably written to `<sandbox>/.cyphex/patches.json`. The defect was that **no command ever read them back**, one manifest per scan, nothing aggregated. That produces a silent decay:
+
+```mermaid
+flowchart LR
+    A["tsc uninstalled<br/>(or PATH changed)"] --> B["TS/TSX build check<br/>cannot run"]
+    B --> C["verifier returns None<br/>— never a silent PASS"]
+    C --> D["every TS verdict<br/>= UNVERIFIABLE"]
+    D --> E["patches applied<br/>but never counted"]
+    E --> F["score stops improving"]
+    F --> G["nothing anywhere<br/>says why"]
+```
+
+Refusing to claim an unverified fix is exactly right. **Correctness without visibility is still a broken deployment** — the maintainer sees a pipeline that quietly stopped producing verified fixes and has no way to learn the cause is one missing binary.
+
+**Step three — build read-only aggregators, not new state.** Both panels read state the pipeline *already* writes. Neither mutates a manifest. Neither needs a scan running.
+
+```mermaid
+flowchart TB
+    subgraph scan["cyphex scan"]
+        GATE{"Verify Gate<br/>5 checks"}
+    end
+    subgraph disk["Durable state — backend/sandboxes/*/.cyphex/"]
+        MAN[("patches.json<br/>one entry per patch attempt")]
+        EV[("events.jsonl<br/>append-only event stream")]
+    end
+    subgraph read["Read-only aggregators"]
+        VH["backend/patch/verify_health.py<br/>get_verify_health()"]
+        OH["backend/observability/health.py<br/>get_system_health()"]
+    end
+    subgraph out["Maintainer surfaces"]
+        V["cyphex verify"]
+        S["cyphex status"]
+        CI["--ci → exit 0/1/2"]
+        J["--json → machine-readable"]
+    end
+    GATE -->|"PASS / FAIL / UNVERIFIABLE"| MAN
+    scan -->|"emit() · never raises"| EV
+    MAN --> VH --> V
+    VH --> CI
+    VH --> J
+    EV --> OH --> S
+```
+
+**Step four — map every requirement to something that exists.**
+
+| PS requirement | Implementation | Where it appears |
+|---|---|---|
+| **Configuration** of the modified capability | blast-radius caps per severity, count of tracked suppression patterns, per-check toolchain readiness annotated with *the gate each dependency serves* | `CONFIGURATION` block, `cyphex verify` |
+| **Status** — current | manifests found, patch attempts recorded, durability-rate bar, PASS/FAIL/UNVERIFIABLE counts | `STATUS` block, `cyphex verify` |
+| **Status** — historical | per-CWE durability breakdown, scan-over-scan trend, recent verifications, run history with interrupted-run count | `STATUS` + `RUN HISTORY`, `cyphex verify` |
+| **Health** | verdict lamp `GATE HEALTHY` / `GATE DEGRADED` / `GATE UNUSED`; live functional self-test under `--selftest`; exit code under `--ci` | `cyphex verify`, `cyphex verify --selftest`, `cyphex verify --ci` |
+| **Success** clearly shown | `PASS` counts in phosphor-green, filled durability bar, `GATE HEALTHY` lamp, `✓` per working check | both panels |
+| **Failure** clearly shown | `FAIL` counts in warn-bright, `why (evidence key → count)` naming the exact check that failed, `✗` per broken dependency, `RECENT ERRORS` tail, `SYSTEM DEGRADED` lamp | both panels |
+| **Current status** | last-scan reconstruction: phase timings, agent outcomes, memory rates, completion state, full waypoint trace | `cyphex status` |
+| **Next steps** | derived from observed state, conditional, and specific — never templated filler | `NEXT STEPS`, both panels |
+
+Three rules held the design together:
+
+1. **No new state.** A panel that needs its own database is a second thing that can rot.
+2. **Derived, never templated.** Each `NEXT STEPS` entry appears only when its triggering condition holds, and names the concrete command that fixes it.
+3. **Presence ≠ works.** `--selftest` *drives* each check rather than probing for a binary — a linter that has stopped rejecting things still reports as installed.
+
+---
+
+### 2 · The outcome
+
+Two commands, one screen each. Both images below are direct captures of this repository's own state — no mock-ups, no hand-written sample output.
+
+#### Image 1 — `cyphex verify --selftest` · the Verify Gate maintainability panel
+
+<p align="center"><img src="assets/panel_verify.png" width="900" alt="cyphex verify --selftest — the Verify Gate maintainability panel showing CONFIGURATION (blast-radius caps, suppression guards, toolchain readiness, live self-test), STATUS (52 patch attempts, 100% durable-verified, per-CWE breakdown, trend, recent verifications), RUN HISTORY, NEXT STEPS, and a GATE HEALTHY verdict lamp" /></p>
+
+Everything the problem statement asks for, in reading order:
+
+| Region | PS requirement | What it shows here |
+|---|---|---|
+| `CONFIGURATION` | **configuration** | caps `Critical 80 · High 60 · Medium 40 · Low 30`, 7 suppression patterns, and 5 toolchain deps each labelled with *the gate it serves* (`gates: TS/TSX build check`) |
+| `live self-test` | **health** | each check actually driven — `tsc` handed a known type error and confirmed to *reject* it, the scanner run against a known-vulnerable fixture, `httpx` driven into a closed port |
+| `STATUS` | **status + success** | 22 manifests · 52 attempts · `100.0% durable-verified` · `PASS 52 FAIL 0 UNVERIFIABLE 0` |
+| `by CWE` + `trend` | **historical status** | durability per CWE (CWE-89 23 passes, CWE-79 7, CWE-78 6 …) and the rate per scan, oldest → newest |
+| `RUN HISTORY` | **current status** | 33 runs recorded, 6 completed, **14 interrupted** — surfaced, not hidden |
+| `NEXT STEPS` | **next steps** | derived: *"14 of 33 recorded run(s) never reached a `scan_end` … their numbers are not comparable to completed runs"* |
+| `▐ GATE HEALTHY ▌` | **health verdict** | one lamp, three states, mirrored by `--ci` exit `0` |
+
+#### Image 2 — `cyphex status` · system observability, and what failure looks like
+
+<p align="center"><img src="assets/panel_status.png" width="900" alt="cyphex status — system observability panel showing event log, last scan phase timings, DeepAgents swarm outcomes, cognee memory recall rate, the full waypoint trace with per-phase goals, recent errors, and a SYSTEM DEGRADED verdict lamp" /></p>
+
+This is the more important of the two screenshots, because **it is the failing one** — and it fails legibly:
+
+- `status  STARTED — no scan_end seen` — the run never finished, stated plainly instead of being rendered as a clean result.
+- `DYNAMIC VULNERABILITY SCAN  792.5s` next to eight phases under 30s — the cost is visible, not averaged away.
+- `DeepAgents swarm  2 ok · 2 timed out · 0 errored` and `cognee memory  recall 8/9 · persist 0/0`.
+- The waypoint trace marks `▲ 4/9` **warn**, not ok, because two sub-steps timed out — *a waypoint is as bad as its worst step*.
+- `RECENT ERRORS` names them by type: `deepagent_timeout DeepSQLiAgent`, `cognee_recall_result TimeoutError: recall exceeded 20s`.
+- `NEXT STEPS` turns each into an action: *"2 DeepAgent(s) timed out — check Ollama load/timeouts if this is frequent."*
+- `▐ SYSTEM DEGRADED ▌`.
+
+Note what the two lamps do **not** do: the gate reads `GATE HEALTHY` while the system reads `SYSTEM DEGRADED`. They are answering different questions — *can I still verify?* versus *did the last run go well?* — and collapsing them into one number would have destroyed both answers.
+
+#### The 60-second proof
+
+Break the toolchain and watch the panel catch it:
+
+```bash
+PATH=/usr/bin:/bin cyphex verify        # node and tsc now invisible
+```
+```
+toolchain readiness — what each check depends on to run at all
+  ✗ node           not installed        gates: JS/JSX build check
+  ✗ tsc            not installed        gates: TS/TSX build check
+  ✓ py_compile     stdlib               gates: Python build check
+  ✓ static_scanner importable           gates: static re-scan (finding_gone)
+
+NEXT STEPS
+  → Install TypeScript (`npm install -g typescript`) — TS/TSX patches currently
+    verify as UNVERIFIABLE, not PASS, because the build check can't run.
+  → Install Node.js — JS/JSX build checks can't run without it.
+```
+
+The lamp still reads `GATE HEALTHY` and `--ci` still exits `0`. That is deliberate: only `static_scanner` and `py_compile` are *required*, because a Python-only project genuinely does not need Node. Language-specific checks surface as readiness failures and next steps rather than failing someone's build.
+
+---
+
+### 3 · The CYPHEX buddy — and how it works using agent memory
+
+<p align="center"><img src="assets/buddy_hero.png" width="96" alt="The CYPHEX buddy — a pixel-art robot in a dark chassis with a red-outlined screen head reading CYPHEX" /></p>
+
+#### The buddy is a state indicator, not decoration
+
+The buddy is **pinned in the footer beside the input box — three rows, the box's own height — and never scrolls with the output**, like Claude Code's status bar. Its face is **bound to trace state rather than to a timer**. It advances on real trace transitions, so it visibly works harder when the pipeline is doing more.
+
+```
+╭─ ◈ CYPHEX  5/9  IMMUNE SYSTEM - BUILD GENOME ──────────────────── 143s ─╮
+│  ▛▀▀▀▀▜   goal · Learn this app's normal behaviour well enough to      │
+│  ▌▪▪▪ ▐   ✓ genome source     fresh genome                      0.0s   │
+│  ▙▄▄▄▄▟   ▲ generation 0      blocked 22/30 · 73.3% · red: url_e 0.5s  │
+│   ▀  ▀    ✓ generation 1      blocked 18/20 · 90.0%             0.1s   │
+╰────────────────────────────────────────────────────────────────────────╯
+```
+
+The binding is a pure function of the waypoint, not a mood — `_mascot_state()` in [trace_deck.py](trace_deck.py):
+
+```python
+def _mascot_state(self, wp):
+    if wp is None:                              return "idle"
+    status = wp.derived_status() if wp.status != RUNNING else RUNNING
+    if status == FAIL:                          return "error"
+    if wp.status != RUNNING and status in (OK, ST_WARN):
+        return "success"
+    return STATE_FOR_WAYPOINT.get(str(wp.num).split("/")[0].strip(), "working")
+```
+
+Here is the buddy's full sprite set — the art the terminal renderer draws from:
+
+<p align="center"><img src="assets/buddy_sheet.png" width="820" alt="The CYPHEX buddy sprite sheet — POSES (idle, walk, typing, scan, success), EXPRESSIONS (neutral, thinking, focused, alert, hacking, error), ANIMATIONS (loading, scanning, uploading), and SIZE VARIANTS at 16px, 32px and 64px" /></p>
+
+Each state the trace can be in resolves to one sprite stem, in [mascot_anim.py](mascot_anim.py):
+
+| `_mascot_state()` | Sprite stem (alt) | Chosen when |
+|---|---|---|
+| `uploading` | `ANIMATIONS · UPLOADING` | phase `1` — fetching source |
+| `searching` | `ANIMATIONS · SCANNING` *(alt `POSES · SCAN`)* | phases `2`, `3b`, `4` — static analysis, network sweep, dynamic scan |
+| `working` | `POSES · TYPING` | phases `3`, `6`, `8` — sandbox deploy, attack simulation, patch + verify |
+| `thinking` | `ANIMATIONS · LOADING` *(alt `EXPRESSIONS · THINKING`)* | phases `5`, `7` — genome build, report |
+| `success` | `POSES · SUCCESS` | waypoint finished `OK` or `WARN` |
+| `error` | `EXPRESSIONS · ERROR` *(alt `EXPRESSIONS · ALERT`)* | any step returned `FAIL` |
+| `idle` | `POSES · IDLE` | no waypoint open |
+
+`SIZE VARIANTS` is the render ladder the sheet was authored against; the footer buddy is the same TV head redrawn at **9×4 cells** (antenna in the rail row, head the input box's height), with each `EXPRESSIONS` face drawn as real text on its screen — `!`, `x_x`, `>_`, `> <`, `...`, `CYPHEX` — so it stays legible where downsampled pixels would not. `WALK` is drawn but currently unbound.
+
+Rendered into the trace box, that resolves per phase as:
+
+| Waypoint | Buddy | Animation |
+|---|---|---|
+| `1/9` GETTING SOURCE CODE | `▌▘  ▘▐` | `uploading` — fetching |
+| `2/9` STATIC CODE ANALYSIS | `▌▘▸  ▐` | `searching` — scanning |
+| `3/9` DEPLOYING SANDBOX | `▌▘  ▘▐` | `working` |
+| `4/9` DYNAMIC VULNERABILITY SCAN | `▌▘▸▸ ▐` | `searching` — attacking |
+| `5/9` IMMUNE SYSTEM — BUILD GENOME | `▌▪▪▪ ▐` | `thinking` — the highlighted phase |
+| `6/9` AI ATTACK SIMULATION | `▌▘  ▘▐` | `working` |
+| `7/9` SECURITY REPORT | `▌▪▪  ▐` | `thinking` |
+| `8/9` AI PATCH + VERIFY | `▌▘  ▘▐` | `working` |
+
+Any failed step flips it to `error`; a clean finish flips it to `success`. Because the same state drives the buddy, the trace text, the durable event log, and `cyphex status`, **the picture cannot drift from the record**. A spinner tells you the process is alive; the buddy tells you *which kind of work* is alive.
+
+#### The agent memory loop the buddy is watching
+
+Phase `8/9` — the one the buddy renders as `working` — is a **recall → generate → verify → write-back** loop across three separate memory stores. Verdicts are not just displayed; they are what the next scan learns from.
+
+```mermaid
+flowchart LR
+    F["confirmed finding<br/>CWE + function"] --> R1["patch_memory.recall()<br/>exact cwe:semantic_hash"]
+    R1 -->|hit| GEN["patch candidate"]
+    R1 -->|miss| R2["cognee.recall_similar_fixes()<br/>semantic, cross-project"]
+    R2 --> R3["session.get_prior_context()<br/>lessons + CWE:strategy patterns"]
+    R3 --> GEN
+    GEN --> GATE{"Verify Gate"}
+    GATE -->|PASS| W1["patch_memory.store(verified=True)"]
+    GATE -->|PASS| W2["session.add_lesson() + add_pattern('CWE:strategy')"]
+    GATE -->|PASS| W3["cognee.remember_fix() — cross-project graph"]
+    GATE -->|FAIL| RB["rollback to original bytes<br/>patch_memory.invalidate()"]
+    GATE -->|FAIL| W4["session.add_lesson('… FAILED — try a different approach')"]
+```
+
+| Store | Scope | Key | Written when |
+|---|---|---|---|
+| [`backend/rag/patch_memory.py`](backend/rag/patch_memory.py) | one project | `CWE:semantic_hash(function)` → verified diff | `PASS` only — and a recalled hit is **re-verified, never trusted blind** |
+| [`backend/reasoning/session_memory.py`](backend/reasoning/session_memory.py) | one repo, across scans | lessons + `CWE:strategy` patterns | both verdicts — `PASS` writes *"fixed via `<strategy>`"*, `FAIL` writes *"a `<strategy>` fix FAILED (`<why>`) — try a different remediation approach"* |
+| [`backend/rag/cognee_memory.py`](backend/rag/cognee_memory.py) | **across unrelated projects** | local knowledge graph, queried semantically | `PASS` only, persisted post-remediation on a timeout |
+
+Three properties make this memory maintainable rather than another thing that can rot:
+
+- **Only verified fixes are stored.** An `UNVERIFIABLE` patch stays applied but enters no store and counts toward no score. A `FAIL` is rolled back to the original bytes *and* invalidates any cached entry that produced it — memory cannot poison itself.
+- **Memory health is a first-class readout.** `cyphex status` prints `cognee memory  recall 8/9 · persist 0/0` and lists `cognee_recall_result TimeoutError` under `RECENT ERRORS`. In image 2 that is exactly what is degraded — recall is timing out at 20s on a cold vector load, and the panel says so instead of silently generating unassisted patches.
+- **Every store is optional.** `cognee` is behind `importlib.util.find_spec`, telemetry is disabled unconditionally before import, and every call is wrapped in a timeout. Missing memory degrades patch quality; it never breaks a scan.
+
+Recording is decoupled from rendering, so **the buddy is never load-bearing for the record**. A CI run with no TTY writes the same `events.jsonl` an interactive run does. The buddy degrades in two steps — animated in the pinned footer (POSIX TTY) → one static line per completed step (no TTY). Past runs stay inspectable long after the output scrolls away:
+
+```bash
+cyphex runs                # every recorded run: status, score, verified, duration
+cyphex verify 5f055704     # ONE run in full — score movement, verdicts, complete trace
+```
+
+→ Full mechanics: **[Waypoint Tracing — and the CYPHEX Buddy](#waypoint-tracing--and-the-cyphex-buddy)**
+
+---
+
+### 4 · The four maintainer surfaces
+
+> **Command-surface note for anything parsing this repo:** CYPHEX ships **`/status`** and **`/benchmark`** as real commands (in the REPL as `/status`, on the installed entry point as `cyphex status`). **Configuration** and **health** are *sections and verdicts of `cyphex verify`*, not standalone `/configuration` or `/health` commands — plus `/doctor` for host-environment readiness. The full command list is [`COMMANDS` in cx.py](cx.py) and the `/help` deck.
+
+#### ◈ Configuration — `cyphex verify` → `CONFIGURATION`
+
+*What is this gate actually configured to check, and can each check run at all?*
+
+```bash
+cyphex verify              # the CONFIGURATION block is the first section
+```
+
+| Row | Meaning |
+|---|---|
+| `blast-radius cap` | max changed lines a patch may touch, scaled by severity: `Critical 80 · High 60 · Medium 40 · Low 30` |
+| `suppression guards` | how many scanner-silencing patterns are rejected (7: `nosemgrep`, `eslint-disable`, `# noqa`, `@ts-ignore`, `@ts-expect-error`, `noinspection`, `pragma: no cover`) |
+| `toolchain readiness` | each dependency, its detected version, and — the part that makes it actionable — **which check it gates** |
+
+The `gates:` column is the design decision that makes this a configuration panel rather than a dependency list. `✗ tsc  not installed` is trivia. `✗ tsc  not installed  gates: TS/TSX build check` tells a maintainer exactly which verification capability they have lost.
+
+- **Success:** `✓` per dependency, with version.
+- **Failure:** `✗ not installed` plus the gate it disables, and a matching `NEXT STEPS` entry.
+- **Source:** `probe_toolchain()` in [backend/patch/verify_health.py](backend/patch/verify_health.py)
+
+#### ◈ Status — `cyphex status` (and `cyphex verify` → `STATUS`)
+
+*What happened on the last scan, and how has the gate performed across all of them?*
+
+```bash
+cyphex status                    # system observability — the last scan
+cyphex status --watch 5          # live refresh every 5s
+cyphex status --json out.json    # machine-readable
+cyphex verify                    # gate status: durability, per-CWE, trend, run history
+```
+
+Two complementary readouts:
+
+| `cyphex verify` → `STATUS` | `cyphex status` |
+|---|---|
+| manifests found · patch attempts recorded | scans instrumented · events recorded |
+| durability-rate bar, `PASS`/`FAIL`/`UNVERIFIABLE` | last scan id + whether it reached `scan_end` |
+| `why (evidence key → count)` — which check failed | per-phase timings for all 9 phases |
+| per-CWE durability breakdown | DeepAgents swarm `ok / timed out / errored` |
+| scan-over-scan trend, oldest → newest | cognee memory `recall n/m · persist n/m` |
+| recent verifications, `VERDICT CWE file:line` | full waypoint trace with per-phase goals |
+| run history: completed vs **interrupted** | `RECENT ERRORS` tail, typed |
+
+- **Success:** filled bar, `PASS` counts, `✓` waypoints, `completed` runs.
+- **Failure:** `FAIL` counts with the evidence key that caused them, `▲` warn waypoints, `STARTED — no scan_end seen`, typed error tail.
+- **Source:** `get_verify_health()` and `get_system_health()` in [backend/patch/verify_health.py](backend/patch/verify_health.py) · [backend/observability/health.py](backend/observability/health.py)
+
+#### ◈ Health — the verdict lamp, `--selftest`, `--ci`, and `/doctor`
+
+*Is the gate still able to do its job — and is this host still able to run CYPHEX?*
+
+```bash
+cyphex verify                # lamp: GATE HEALTHY / GATE DEGRADED / GATE UNUSED
+cyphex verify --selftest     # live functional self-test — drive each check
+cyphex verify --ci           # exit 0 healthy / 1 degraded / 2 unusable
+cyphex doctor                # host readiness: python, git, node, npm, curl, Ollama
+```
+
+Health is deliberately answered at three depths:
+
+| Depth | Question | Surface |
+|---|---|---|
+| **Lamp** | is the gate healthy right now? | `▐ GATE HEALTHY ▌` · `▐ GATE DEGRADED ▌` · `▐ GATE UNUSED ▌`; `cyphex status` has its own `SYSTEM NOMINAL` / `SYSTEM DEGRADED` / `NO TELEMETRY YET` |
+| **Self-test** | are the checks *functionally* working, not merely installed? | `--selftest` — `py_compile` must reject invalid syntax; `tsc` must flag a known type error; the scanner must detect a finding in a known-vulnerable fixture; `httpx` must handle a closed port |
+| **Exit code** | can a machine gate on this? | `--ci` → `0` healthy · `1` degraded · `2` unusable |
+
+`GATE UNUSED` is a distinct state on purpose: a gate with zero recorded patch attempts is neither healthy nor broken, and reporting it as healthy would be the same overclaim the whole project exists to refuse.
+
+`cyphex doctor` is the separate, lower layer — host readiness rather than gate integrity. It reports `[OK]` / `[!!]` per dependency and a `PARTIAL` verdict when something like a stopped Ollama would degrade a scan.
+
+- **Success:** `GATE HEALTHY`, every self-test `✓`, exit `0`, doctor all `[OK]`.
+- **Failure:** `GATE DEGRADED`, a self-test `✗` with the reason, exit `1`/`2`, doctor `[!!]` + `PARTIAL`.
+- **Source:** `run_gate_selftest()` and `compute_gate_exit_code()` in [backend/patch/verify_health.py](backend/patch/verify_health.py) · [cyphex/doctor.py](cyphex/doctor.py)
+
+#### ◈ Benchmark — `cyphex benchmark`
+
+*Is the detection capability the gate depends on still as good as we claim?*
+
+```bash
+cyphex benchmark                          # bundled 76-sample corpus, fully offline
+cyphex benchmark corpus.json              # your own labelled corpus
+cyphex benchmark --threshold 0.5          # sweep the block threshold
+cyphex benchmark --json out.json          # machine-readable
+```
+
+Scores the Behavioural Immune System against a labelled corpus and writes [`benchmark_report.json`](benchmark_report.json). Measured on this repository:
+
+| Metric | Value |
+|---|---|
+| Corpus | 76 samples — 46 attack / 30 benign |
+| Precision | **97.7%** |
+| Recall | **91.3%** |
+| F1 | **94.4%** |
+| Accuracy | **93.4%** |
+| False-positive rate | **3.3%** |
+| Throughput | 0.04 ms/sample |
+| Detector | `BehavioralGenome` (heuristic + IsolationForest) |
+| Gate | `▐ GATE PASS ▌` — recall ≥ 80%, FPR ≤ 10% |
+
+The panel prints per-class detection (`xss 8/8`, `sqli 8/10`, `cmdi 6/7`, `path_traversal 4/5`) **and then names every residual miss and false positive individually** — `[cmdi] | whoami (0.00)`, `[sqli] admin'-- (0.30)`, and the one benign string it wrongly blocks: `Our A/B test showed variant 1 = 1 conversion lift (0.70)`.
+
+That last block is the point. A benchmark that prints only aggregate metrics is marketing; one that hands you its four worst failures by payload is a maintenance tool. The 76-sample corpus is **directional, not certified**.
+
+- **Success:** `GATE PASS` with both thresholds met.
+- **Failure:** `GATE FAIL` when recall drops below 80% or FPR exceeds 10%, with the exact payloads responsible.
+- **Source:** [cyphex_benchmark.py](cyphex_benchmark.py) · `render_benchmark()` in [terminal_ui.py](terminal_ui.py)
+
+---
+
+### 5 · Where the code lives
+
+| Concern | File |
+|---|---|
+| The Verify Gate itself — 5 checks, tri-state verdict | `backend/patch/` |
+| Gate health aggregation, toolchain probe, self-test, exit code, next steps | [backend/patch/verify_health.py](backend/patch/verify_health.py) |
+| System observability over the event log | [backend/observability/health.py](backend/observability/health.py) |
+| Durable, append-only event stream — written with no TTY | [backend/observability/events.py](backend/observability/events.py) |
+| Waypoints, goals, per-step status roll-up | [backend/observability/trace.py](backend/observability/trace.py) |
+| Run registry and per-run drill-down | [backend/observability/runs.py](backend/observability/runs.py) |
+| Panel rendering — Rich → plain text → pure ASCII | [terminal_ui.py](terminal_ui.py) |
+| Trace deck and the buddy's state binding | [trace_deck.py](trace_deck.py) |
+| Per-project verified-fix cache | [backend/rag/patch_memory.py](backend/rag/patch_memory.py) |
+| Cross-scan lessons and `CWE:strategy` patterns | [backend/reasoning/session_memory.py](backend/reasoning/session_memory.py) |
+| Cross-project semantic memory | [backend/rag/cognee_memory.py](backend/rag/cognee_memory.py) |
+| Immune-system benchmark harness | [cyphex_benchmark.py](cyphex_benchmark.py) |
+| Command dispatch for `verify` / `status` / `runs` / `benchmark` / `doctor` | [cx.py](cx.py) |
+
+Both panels are read-only, never mutate a manifest, degrade to plain text without Rich, and degrade again to pure ASCII on terminals that cannot render box-drawing glyphs. 408 tests pass.
+
+→ **[Full documentation: docs/VERIFICATION_MAINTAINABILITY_PANEL.md](docs/VERIFICATION_MAINTAINABILITY_PANEL.md)**
+
+---
+
 ## Waypoint Tracing — and the CYPHEX Buddy
+
+<p align="center"><img src="assets/buddy_hero.png" width="96" alt="The CYPHEX buddy" /></p>
 
 The panel above answers *"is the gate healthy?"*. Tracing answers the question underneath it: **"what was the pipeline trying to do at each step, and how far did it get?"**
 
@@ -204,9 +600,9 @@ A scan is nine phases and can run twenty minutes. A phase banner tells you *wher
 
 ### The buddy is a state indicator, not decoration
 
-The mascot exists **for traceability**. It is 8 columns wide, lives *inside* the trace box next to the thing it is reacting to, and its animation is **bound to trace state** — not to a timer. Its frame advances on real trace transitions, so it visibly works harder when the pipeline is doing more, and a glance at it tells you the same thing the text does.
+The mascot exists **for traceability**. It is the sprite's TV head at 9×4 cells, pinned in the footer beside the input box so it never scrolls away, and its face is **bound to trace state** — not to a timer. Its frame advances on real trace transitions, so it visibly works harder when the pipeline is doing more, and a glance at it tells you the same thing the text does.
 
-That binding is observable. Below is the buddy's face at each waypoint, taken verbatim from one real scan's output — the eyes genuinely differ by phase because the animation is selected by what the pipeline is doing:
+That binding is observable. Below is the buddy's face at each waypoint, taken verbatim from one real scan's output — the eyes genuinely differ by phase because the animation is selected by what the pipeline is doing. ([The full sprite set and its state map](#problem-statement-answered-the-maintainability-panel) shows which drawing each row is downsampled from.)
 
 | Waypoint | Buddy | Animation |
 |---|---|---|
@@ -251,7 +647,7 @@ cyphex status              # last scan's phases, agents, errors
 
 That is what makes a *past* run inspectable. `cyphex verify 5f055704` replays that scan's entire goal/step tree — including that two DeepAgents timed out in it — long after its output scrolled away.
 
-The buddy degrades in three levels, like every other surface here: animated beside the trace (TTY + Pillow) → text-only box (no mascot assets) → one static line per completed step (no TTY, e.g. CI logs). It is never load-bearing for the record.
+The buddy degrades in three levels, like every other surface here: animated in the pinned footer (POSIX TTY) → inline trace box with no footer (other terminals) → one static line per completed step (no TTY, e.g. CI logs). It is never load-bearing for the record.
 
 ---
 
@@ -474,6 +870,117 @@ Qwen-coder patch generation · validation before any change is pushed.<br/>
 The Android column — Android SAST, the Kotlin/Java rules, the manifest and XML scanners, the ADB
 emulator, and the two Android agents — is <b>planned and not yet built</b>.
 </sub></p>
+
+### System, as a diagram
+
+The whole run, from source to a scored, patched report:
+
+```mermaid
+flowchart TB
+  IN["Input<br/>GitHub URL · local dir · ZIP"] --> SRC["Fetch + normalise source"]
+  SRC --> SAST["Static analysis<br/>Semgrep + built-in rules"]
+  SRC --> SBX["Deploy sandbox<br/>Docker (preferred) or native"]
+  SBX --> URL["Live target URL"]
+  SAST --> FIND[("Findings<br/>STATIC · DYNAMIC · NETWORK")]
+  URL --> DAST["Dynamic scan<br/>crawl + fast probes"]
+  DAST --> SWARM["DeepAgents swarm<br/>13 oracle-guided agents"]
+  SWARM --> FIND
+  DAST --> FIND
+  FIND --> COUNCIL["Council<br/>multi-model false-positive debate"]
+  COUNCIL --> GENOME["Behavioural immune system<br/>genome + attack simulation"]
+  GENOME --> PATCH["Patch + Verify<br/>RAG · Council · Reflexion · Memory"]
+  PATCH --> SCORE["Before / After posture score"]
+  SCORE --> REPORT["Reports<br/>terminal · JSON / MD / SARIF · HTML"]
+```
+
+### The DeepAgents loop
+
+Each of the 13 agents runs the same Observe → Think → Act loop, steered by local
+models through one shared Oracle:
+
+```mermaid
+flowchart LR
+  ASI["Attack Surface Index"] --> PLAN["Oracle.plan()<br/>qwen2.5-coder:7b"]
+  PLAN --> HYP["Hypotheses<br/>payload · endpoint · severity"]
+  HYP --> PROBE["HTTP probe"]
+  PROBE --> DECIDE{"Oracle.decide()<br/>llama3.1:8b"}
+  DECIDE -->|confirmed| VULN[("Confirmed vuln")]
+  DECIDE -->|adapt| MUT["Oracle.mutate()<br/>deepseek-coder:6.7b"]
+  MUT --> PROBE
+  DECIDE -->|abandoned| NEXT["Next hypothesis"]
+```
+
+Agents run in parallel groups; a per-model lock serialises same-model inference
+so the swarm never thrashes local VRAM. Findings that are **STATIC**
+(deterministic source matches) bypass the council vote — only **DYNAMIC**
+findings are debated, so a wrong vote can never delete a patchable finding.
+
+## Web Interface — Dashboard + API
+
+CYPHEX has two front doors onto the same engine family. Not everyone lives in a
+terminal, so the browser dashboard is there for demos and non-CLI users.
+
+| | Terminal (`cx`) | Web dashboard |
+|---|---|---|
+| Engine | `cli_engine.py` — the **DeepAgents swarm** (oracle-guided) | `backend/backend/` — the multi-agent **ScanOrchestrator** |
+| Best for | Full oracle-guided scans + self-patching | A browser, non-terminal users, demos |
+| Run | `cx` | `python backend/backend/api.py` + `npm run dev` |
+
+The dashboard is **React 19 + Vite + TypeScript + Tailwind**; the API is
+**FastAPI + WebSocket**.
+
+```mermaid
+flowchart LR
+  subgraph B["Browser · localhost:5173"]
+    UI["React dashboard<br/>upload ZIP · GitHub URL"]
+  end
+  subgraph API["FastAPI · localhost:8000"]
+    REST["REST<br/>/api/scan · /api/sandbox/upload"]
+    WS["WebSocket<br/>/ws/{scan_id}"]
+    ORCH["ScanOrchestrator<br/>recon · crawl · injection · xss · auth · lfi · …"]
+  end
+  UI -->|target / ZIP| REST
+  UI <-->|live agent_log · vuln_found · scan_complete| WS
+  REST --> ORCH
+  ORCH --> SBX["Sandbox<br/>Docker / native"]
+  ORCH --> WS
+  ORCH --> REP["Findings + posture + HTML report"]
+```
+
+### Run it
+
+```bash
+# 1 — backend (prints the API key; serves 127.0.0.1:8000)
+cd backend/backend && python api.py
+
+# 2 — frontend, separate terminal
+cd frontend && npm install && npm run dev      # → http://localhost:5173
+```
+
+The Vite dev server injects the same `~/.cyphex/api_key` the backend generates,
+and the backend's CORS already allows `:5173`, so there is no key to copy by
+hand. Docker should be running for the sandbox to deploy; it falls back to a
+native host process otherwise.
+
+### What you see
+
+Upload a vulnerable app (a ZIP or a GitHub URL) → it deploys to a local sandbox
+→ the **live terminal panel streams every agent's activity** (`Calling local
+AI…`, `Reasoning…`, `$ curl …`) so a scan never looks frozen → findings land
+with severity and payload → the **Report** page shows the security posture, a
+severity donut, findings-by-type and the patch table.
+
+### The HTML report
+
+Every scan also writes a self-contained, **offline** `cyphex_report_<id>.html`
+into the folder you ran it from and prints an openable `file://` link. It reads
+as a document, styled like the dashboard (muted palette, big numbers): an
+executive-summary paragraph over four headline tiles, before/after posture
+bars, a severity donut and findings-by-type graph, **per-finding detail cards
+with plain-language remediation**, a patches-applied table, and a Methodology
+section. A **Download PDF** button prints it (browser Save-as-PDF, dark theme
+and page breaks preserved). Built by [`report_html.py`](report_html.py); it
+opens with no server, no fonts, no CDN.
 
 ## The Patch Ladder
 
@@ -726,7 +1233,7 @@ Every panel is drawn by `terminal_ui.py` and **degrades twice**: no Rich → pla
 | `nl_router.py` | Plain English → a real slash command, via local Ollama. Guardrailed: it either emits a command from the known list or refuses — it never invents one |
 | `mascot*.py` | Tiered terminal pixel-art mascot. Tier 3 Kitty/iTerm inline images → sextant/quadrant subcell → half-block → plain glyphs. Pillow optional; without it the render drops a tier rather than failing. `mascot_companion_loop.py` can run it in its own terminal window |
 
-Colour is a single hue — **MONO SIGNAL RED** — with severity and hierarchy carried by *brightness* inside that hue, not by different colours.
+Colour follows **BLOOD SIGNAL**: blood red owns the brand and structure, and every other hue means one thing — ice for active/commands, lilac for identifiers, arterial/ember/amber/slate for Critical/High/Medium/Low, green for verified. All values live in [ui_palette.py](ui_palette.py).
 
 ---
 
@@ -842,7 +1349,7 @@ sdks/node/cyphex-rasp.js    # the runtime shield (Express)                  → 
 scripts/                    # end-to-end convenience shell scripts          → scripts/README.md
 assets/                     # mascot source art + QA renders                → assets/README.md
 finetune/                   # optional QLoRA specialisation of the patcher  → finetune/README.md
-frontend/                   # experimental React dashboard (not wired in)   → frontend/README.md
+frontend/                   # React + Vite dashboard, wired to the FastAPI backend → frontend/README.md
 iot/                        # experimental ESP32 sensor bridge              → iot/README.md
 vuln-webapp/                # bundled deliberately-vulnerable Express app   → vuln-webapp/README.md
 demo/                       # demo targets used in walkthroughs
@@ -956,7 +1463,7 @@ Each of these answers "what is in this folder and what may I safely change" with
 | **[assets/](assets/README.md)** | Mascot source art, the remaster pipeline, and the QA render corpus |
 | **[vuln-webapp/](vuln-webapp/README.md)** | The bundled vulnerable target — every planted CWE and its line |
 | **[finetune/](finetune/README.md)** | Optional QLoRA specialisation of the patcher model |
-| **[frontend/](frontend/README.md)** | Experimental React dashboard — **not wired into the CLI** |
+| **[frontend/](frontend/README.md)** | React + Vite dashboard — a browser front door, wired to the FastAPI backend (`backend/backend`). Separate from the `cx` CLI. See [Web Interface](#web-interface--dashboard--api). |
 | **[iot/](iot/README.md)** | Experimental ESP32 sensor bridge — **not wired into the CLI** |
 
 Everything below lives in **[CYPHEX_PRD.md](CYPHEX_PRD.md)**:
