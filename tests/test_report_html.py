@@ -29,9 +29,13 @@ def test_renders_all_fixed_sections_with_before_after():
         _REPORT, score_before=16, score_after=42, patches_applied=1,
         patched=patched, remaining=3)
     # masthead + every fixed section header is present
-    for token in ("CYPHEX", "Security Posture", "Findings Summary",
-                  "Findings by Type", "Patches Applied", "Confirmed Vulnerabilities"):
+    for token in ("CYPHEX", "Executive Summary", "Security Posture",
+                  "Findings Summary", "Findings by Type", "Findings — Detail",
+                  "Patches Applied", "Methodology"):
         assert token in html
+    # comprehensive, PDF-ready extras
+    assert "Download PDF" in html and "window.print()" in html
+    assert "Remediation" in html               # per-finding fix guidance
     # before/after posture + delta are shown
     assert "Before Patching" in html and "After Patching" in html
     assert "+26" in html                       # delta 42 - 16
