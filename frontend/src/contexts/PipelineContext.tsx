@@ -13,6 +13,7 @@ interface PipelineContextType {
   currentStage: number;
   backendConnected: boolean;
   startPipeline: (url: string) => void;
+  stopPipeline: () => void;
 }
 
 const PipelineContext = createContext<PipelineContextType | undefined>(undefined);

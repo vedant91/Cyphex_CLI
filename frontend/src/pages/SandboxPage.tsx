@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload, Box, Terminal, Play, Square, Trash2,
-  CheckCircle, Loader2, AlertCircle, Server,
-  FolderArchive, ChevronRight, Zap
+  Loader2, AlertCircle, Server,
+  FolderArchive, Zap
 } from 'lucide-react';
 import { uploadSandbox, connectSandboxWebSocket } from '../lib/api';
 import { usePipelineContext } from '../contexts/PipelineContext';
@@ -26,7 +26,13 @@ interface TerminalLine {
 }
 
 export function SandboxPage() {
-  const { startPipeline, isRunning, logs } = usePipelineContext();
+  const { startPipeline, stopPipeline, isRunning, logs } = usePipelineContext();
+
+  // True once a scan has been kicked off for the current sandbox. Combined
+  // with isRunning this gives the three lifecycle states the action row
+  // needs: ready (sandbox up, not scanned), running, and done.
+  const [hasScanned, setHasScanned] = useState(false);
+  const scanDone = hasScanned && !isRunning;
 
   // Upload state
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -161,14 +167,26 @@ export function SandboxPage() {
   // ── Start scanning ────────────────────────────────────────
 
   const handleStartScan = () => {
-    if (!sandbox) return;
+    if (!sandbox || isRunning) return;
     addTerminalLine('system', '');
     addTerminalLine('system', '═══════════════════════════════════════════');
     addTerminalLine('system', '  🚀 INITIATING CYPHEX MULTI-AGENT SCAN');
     addTerminalLine('system', `  TARGET: ${sandbox.url}`);
     addTerminalLine('system', '═══════════════════════════════════════════');
     addTerminalLine('system', '');
+    setHasScanned(true);
     startPipeline(sandbox.url);
+  };
+
+  // Tear down the current sandbox back to the upload screen so the operator
+  // can deploy the next app. Stops any in-flight scan first.
+  const resetSandbox = () => {
+    if (isRunning) stopPipeline();
+    setSandbox(null);
+    setHasScanned(false);
+    setTerminalLines([]);
+    setUploadProgress(0);
+    if (sandboxWsRef.current) sandboxWsRef.current.close();
   };
 
   // ── Drag & drop ───────────────────────────────────────────
@@ -318,9 +336,15 @@ export function SandboxPage() {
                 <div className="sandbox-status-header">
                   <Server size={18} className="glow-green" />
                   <span className="mono sandbox-status-title">SANDBOX_ACTIVE</span>
-                  <span className={`sandbox-badge ${sandbox.status === 'running' ? 'badge-running' : 'badge-starting'}`}>
-                    {sandbox.status === 'running' ? '● RUNNING' : '◐ STARTING'}
-                  </span>
+                  {isRunning ? (
+                    <span className="sandbox-badge badge-running">◉ SCANNING</span>
+                  ) : scanDone ? (
+                    <span className="sandbox-badge badge-running">✓ SCAN COMPLETE</span>
+                  ) : (
+                    <span className={`sandbox-badge ${sandbox.status === 'running' ? 'badge-running' : 'badge-starting'}`}>
+                      {sandbox.status === 'running' ? '● RUNNING' : '◐ STARTING'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="sandbox-info-grid">
@@ -349,40 +373,48 @@ export function SandboxPage() {
                   </div>
                 </div>
 
-                {/* Action buttons */}
+                {/* Action buttons — three lifecycle states:
+                    running → Stop (kill) · done → Scan Again / New Sandbox ·
+                    ready → Run / Reset */}
                 <div className="sandbox-action-row">
-                  <motion.button
-                    className="sandbox-scan-btn"
-                    onClick={handleStartScan}
-                    disabled={isRunning}
-                    whileHover={!isRunning ? { scale: 1.03 } : {}}
-                    whileTap={!isRunning ? { scale: 0.97 } : {}}
-                  >
-                    {isRunning ? (
-                      <>
-                        <Loader2 size={16} className="spin" />
-                        <span>SCANNING...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={16} />
-                        <span>RUN CYPHEX SCAN</span>
-                      </>
-                    )}
-                  </motion.button>
+                  {isRunning ? (
+                    <motion.button
+                      className="sandbox-scan-btn sandbox-stop-btn"
+                      onClick={stopPipeline}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      <Square size={15} />
+                      <span>STOP SCAN</span>
+                    </motion.button>
+                  ) : scanDone ? (
+                    <motion.button
+                      className="sandbox-scan-btn"
+                      onClick={handleStartScan}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      <Play size={15} />
+                      <span>SCAN AGAIN</span>
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      className="sandbox-scan-btn"
+                      onClick={handleStartScan}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      <Zap size={16} />
+                      <span>RUN CYPHEX SCAN</span>
+                    </motion.button>
+                  )}
 
                   <button
                     className="sandbox-reset-btn"
-                    onClick={() => {
-                      setSandbox(null);
-                      setTerminalLines([]);
-                      setUploadProgress(0);
-                      if (sandboxWsRef.current) sandboxWsRef.current.close();
-                    }}
-                    disabled={isRunning}
+                    onClick={resetSandbox}
                   >
                     <Trash2 size={14} />
-                    <span>RESET</span>
+                    <span>{scanDone ? 'NEW SANDBOX' : 'RESET'}</span>
                   </button>
                 </div>
               </motion.div>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Agent, MetricState, LogEntry, ScanReport, WSEvent, VulnData } from '../types';
-import { startScan, connectScanWebSocket, getScan } from '../lib/api';
+import { startScan, stopScan, connectScanWebSocket, getScan } from '../lib/api';
 
 // ── DeepAgents swarm — display labels only; ids stay wired to the backend ──
 const initialAgents: Agent[] = [
@@ -313,26 +313,27 @@ export function usePipeline() {
         newScanId,
         handleWSEvent,
         () => {
-          // On close — check if scan completed
-          if (scanId) {
-            getScan(newScanId).then(meta => {
-              if (meta.report) {
-                setReport(meta.report);
-                // Same reconciliation as the scan_complete WS event, for the
-                // case where the socket closed before that event arrived.
-                const authoritativeScore = meta.report.summary?.security_score;
-                if (typeof authoritativeScore === 'number') {
-                  const finalRisk = securityScoreToRiskScore(authoritativeScore);
-                  setMetrics(prev => ({
-                    ...prev,
-                    riskScore: finalRisk,
-                    riskHistory: [...prev.riskHistory, { time: new Date().toLocaleTimeString(), risk: finalRisk }],
-                  }));
-                }
+          // On close — always clear the running flag (so the next run can
+          // start) and pull the final report if one was produced. The old
+          // `if (scanId)` guard used a stale closure value that was null on
+          // the first run, so isRunning could get stuck on.
+          getScan(newScanId).then(meta => {
+            if (meta.report) {
+              setReport(meta.report);
+              // Same reconciliation as the scan_complete WS event, for the
+              // case where the socket closed before that event arrived.
+              const authoritativeScore = meta.report.summary?.security_score;
+              if (typeof authoritativeScore === 'number') {
+                const finalRisk = securityScoreToRiskScore(authoritativeScore);
+                setMetrics(prev => ({
+                  ...prev,
+                  riskScore: finalRisk,
+                  riskHistory: [...prev.riskHistory, { time: new Date().toLocaleTimeString(), risk: finalRisk }],
+                }));
               }
-              setIsRunning(false);
-            }).catch(() => setIsRunning(false));
-          }
+            }
+            setIsRunning(false);
+          }).catch(() => setIsRunning(false));
         },
         () => {
           addLog('System', 'WebSocket connection lost. Retrying...', 'error');
@@ -346,7 +347,25 @@ export function usePipeline() {
       addLog('System', `⚠ Backend offline (${err.message}). Running swarm simulation...`, 'error');
       await runDemoMode(targetURL);
     }
-  }, [isRunning, resetState, addLog, handleWSEvent, scanId]);
+  }, [isRunning, resetState, addLog, handleWSEvent]);
+
+  // ── Stop / kill the running scan ──────────────────────────────
+
+  const stopPipeline = useCallback(async () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setIsRunning(false);
+    addLog('System', '■ Scan stopped by operator.', 'error');
+    if (scanId) {
+      try {
+        await stopScan(scanId);
+      } catch {
+        // Backend already gone / demo mode — the UI is stopped regardless.
+      }
+    }
+  }, [scanId, addLog]);
 
   // ── Demo/fallback mode (simulated) ──────────────────────────
 
@@ -423,5 +442,6 @@ export function usePipeline() {
     currentStage,
     backendConnected,
     startPipeline,
+    stopPipeline,
   };
 }

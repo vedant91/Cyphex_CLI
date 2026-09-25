@@ -368,6 +368,16 @@
   cursor: not-allowed;
 }
 
+/* Kill button — shown while a scan is running */
+.sandbox-stop-btn {
+  background: linear-gradient(135deg, #b91c1c, #ff3131);
+  box-shadow: 0 0 24px rgba(255, 49, 49, 0.35);
+}
+
+.sandbox-stop-btn:hover:not(:disabled) {
+  box-shadow: 0 0 40px rgba(255, 49, 49, 0.55);
+}
+
 .sandbox-reset-btn {
   font-family: var(--font-mono);
   font-size: 0.65rem;

@@ -118,6 +118,8 @@ def _require_api_access(request: Request) -> None:
 # ── In-memory state ──────────────────────────────────────────
 # scan_id -> scan metadata
 scans: Dict[str, dict] = {}
+# scan_id -> the running asyncio task (so a kill/stop request can cancel it)
+scan_tasks: Dict[str, asyncio.Task] = {}
 # scan_id -> set of connected websocket clients
 ws_clients: Dict[str, Set[WebSocket]] = {}
 # sandbox_id -> set of connected websocket clients (for sandbox terminal feed)
@@ -222,8 +224,10 @@ async def start_scan(req: ScanRequest, request: Request):
     # Override Cerebras key if provided
     cerebras_key = req.cerebras_key or config.CEREBRAS_API_KEY
 
-    # Launch scan in background
-    asyncio.create_task(_run_scan_task(scan_id, target, cerebras_key))
+    # Launch scan in background, keeping the handle so it can be killed
+    scan_tasks[scan_id] = asyncio.create_task(
+        _run_scan_task(scan_id, target, cerebras_key)
+    )
 
     return ScanResponse(
         scan_id=scan_id,
@@ -240,6 +244,18 @@ async def get_scan(scan_id: str, request: Request):
     if scan_id not in scans:
         return {"error": "Scan not found"}, 404
     return scans[scan_id]
+
+
+@app.post("/api/scan/{scan_id}/stop")
+async def kill_scan(scan_id: str, request: Request):
+    """Cancel a running scan so the operator can start the next run."""
+    _require_api_access(request)
+    if scan_id not in scans:
+        return JSONResponse(status_code=404, content={"error": "Scan not found"})
+    task = scan_tasks.get(scan_id)
+    if task and not task.done():
+        task.cancel()  # _run_scan_task handles CancelledError + broadcasts
+    return {"scan_id": scan_id, "status": "cancelling"}
 
 
 @app.get("/api/scans")
@@ -470,10 +486,22 @@ async def _run_scan_task(scan_id: str, target: str, cerebras_key: str):
         scans[scan_id]["error"] = f"Scan timed out after {config.SCAN_TIMEOUT_SECONDS}s"
         await callback({"type": "scan_error", "error": "timeout"})
 
+    except asyncio.CancelledError:
+        # Killed via POST /api/scan/{id}/stop — tell the client and re-raise
+        # so the task ends as cancelled rather than swallowing the signal.
+        scans[scan_id]["status"] = "cancelled"
+        scans[scan_id]["completed_at"] = datetime.now().isoformat()
+        scans[scan_id]["error"] = "cancelled by operator"
+        await callback({"type": "scan_error", "error": "cancelled by operator"})
+        raise
+
     except Exception as e:
         scans[scan_id]["status"] = "error"
         scans[scan_id]["error"] = str(e)
         await callback({"type": "scan_error", "error": str(e)})
+
+    finally:
+        scan_tasks.pop(scan_id, None)
 
 
 # ═══════════════════════════════════════════════════════════════
