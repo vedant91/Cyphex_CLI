@@ -50,7 +50,7 @@ export function ScanHistoryPage() {
           </div>
           <div>
             <h2 className="module-title">//SCAN_HISTORY//</h2>
-            <p className="module-desc">[ ALL_PAST_SCANS ] Previous scan results and reports</p>
+            <p className="module-desc">[ ALL_PAST_SCANS ] Previous DeepAgents swarm scans and reports</p>
           </div>
         </div>
       </div>

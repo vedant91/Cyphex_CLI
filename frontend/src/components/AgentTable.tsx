@@ -56,9 +56,9 @@ export function AgentTable({ agents, logs }: Props) {
   return (
     <div className="card agent-card">
       <div className="card-header">
-        <span className="card-title mono">//LOG: AGENT_SYSTEM_TRACE//</span>
+        <span className="card-title mono">//LOG: DEEPAGENTS_SWARM_TRACE//</span>
         <div className="terminal-header mono">
-          [ AGENTS: {agents.filter(a => a.status === 'done').length}/{agents.length} ] [ LOGS: {logs.length} ]
+          [ DEEPAGENTS: {agents.filter(a => a.status === 'done').length}/{agents.length} ] [ LOGS: {logs.length} ]
         </div>
       </div>
       
@@ -66,9 +66,9 @@ export function AgentTable({ agents, logs }: Props) {
         <table className="agent-table mono">
           <thead>
             <tr>
-              <th>AGENT_UNIT</th>
-              <th>VECTOR</th>
-              <th>STATUS_NODE</th>
+              <th>DEEPAGENT</th>
+              <th>HYPOTHESIS</th>
+              <th>STATUS</th>
             </tr>
           </thead>
           <tbody>
@@ -95,7 +95,7 @@ export function AgentTable({ agents, logs }: Props) {
 
         <div className="terminal-console mono">
           <div className="console-header">
-            <Terminal size={14} /> //STREAMING_LIVE_DATA//
+            <Terminal size={14} /> //ORACLE_LIVE_FEED//
           </div>
           <div className="console-body scrollbar-hidden" ref={logRef}>
             {terminalLogs.map((log) => (
@@ -115,7 +115,7 @@ export function AgentTable({ agents, logs }: Props) {
             ))}
             {terminalLogs.length === 0 && (
               <div className="console-line idle">
-                <span className="line-msg">WAITING FOR SYSTEM DEPLOYMENT...</span>
+                <span className="line-msg">AWAITING DEEPAGENTS DEPLOYMENT...</span>
               </div>
             )}
           </div>

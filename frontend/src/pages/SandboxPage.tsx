@@ -149,7 +149,7 @@ export function SandboxPage() {
       addTerminalLine('success', `✓ Server running at ${result.url}`);
       addTerminalLine('info', `  App file: ${result.app_file || 'auto-detected'}`);
       addTerminalLine('info', `  Port: ${result.port}`);
-      addTerminalLine('system', '─── Ready for scanning ───');
+      addTerminalLine('system', '─── Ready for the DeepAgents swarm ───');
     } catch (err: any) {
       setUploadError(err.message);
       addTerminalLine('error', `✗ Upload failed: ${err.message}`);
@@ -548,7 +548,7 @@ function buildZipBlob(entries: { name: string; data: Uint8Array }[]): Blob {
   ev.setUint32(16, offset, true);
   ev.setUint16(20, 0, true);
 
-  return new Blob([...localParts, ...centralDir, eocd], { type: 'application/zip' });
+  return new Blob([...localParts, ...centralDir, eocd] as BlobPart[], { type: 'application/zip' });
 }
 
 function crc32(data: Uint8Array): number {

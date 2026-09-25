@@ -443,6 +443,9 @@ class CyphexEngine:
 
         self._final_banner()
 
+        # ── Visual HTML report (openable link) ──
+        self._write_html_report(report)
+
     def doctor(self) -> bool:
         """
         Local readiness check for judge/demo environments.
@@ -2751,6 +2754,28 @@ class CyphexEngine:
             json.dump(report, f, indent=2)
         print(f"  {C.G}[OK]{C.RST} Report saved to {filepath}")
 
+    def _write_html_report(self, report):
+        """Write the visual HTML report for this scan and print an openable
+        file:// link. Best-effort — a report-render failure never fails a scan
+        that already completed. Before/after posture come off the engine, set
+        by the patch phase."""
+        try:
+            from report_html import write_report_html
+            html_path = write_report_html(
+                report,
+                score_before=getattr(self, "_score_before", None),
+                score_after=getattr(self, "_post_patch_score", None),
+                patches_applied=getattr(self, "_patches_applied", None),
+                patched=getattr(self, "_patched_details", None),
+                remaining=len(getattr(self, "_post_patch_remaining", []) or []),
+                target=getattr(self, "repo_url", None) or getattr(self, "local_path", None),
+            )
+            print(f"\n  {C.G}[OK]{C.RST} {C.BOLD}Visual report{C.RST}  "
+                  f"{C.CY}file://{html_path}{C.RST}")
+            print(f"  {C.DIM}open it →{C.RST} {C.NEON}open \"{html_path}\"{C.RST}")
+        except Exception as e:
+            print(f"  {C.Y}[SKIP]{C.RST} HTML report: {str(e)[:80]}")
+
     def _save_judge_artifacts(self, report: dict):
         """Save deterministic judge artifacts in JSON, Markdown, and SARIF."""
         out_dir = os.path.join(self.source_dir or WORK_DIR, "cyphex_judge_artifacts")
@@ -3051,6 +3076,7 @@ class CyphexEngine:
 
         patch_council = PatchCouncil(thread_id=thread_id) if COUNCIL_AVAILABLE else None
         patched_files = []
+        self._patched_details = []   # {file, cwe, vuln_type} per applied patch, for the HTML report
         verified_count = 0
         template_count = 0
         skipped = 0
@@ -3865,6 +3891,11 @@ class CyphexEngine:
                 with open(p["filepath"], "w", encoding="utf-8") as f: f.writelines(lines)
 
             patched_files.append(p["rel_path"])
+            self._patched_details.append({
+                "file": p["rel_path"],
+                "cwe": p.get("cwe", ""),
+                "vuln_type": p.get("vuln_type", ""),
+            })
             console.print(f"[green][APPLIED][/green] Patch applied to {p['rel_path']} [dim]({fix_source})[/dim]\n")
 
             # NOTE: Disabled write-back to original source directory.

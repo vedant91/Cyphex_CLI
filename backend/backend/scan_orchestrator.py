@@ -435,11 +435,13 @@ class ScanOrchestrator:
             while True:
                 item = await log_queue.get()
                 event_type = item.get("type", "")
-                # Skip verbose terminal/agent logs — the orchestrator already
-                # emits the important lifecycle events (agent_start, agent_complete,
-                # vuln_found, stage_start) directly.  Forwarding every terminal
-                # command floods the WebSocket and causes ping timeouts (1011).
-                if event_type in ("terminal_log", "agent_log"):
+                # Raw terminal_log carries a command's FULL stdout, which can be
+                # huge (a curl body, a hallucinated HTML page) and floods the
+                # socket into a 1011 ping timeout — keep skipping it. agent_log
+                # lines are short narration (hard-truncated at the source in
+                # BaseAgent.log) and are exactly the "something is happening"
+                # signal the frontend needs, so forward those.
+                if event_type == "terminal_log":
                     continue
                 await self._emit(item)
         except asyncio.CancelledError:

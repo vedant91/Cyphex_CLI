@@ -2,18 +2,18 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Agent, MetricState, LogEntry, ScanReport, WSEvent, VulnData } from '../types';
 import { startScan, connectScanWebSocket, getScan } from '../lib/api';
 
-// ── Agent definitions matching the real backend pipeline ──────
+// ── DeepAgents swarm — display labels only; ids stay wired to the backend ──
 const initialAgents: Agent[] = [
-  { id: 'recon', name: 'Recon Agent', task: 'Ready', status: 'idle' },
-  { id: 'crawler', name: 'Crawler Agent', task: 'Ready', status: 'idle' },
-  { id: 'injection', name: 'Injection Agent (SQLi + CMDi)', task: 'Ready', status: 'idle' },
-  { id: 'xss', name: 'XSS Agent', task: 'Ready', status: 'idle' },
-  { id: 'auth', name: 'Auth Agent', task: 'Ready', status: 'idle' },
-  { id: 'lfi', name: 'LFI Agent', task: 'Ready', status: 'idle' },
-  { id: 'logic', name: 'Logic Agent', task: 'Ready', status: 'idle' },
-  { id: 'supply_chain', name: 'Supply Chain Agent', task: 'Ready', status: 'idle' },
-  { id: 'analysis', name: 'Analysis Agent', task: 'Ready', status: 'idle' },
-  { id: 'patch', name: 'Patch Agent', task: 'Ready', status: 'idle' },
+  { id: 'recon', name: 'Recon DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'crawler', name: 'Surface-Map DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'injection', name: 'Injection DeepAgent · SQLi/CMDi', task: 'Idle', status: 'idle' },
+  { id: 'xss', name: 'XSS DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'auth', name: 'Auth-Bypass DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'lfi', name: 'Path-Traversal DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'logic', name: 'Business-Logic DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'supply_chain', name: 'Supply-Chain DeepAgent', task: 'Idle', status: 'idle' },
+  { id: 'analysis', name: 'Oracle Council', task: 'Idle', status: 'idle' },
+  { id: 'patch', name: 'Self-Patch DeepAgent', task: 'Idle', status: 'idle' },
 ];
 
 // Live, client-side risk weighting used ONLY to animate the gauge while a
@@ -63,7 +63,7 @@ export function usePipeline() {
     discoveredItems: [],
   });
   const [logs, setLogs] = useState<LogEntry[]>([
-    { id: 'sys-1', agent: 'System', message: 'System ready. Awaiting target URL.', timestamp: new Date().toISOString() },
+    { id: 'sys-1', agent: 'System', message: 'DeepAgents swarm idle. Awaiting target.', timestamp: new Date().toISOString() },
   ]);
   const [isRunning, setIsRunning] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -182,13 +182,13 @@ export function usePipeline() {
   const handleWSEvent = useCallback((event: WSEvent) => {
     switch (event.type) {
       case 'scan_start':
-        addLog('System', `Scan started on ${(event as any).target}`, 'info');
+        addLog('System', `DeepAgents swarm deployed on ${(event as any).target}`, 'info');
         break;
 
       case 'stage_start': {
         const e = event as any;
         setCurrentStage(e.stage);
-        addLog('System', `━━━ STAGE ${e.stage}/5: ${e.name} ━━━`, 'info');
+        addLog('System', `━━━ PHASE ${e.stage}/5: ${e.name} ━━━`, 'info');
         break;
       }
 
@@ -210,6 +210,18 @@ export function usePipeline() {
         const e = event as any;
         updateAgent(e.agent_id, { status: 'error', task: `Error: ${e.error}` });
         addLog(e.agent_name, `Error: ${e.error}`, 'error');
+        break;
+      }
+
+      case 'agent_log': {
+        // Live narration from an agent (Calling AI, Reasoning, $ curl …) so the
+        // user sees the scan is working, not a frozen screen.
+        const e = event as any;
+        const t: LogEntry['type'] =
+          e.level === 'success' ? 'success'
+          : (e.level === 'danger' || e.level === 'critical' || e.level === 'error') ? 'error'
+          : 'info';
+        addLog(e.agent_name || 'Agent', e.message, t);
         break;
       }
 
@@ -252,7 +264,7 @@ export function usePipeline() {
           }));
         }
         setIsRunning(false);
-        addLog('System', '✓ Scan completed successfully.', 'success');
+        addLog('System', '✓ DeepAgents swarm complete. Posture scored.', 'success');
         break;
       }
 
@@ -278,7 +290,7 @@ export function usePipeline() {
     setLogs([{
       id: Date.now().toString(),
       agent: 'System',
-      message: `Initializing scan for ${targetURL}...`,
+      message: `Deploying DeepAgents against ${targetURL}...`,
       timestamp: new Date().toISOString(),
       type: 'info',
     }]);
@@ -290,7 +302,7 @@ export function usePipeline() {
       setScanId(newScanId);
       setBackendConnected(true);
 
-      addLog('System', `Scan ${newScanId} started. Connecting to live feed...`, 'info');
+      addLog('System', `Swarm ${newScanId} armed. Connecting to Oracle feed...`, 'info');
 
       // Connect WebSocket for real-time updates
       if (wsRef.current) {
@@ -331,7 +343,7 @@ export function usePipeline() {
       // Backend is unreachable — fall back to demo mode
       console.warn('Backend unreachable, running demo mode:', err.message);
       setBackendConnected(false);
-      addLog('System', `⚠ Backend unreachable (${err.message}). Running in demo mode...`, 'error');
+      addLog('System', `⚠ Backend offline (${err.message}). Running swarm simulation...`, 'error');
       await runDemoMode(targetURL);
     }
   }, [isRunning, resetState, addLog, handleWSEvent, scanId]);
@@ -341,63 +353,63 @@ export function usePipeline() {
   const runDemoMode = useCallback(async (targetURL: string) => {
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-    addLog('System', `Demo mode for ${targetURL}`, 'info');
+    addLog('System', `Simulation mode — no backend. Emulating the DeepAgents swarm on ${targetURL}`, 'info');
 
-    // Stage 1: Recon
-    updateAgent('recon', { status: 'running', task: `Scanning ${targetURL}` });
-    addLog('Recon Agent', 'Gathering headers, tech stacks, probing sensitive files...', 'info');
+    // Phase 1: Recon
+    updateAgent('recon', { status: 'running', task: `Fingerprinting ${targetURL}` });
+    addLog('Recon DeepAgent', 'Fingerprinting headers, stack and sensitive files...', 'info');
     await sleep(1200);
-    addLog('Recon Agent', 'Detected Express.js framework, nginx server', 'success');
+    addLog('Recon DeepAgent', 'Detected Express.js framework, nginx server', 'success');
     updateAgent('recon', { status: 'done', task: 'Framework detected' });
 
-    // Stage 2: Crawler
-    updateAgent('crawler', { status: 'running', task: 'Mapping endpoints' });
-    addLog('Crawler Agent', 'Extracting links, forms, and API endpoints...', 'info');
+    // Phase 2: Attack-surface mapping
+    updateAgent('crawler', { status: 'running', task: 'Building attack-surface index' });
+    addLog('Surface-Map DeepAgent', 'Indexing links, forms and API endpoints...', 'info');
     await sleep(1500);
-    addLog('Crawler Agent', 'Found 14 links, 3 forms, 8 API endpoints', 'success');
-    updateAgent('crawler', { status: 'done', task: 'Mapped 14 endpoints' });
+    addLog('Surface-Map DeepAgent', 'Indexed 14 links, 3 forms, 8 API endpoints', 'success');
+    updateAgent('crawler', { status: 'done', task: '14 endpoints indexed' });
 
-    // Stage 3: Attack agents (parallel-ish)
+    // Phase 3: Oracle-guided exploitation swarm (parallel)
     const attackDemo = [
-      { id: 'injection', name: 'Injection Agent', delay: 1200, vuln: 'SQL Injection in /api/login', sev: 'Critical', cat: 'Injection' },
-      { id: 'xss', name: 'XSS Agent', delay: 1000, vuln: 'Stored XSS in comments', sev: 'High', cat: 'XSS' },
-      { id: 'auth', name: 'Auth Agent', delay: 900, vuln: 'Default credentials admin:admin', sev: 'Critical', cat: 'Auth' },
-      { id: 'lfi', name: 'LFI Agent', delay: 800, vuln: 'Path traversal in /download', sev: 'High', cat: 'LFI' },
-      { id: 'logic', name: 'Logic Agent', delay: 1100, vuln: 'IDOR on /api/users/{id}', sev: 'Medium', cat: 'Logic' },
-      { id: 'supply_chain', name: 'Supply Chain Agent', delay: 700, vuln: null, sev: 'Low', cat: 'SupplyChain' },
+      { id: 'injection', name: 'Injection DeepAgent', delay: 1200, vuln: 'SQL Injection in /api/login', sev: 'Critical', cat: 'Injection' },
+      { id: 'xss', name: 'XSS DeepAgent', delay: 1000, vuln: 'Stored XSS in comments', sev: 'High', cat: 'XSS' },
+      { id: 'auth', name: 'Auth-Bypass DeepAgent', delay: 900, vuln: 'Default credentials admin:admin', sev: 'Critical', cat: 'Auth' },
+      { id: 'lfi', name: 'Path-Traversal DeepAgent', delay: 800, vuln: 'Path traversal in /download', sev: 'High', cat: 'LFI' },
+      { id: 'logic', name: 'Business-Logic DeepAgent', delay: 1100, vuln: 'IDOR on /api/users/{id}', sev: 'Medium', cat: 'Logic' },
+      { id: 'supply_chain', name: 'Supply-Chain DeepAgent', delay: 700, vuln: null, sev: 'Low', cat: 'SupplyChain' },
     ];
 
     for (const a of attackDemo) {
-      updateAgent(a.id, { status: 'running', task: `Attacking ${targetURL}` });
+      updateAgent(a.id, { status: 'running', task: `Firing payloads at ${targetURL}` });
     }
 
     for (const a of attackDemo) {
-      addLog(a.name, `Testing ${targetURL} for vulnerabilities...`, 'info');
+      addLog(a.name, `Oracle generating hypotheses, firing payloads at ${targetURL}...`, 'info');
       await sleep(a.delay);
       if (a.vuln) {
         addRisk(SEVERITY_RISK[a.sev] || 5, a.cat, 1, [{ label: a.vuln.substring(0, 18), icon: VULN_ICON_MAP[a.id] || 'bug' }]);
-        addLog(a.name, `🚨 [${a.sev}] ${a.vuln}`, 'error');
+        addLog(a.name, `🚨 [${a.sev}] CONFIRMED · ${a.vuln}`, 'error');
       } else {
-        addLog(a.name, 'No vulnerabilities found', 'success');
+        addLog(a.name, 'No exploit confirmed', 'success');
       }
       updateAgent(a.id, { status: 'done', task: a.vuln || 'Clean' });
     }
 
-    // Stage 4: Analysis
-    updateAgent('analysis', { status: 'running', task: 'Sending to Cerebras AI' });
-    addLog('Analysis Agent', 'Aggregating findings and sending to AI...', 'info');
+    // Phase 4: Council debate
+    updateAgent('analysis', { status: 'running', task: 'Debating findings' });
+    addLog('Oracle Council', 'Multi-model debate — filtering false positives...', 'info');
     await sleep(2000);
-    addLog('Analysis Agent', 'AI threat analysis complete', 'success');
-    updateAgent('analysis', { status: 'done', task: 'Analysis complete' });
+    addLog('Oracle Council', 'Council validated findings', 'success');
+    updateAgent('analysis', { status: 'done', task: 'Council complete' });
 
-    // Stage 5: Patch
-    updateAgent('patch', { status: 'running', task: 'Generating cure plan' });
-    addLog('Patch Agent', 'Generating parameterized query patches, CSP headers...', 'info');
+    // Phase 5: Self-patch + verify
+    updateAgent('patch', { status: 'running', task: 'Generating patches' });
+    addLog('Self-Patch DeepAgent', 'Generating parameterized queries, CSP headers...', 'info');
     await sleep(1500);
-    addLog('Patch Agent', 'Cure plan ready with 5 patches', 'success');
-    updateAgent('patch', { status: 'done', task: 'Cure plan ready' });
+    addLog('Self-Patch DeepAgent', 'Applied 5 patches · posture improved', 'success');
+    updateAgent('patch', { status: 'done', task: 'Patched · verified' });
 
-    addLog('System', '✓ Demo scan completed.', 'success');
+    addLog('System', '✓ Simulation complete.', 'success');
     setIsRunning(false);
   }, [addLog, updateAgent, addRisk]);
 

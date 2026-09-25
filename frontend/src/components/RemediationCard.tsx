@@ -11,11 +11,11 @@ export function RemediationCard({ riskScore }: Props) {
   return (
     <div className="card remediation-card">
       <div className="card-header">
-        <span className="card-title mono">//PROTOCOL: REMEDIATION_STRATEGY//</span>
+        <span className="card-title mono">//PROTOCOL: SELF-PATCH_STRATEGY//</span>
       </div>
       
       <div className="strategy-status">
-        <div className="status-label mono">CRITICAL ACTIONS REQUIRED</div>
+        <div className="status-label mono">POSTURE AFTER SELF-PATCH</div>
         <div className="progress-meter">
           <div 
             className="progress-fill bg-glow-green" 
@@ -24,7 +24,7 @@ export function RemediationCard({ riskScore }: Props) {
         </div>
         <div className="status-meta mono">
           <span>PRIORITY: HIGH</span>
-          <span className="glow-green">S-SCORE: {securityScore}</span>
+          <span className="glow-green">POSTURE: {securityScore}</span>
         </div>
       </div>
 
@@ -32,11 +32,11 @@ export function RemediationCard({ riskScore }: Props) {
         <button className="hacker-btn mono" onClick={() => alert('Generating Threat Deck Report...')}>
           <FileText size={16} /> //REPORT: THREAT_DECK//
         </button>
-        <button className="hacker-btn mono accent-purple" onClick={() => alert('Optimizing Cure Algorithm...')}>
-          <Zap size={16} /> //ENHANCE: CURE_ALGORITHM//
+        <button className="hacker-btn mono accent-purple" onClick={() => alert('Tuning patch engine...')}>
+          <Zap size={16} /> //TUNE: PATCH_ENGINE//
         </button>
-        <button className="hacker-btn mono accent-blue" onClick={() => alert('Deploying Sandbox Fixes...')}>
-          <ShieldCheck size={16} /> //DEPLOY: SANDBOX_FIX//
+        <button className="hacker-btn mono accent-blue" onClick={() => alert('Deploying self-patches...')}>
+          <ShieldCheck size={16} /> //DEPLOY: SELF-PATCH//
         </button>
       </div>
     </div>

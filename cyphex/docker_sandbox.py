@@ -119,6 +119,26 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+async def _check_up(url: str, retries: int = 20, delay: float = 1.0) -> bool:
+    """True once the app inside the container actually answers on the published
+    port. `docker ps` reporting "Up" only means the container process is alive —
+    `npm run start` spawns node, which then needs a moment to bind, so a flat
+    sleep returns "running" before the port is listening and the first browser
+    hit is refused. Poll the real URL (any non-5xx = listening) for up to
+    retries*delay seconds instead."""
+    import httpx
+    for _ in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(url)
+                if resp.status_code < 500:
+                    return True
+        except Exception:
+            pass
+        await asyncio.sleep(delay)
+    return False
+
+
 async def deploy_docker_sandbox(
     source_dir: str,
     sandbox_id: Optional[str] = None
@@ -184,17 +204,19 @@ async def deploy_docker_sandbox(
                 "sandbox_id": sandbox_id,
             }
 
-        # Wait for container to start
-        await asyncio.sleep(5)
-
-        # Verify it's running
+        # Give the container a moment to boot, then confirm the container is
+        # alive AND the app actually answers on the published port. "Up" alone
+        # is not enough — the app needs to bind first (see _check_up).
+        url = f"http://localhost:{port}"
+        await asyncio.sleep(2)
         ps = subprocess.run(
             ["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Status}}"],
             capture_output=True, text=True, timeout=10
         )
-        is_running = "Up" in ps.stdout
+        container_up = "Up" in ps.stdout
+        reachable = container_up and await _check_up(url)
 
-        # Capture container stdout+stderr so the scan can surface real logs
+        # Capture container stdout+stderr so a failure is diagnosable
         # (the container runs detached, so nothing else drains them).
         try:
             logs_res = subprocess.run(
@@ -205,12 +227,17 @@ async def deploy_docker_sandbox(
         except Exception:
             container_logs = ""
 
+        # status reflects real reachability. NB: we keep `url` and add no
+        # `error` key even when unreachable, so cli_engine (which accepts the
+        # sandbox on url-and-no-error) is unaffected; only the web frontend,
+        # which reads `status`, sees the honest state + logs.
         return {
             "sandbox_id": sandbox_id,
             "port": port,
-            "url": f"http://localhost:{port}",
+            "url": url,
             "container_name": container_name,
-            "status": "running" if is_running else "failed",
+            "status": "running" if reachable else "failed",
+            "app_file": app_info.get("entry"),
             "app_type": app_info["type"],
             "generated_dockerfile": generated,
             "logs": container_logs,

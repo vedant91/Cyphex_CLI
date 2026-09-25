@@ -32,7 +32,8 @@
   height: 68px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 10px;
   padding: 0 18px;
   border-bottom: 1px solid rgba(124, 58, 237, 0.12);
   flex-shrink: 0;
@@ -40,13 +41,16 @@
 
 .logo-icon { flex-shrink: 0; }
 
+/* Terminal-style CYPHEX wordmark (matches the CLI's mono banner) */
 .logo-text {
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
   color: #fff;
-  letter-spacing: 0.5px;
+  letter-spacing: 4px;
   white-space: nowrap;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.55), 0 0 22px rgba(124, 58, 237, 0.35);
 }
 
 /* ─── Section Label ───────────────────────────────────────────── */

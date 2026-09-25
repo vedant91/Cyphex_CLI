@@ -63,7 +63,7 @@ export async function listScans(): Promise<{ scans: ScanMeta[] }> {
 export async function uploadSandbox(
   file: File,
   onProgress?: (pct: number) => void,
-): Promise<{ sandbox_id: string; port: number; url: string; status: string; error?: string }> {
+): Promise<{ sandbox_id: string; port: number; url: string; status: string; app_file?: string; error?: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/api/sandbox/upload`);

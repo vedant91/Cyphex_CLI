@@ -39,19 +39,19 @@ export function ModuleLayout({ agentId, agentLabel, agentName, description, icon
           </div>
           <div>
             <h2 className="module-title">//{agentName.toUpperCase().replace(/ /g, '_')}//</h2>
-            <p className="module-desc">[ AGENT_DESCRIPTION ] {description}</p>
+            <p className="module-desc">[ DEEPAGENT ] {description}</p>
           </div>
         </div>
 
         <div className="module-status-row">
           <div className="status-block" style={{ borderColor: `${statusColor}44` }}>
-            <div className="status-block-label">STATUS_NODE</div>
+            <div className="status-block-label">STATUS</div>
             <div className="status-block-value" style={{ color: statusColor }}>
               [{agent?.status?.toUpperCase() || 'IDLE'}]
             </div>
           </div>
           <div className="status-block">
-            <div className="status-block-label">ACTIVE_VECTOR</div>
+            <div className="status-block-label">HYPOTHESIS</div>
             <div className="status-block-value" style={{ color: 'var(--text-main)', fontSize: '0.78rem' }}>
               {agent?.task || 'STANDBY'}
             </div>
@@ -134,56 +134,56 @@ export function ModuleLayout({ agentId, agentLabel, agentName, description, icon
 // ── Agent Page Exports (matching all 11 backend agents) ──────
 
 export const ReconPage = () => <ModuleLayout
-  agentId="recon" agentLabel="Recon Agent" agentName="Recon Satellite"
-  description="Gathers headers, tech stacks, and probes sensitive files (.env, .git/HEAD, robots.txt)."
+  agentId="recon" agentLabel="Recon DeepAgent" agentName="Recon DeepAgent"
+  description="Fingerprints headers, tech stack, and probes sensitive files (.env, .git/HEAD, robots.txt)."
   icon={Activity} accentColor="var(--neon-blue)"
 />;
 
 export const CrawlerPage = () => <ModuleLayout
-  agentId="crawler" agentLabel="Crawler Agent" agentName="Crawler Agent"
-  description="Maps all visible paths, API endpoints, forms, and parameters for targeted fuzzing."
+  agentId="crawler" agentLabel="Surface-Map DeepAgent" agentName="Surface-Map DeepAgent"
+  description="Builds the attack-surface index — paths, API endpoints, forms, and parameters for oracle-guided targeting."
   icon={Globe} accentColor="var(--neon-green)"
 />;
 
 export const InjectionPage = () => <ModuleLayout
-  agentId="injection" agentLabel="Injection Agent (SQLi + CMDi)" agentName="Injection Agent"
-  description="Combined SQL Injection and Command Injection testing. Blind, error-based, and UNION attacks."
+  agentId="injection" agentLabel="Injection DeepAgent (SQLi + CMDi)" agentName="Injection DeepAgent"
+  description="Oracle-guided SQL Injection and Command Injection exploitation. Blind, error-based, and UNION attacks."
   icon={Target} accentColor="var(--purple-light)"
 />;
 
 export const XSSPage = () => <ModuleLayout
-  agentId="xss" agentLabel="XSS Agent" agentName="XSS Scanner"
-  description="Checks DOM structure and reflection to find stored, reflected, and DOM-based XSS flaws."
+  agentId="xss" agentLabel="XSS DeepAgent" agentName="XSS DeepAgent"
+  description="Hypothesis-driven testing of DOM structure and reflection for stored, reflected, and DOM-based XSS."
   icon={Bug} accentColor="var(--fire-red)"
 />;
 
 export const AuthPage = () => <ModuleLayout
-  agentId="auth" agentLabel="Auth Agent" agentName="Auth Bypass Agent"
-  description="Default credentials brute force (hydra), JWT weaknesses, username enumeration, session hijacking."
+  agentId="auth" agentLabel="Auth-Bypass DeepAgent" agentName="Auth-Bypass DeepAgent"
+  description="Default-credential attacks, JWT weaknesses, username enumeration, and session hijacking."
   icon={Lock} accentColor="var(--neon-blue)"
 />;
 
 export const LFIPage = () => <ModuleLayout
-  agentId="lfi" agentLabel="LFI Agent" agentName="LFI / Path Traversal"
-  description="Path traversal attacks, file upload bypasses, XXE injection, and local file inclusion."
+  agentId="lfi" agentLabel="Path-Traversal DeepAgent" agentName="Path-Traversal DeepAgent"
+  description="Path traversal, file-upload bypasses, XXE injection, and local file inclusion."
   icon={FileWarning} accentColor="var(--purple-light)"
 />;
 
 export const LogicPage = () => <ModuleLayout
-  agentId="logic" agentLabel="Logic Agent" agentName="Logic Flaw Agent"
-  description="IDOR, SSRF, CORS misconfigurations, mass assignment, and business logic vulnerabilities."
+  agentId="logic" agentLabel="Business-Logic DeepAgent" agentName="Business-Logic DeepAgent"
+  description="IDOR, SSRF, CORS misconfigurations, mass assignment, and business-logic exploitation."
   icon={Eye} accentColor="var(--neon-green)"
 />;
 
 export const SupplyChainPage = () => <ModuleLayout
-  agentId="supply_chain" agentLabel="Supply Chain Agent" agentName="Supply Chain Agent"
+  agentId="supply_chain" agentLabel="Supply-Chain DeepAgent" agentName="Supply-Chain DeepAgent"
   description="Detects exposed manifests, known CVEs in dependencies, and typosquatting risks."
   icon={Box} accentColor="var(--fire-red)"
 />;
 
 export const AnalysisPage = () => <ModuleLayout
-  agentId="analysis" agentLabel="Analysis Agent" agentName="AI Threat Analysis"
-  description="Passes threat topology to Cerebras AI for behavioral and holistic risk classification."
+  agentId="analysis" agentLabel="Oracle Council" agentName="Oracle Council"
+  description="Multi-model council debate that validates confirmed findings and filters false positives."
   icon={CheckCircle} accentColor="var(--neon-green)"
 />;
 
@@ -215,14 +215,14 @@ export const CurePlannerPage = () => {
             <Heart size={20} color="var(--purple-light)" />
           </div>
           <div>
-            <h2 className="module-title">//CURE_PLANNER//</h2>
-            <p className="module-desc">[ AGENT_DESCRIPTION ] Generates framework-specific code patches and a structured cure plan for all findings.</p>
+            <h2 className="module-title">//SELF-PATCH//</h2>
+            <p className="module-desc">[ DEEPAGENT ] Generates framework-specific code patches and a structured cure plan for all findings.</p>
           </div>
         </div>
 
         <div className="module-status-row">
           <div className="status-block" style={{ borderColor: `${statusColor}44` }}>
-            <div className="status-block-label">STATUS_NODE</div>
+            <div className="status-block-label">STATUS</div>
             <div className="status-block-value" style={{ color: statusColor }}>
               [{agent?.status?.toUpperCase() || 'IDLE'}]
             </div>

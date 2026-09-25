@@ -18,6 +18,59 @@ const SEVERITY_BG: Record<string, string> = {
   Low: 'rgba(0,229,255,0.1)',
 };
 
+// ── Security posture bar (matches the HTML report's before/after bars) ──────
+function PostureBar({ score }: { score: number }) {
+  const n = Math.max(0, Math.min(100, Math.round(score || 0)));
+  const col = n >= 70 ? 'var(--neon-green)' : n >= 40 ? '#e6c200' : 'var(--fire-red)';
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14 }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '3rem', fontWeight: 900, color: col }}>{n}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-dim)', letterSpacing: 2 }}>POSTURE / 100</span>
+      </div>
+      <div style={{ height: 12, background: '#241536', borderRadius: 8, overflow: 'hidden', maxWidth: 360 }}>
+        <div style={{ height: '100%', width: `${n}%`, background: col, boxShadow: `0 0 12px ${col}66`, borderRadius: 8, transition: 'width .4s' }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Severity donut (inline SVG, same as the HTML report) ────────────────────
+function SeverityDonut({ counts }: { counts: Record<string, number> }) {
+  const order = ['Critical', 'High', 'Medium', 'Low'];
+  const total = order.reduce((n, k) => n + (counts[k] || 0), 0);
+  const r = 70, cx = 90, cy = 90, circ = 2 * Math.PI * r;
+  let offset = 0;
+  const segs = total
+    ? order.filter(k => counts[k]).map(k => {
+        const len = (circ * (counts[k] || 0)) / total;
+        const el = (
+          <circle key={k} cx={cx} cy={cy} r={r} fill="none" stroke={SEVERITY_COLORS[k]} strokeWidth={26}
+            strokeDasharray={`${len} ${circ - len}`} strokeDashoffset={-offset} transform={`rotate(-90 ${cx} ${cy})`} />
+        );
+        offset += len;
+        return el;
+      })
+    : [<circle key="empty" cx={cx} cy={cy} r={r} fill="none" stroke="#241536" strokeWidth={26} />];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+      <svg viewBox="0 0 180 180" width={150} height={150}>
+        {segs}
+        <text x={90} y={86} textAnchor="middle" style={{ fill: '#fff', font: '800 32px var(--font-mono)' }}>{total}</text>
+        <text x={90} y={106} textAnchor="middle" style={{ fill: 'var(--text-dim)', font: '600 9px var(--font-mono)', letterSpacing: '2px' }}>FINDINGS</text>
+      </svg>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', minWidth: 120 }}>
+        {order.map(k => (
+          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0', color: 'var(--text-dim)' }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: SEVERITY_COLORS[k], display: 'inline-block' }} />
+            {k}<span style={{ marginLeft: 'auto', color: '#fff', fontWeight: 700 }}>{counts[k] || 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ReportPage() {
   const { report, isRunning, scanId } = usePipelineContext();
   const [expandedVuln, setExpandedVuln] = useState<number | null>(null);
@@ -28,7 +81,7 @@ export function ReportPage() {
         <div style={{ textAlign: 'center', padding: '80px 0' }}>
           <Shield size={64} style={{ color: 'var(--purple-light)', opacity: 0.3, margin: '0 auto 24px' }} />
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: '#fff', marginBottom: '12px' }}>
-            No Scan Report Available
+            No DeepAgents Report Available
           </h2>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-dim)', letterSpacing: '1px' }}>
             Start a scan from the Overview page to generate a report.
@@ -49,10 +102,10 @@ export function ReportPage() {
             margin: '0 auto 24px',
           }} />
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: '#fff', marginBottom: '12px' }}>
-            Scan In Progress...
+            DeepAgents Swarm In Progress...
           </h2>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-dim)', letterSpacing: '1px' }}>
-            [ SCAN_ID: {scanId} ] · Report will appear when scan completes.
+            [ SCAN_ID: {scanId} ] · Report will appear when the swarm completes.
           </p>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -78,11 +131,31 @@ export function ReportPage() {
             <FileText size={20} color="#fff" />
           </div>
           <div>
-            <h2 className="module-title">//SCAN_REPORT//</h2>
+            <h2 className="module-title">//SWARM_REPORT//</h2>
             <p className="module-desc">[ TARGET: {report.target} ] · [ DURATION: {report.scan_time} ] · [ ID: {report.scan_id} ]</p>
           </div>
         </div>
       </div>
+
+      {/* ── Posture + Severity (graphical, matches the HTML report) ── */}
+      <div className="report-posture" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '16px', marginBottom: '24px' }}>
+        <div className="card">
+          <span className="card-title mono">//SECURITY_POSTURE//</span>
+          <div style={{ marginTop: '16px' }}>
+            <PostureBar score={summary.security_score} />
+          </div>
+        </div>
+        <div className="card">
+          <span className="card-title mono">//SEVERITY//</span>
+          <div style={{ marginTop: '16px' }}>
+            <SeverityDonut counts={{
+              Critical: summary.critical, High: summary.high,
+              Medium: summary.medium, Low: summary.low,
+            }} />
+          </div>
+        </div>
+      </div>
+      <style>{`@media (max-width: 760px) { .report-posture { grid-template-columns: 1fr !important; } }`}</style>
 
       {/* ── Summary Cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '32px' }}>
@@ -244,7 +317,7 @@ export function ReportPage() {
             background: 'rgba(57,255,20,0.04)',
           }}>
             <span className="card-title mono" style={{ color: 'var(--neon-green)' }}>
-              //CURE_PLAN · {cure_plan.patches?.length || 0} PATCHES//
+              //SELF-PATCH PLAN · {cure_plan.patches?.length || 0} PATCHES//
             </span>
           </div>
 

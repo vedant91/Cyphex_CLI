@@ -81,6 +81,20 @@ class BaseAgent(ABC):
             f"{lc}{message}{Colors.RESET}"
         )
 
+        # Also stream this line to the frontend so the user sees live activity,
+        # not just the backend terminal. Hard-truncated and non-blocking: a
+        # runaway model response (e.g. a hallucinated HTML page) can never
+        # flood the WebSocket, and a full/absent queue can never stall a scan.
+        try:
+            log_queue.queue.put_nowait({
+                "type": "agent_log",
+                "agent_name": self.__class__.__name__,
+                "message": str(message)[:300],
+                "level": level,
+            })
+        except Exception:
+            pass
+
     async def add_vuln(self, vuln: Vuln):
         """Register a confirmed vulnerability."""
         self.vulns.append(vuln)

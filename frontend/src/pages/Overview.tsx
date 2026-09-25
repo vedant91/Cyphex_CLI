@@ -71,7 +71,7 @@ export function Overview() {
                   color: backendConnected ? 'var(--neon-green)' : 'var(--fire-red)',
                   letterSpacing: '1px',
                 }}>
-                  {backendConnected ? 'LIVE · Backend Connected' : 'DEMO MODE · Backend Offline'}
+                  {backendConnected ? 'LIVE · Oracle Connected' : 'SIMULATION · Backend Offline'}
                 </span>
               </div>
 
@@ -80,7 +80,7 @@ export function Overview() {
                   fontFamily: 'var(--font-mono)', fontSize: '0.65rem',
                   color: 'var(--neon-blue)', letterSpacing: '1px',
                 }}>
-                  STAGE {currentStage}/5 IN PROGRESS
+                  PHASE {currentStage}/5 · SWARM ACTIVE
                 </div>
               )}
 
@@ -172,12 +172,12 @@ export function Overview() {
                 
                 {/* HUD Elements */}
                 <div className="absolute top-0 left-0 p-4 mono text-[10px] text-cyan-400 opacity-60">
-                  <div>AGENTS: {agents.filter(a => a.status === 'done').length}/{agents.length}</div>
+                  <div>DEEPAGENTS: {agents.filter(a => a.status === 'done').length}/{agents.length}</div>
                   <div>VULNS: {metrics.totalVulns}</div>
                 </div>
                 <div className="absolute bottom-0 right-0 p-4 mono text-[10px] text-cyan-400 opacity-60 text-right">
                   <div>CMDS_EXEC: {report?.summary?.commands_executed || '—'}</div>
-                  <div>STAGE: {currentStage}/5</div>
+                  <div>PHASE: {currentStage}/5</div>
                 </div>
               </div>
 

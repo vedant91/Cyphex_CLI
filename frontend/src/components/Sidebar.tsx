@@ -12,15 +12,15 @@ const items = [
   { name: 'Overview',      path: '/',              icon: Home,        glowClass: 'glow-blue'   },
   { name: 'Sandbox',       path: '/sandbox',       icon: Upload,      glowClass: 'glow-purple' },
   { name: 'Recon',         path: '/recon',         icon: Activity,    glowClass: 'glow-blue'   },
-  { name: 'Crawler',       path: '/crawler',       icon: Globe,       glowClass: 'glow-green'  },
+  { name: 'Surface Map',   path: '/crawler',       icon: Globe,       glowClass: 'glow-green'  },
   { name: 'Injection',     path: '/injection',     icon: Target,      glowClass: 'glow-purple' },
   { name: 'XSS',           path: '/xss',           icon: Bug,         glowClass: 'glow-red'    },
   { name: 'Auth',          path: '/auth',          icon: Lock,        glowClass: 'glow-blue'   },
   { name: 'LFI',           path: '/lfi',           icon: FileWarning, glowClass: 'glow-purple' },
   { name: 'Logic',         path: '/logic',         icon: Eye,         glowClass: 'glow-green'  },
   { name: 'Supply Chain',  path: '/supply-chain',  icon: Box,         glowClass: 'glow-red'    },
-  { name: 'Analysis',      path: '/analysis',      icon: CheckCircle, glowClass: 'glow-green'  },
-  { name: 'Cure Plan',     path: '/cure-planner',  icon: Heart,       glowClass: 'glow-purple' },
+  { name: 'Council',       path: '/analysis',      icon: CheckCircle, glowClass: 'glow-green'  },
+  { name: 'Self-Patch',    path: '/cure-planner',  icon: Heart,       glowClass: 'glow-purple' },
   { name: 'Report',        path: '/report',        icon: Zap,         glowClass: 'glow-blue'   },
   { name: 'Scan History',  path: '/history',       icon: History,     glowClass: 'glow-purple' },
 ];
@@ -46,7 +46,7 @@ export function Sidebar() {
             boxShadow: backendConnected ? '0 0 6px #39ff14' : '0 0 6px #ff3131',
             display: 'inline-block',
           }} />
-          {backendConnected ? 'BACKEND ONLINE' : 'DEMO MODE'}
+          {backendConnected ? 'SWARM ONLINE' : 'SIMULATION'}
         </div>
       )}
 

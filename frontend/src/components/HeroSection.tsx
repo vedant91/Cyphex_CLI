@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, ArrowRight, Upload, Box } from 'lucide-react';
+import { ArrowRight, Upload, Box } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BackgroundScene from './ui/aurora-section-hero';
+import { GridPulse } from './ui/grid-pulse';
 
 interface Props {
   onDeploy: (url: string) => void;
@@ -10,15 +11,15 @@ interface Props {
 }
 
 export function HeroSection({ onDeploy, isRunning }: Props) {
-  const [mode, setMode] = useState<'sandbox' | 'live'>('sandbox');
+  const [mode, setMode] = useState<'sandbox' | 'github'>('github');
   const [url, setUrl] = useState('');
   const navigate = useNavigate();
 
   const handleDeploy = () => {
-    if (mode === 'live') {
-      onDeploy(url.trim() || 'http://localhost:3000');
+    if (mode === 'github') {
+      onDeploy(url.trim() || 'https://github.com');
     } else {
-      // Navigate to the dedicated sandbox page
+      // Navigate to the dedicated sandbox (upload ZIP) page
       navigate('/sandbox');
     }
   };
@@ -60,6 +61,9 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
         background: 'linear-gradient(to top, rgba(7,0,16,1) 0%, transparent 100%)',
       }} />
 
+      {/* ── Interactive purple grid — lights up under the cursor ── */}
+      <GridPulse style={{ zIndex: 3 }} />
+
       {/* ══════════════════════════════════════════ NAVBAR ══════════════ */}
       <nav style={{
         position: 'relative', zIndex: 20,
@@ -69,22 +73,8 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
         backdropFilter: 'blur(8px)',
         background: 'rgba(7,0,16,0.3)',
       }}>
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: 30, height: 30,
-            background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
-            borderRadius: '6px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Shield size={16} color="#fff" strokeWidth={2} />
-          </div>
-          <span style={{
-            fontFamily: "'Space Grotesk', 'Outfit', sans-serif",
-            fontWeight: 700, fontSize: '1.15rem',
-            color: '#fff', letterSpacing: '-0.2px',
-          }}>CYPHEX</span>
-        </div>
+        {/* Logo removed — spacer keeps the nav balanced */}
+        <div style={{ width: 30 }} />
 
         {/* Nav links */}
         <div style={{ display: 'flex', gap: '40px' }}>
@@ -148,7 +138,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
             color: 'rgba(255,255,255,0.5)',
             letterSpacing: '2px',
           }}
-        >Safeguarding Your Digital Identity ·</motion.p>
+        >Oracle-Guided Exploitation Swarm ·</motion.p>
 
         {/* ── Title (huge display) ── */}
         <div style={{ position: 'relative', width: '100%', maxWidth: '1100px' }}>
@@ -217,7 +207,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
             borderRadius: '10px',
             padding: '5px',
           }}>
-            {(['sandbox', 'live'] as const).map(m => (
+            {(['github', 'sandbox'] as const).map(m => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
@@ -235,39 +225,14 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
                   boxShadow: mode === m ? '0 0 18px rgba(124,58,237,0.5)' : 'none',
                 }}
               >
-                {m === 'sandbox' ? 'SANDBOX' : 'LIVE URL'}
+                {m === 'sandbox' ? 'SANDBOX' : 'GITHUB'}
               </button>
             ))}
 
-            {/* Divider */}
-            <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
-
-            {/* Upload sandbox shortcut */}
-            <button
-              onClick={() => navigate('/sandbox')}
-              disabled={isRunning}
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '0.7rem', fontWeight: 700,
-                padding: '9px 16px',
-                borderRadius: '7px',
-                border: '1px solid rgba(168,85,247,0.3)',
-                cursor: isRunning ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s',
-                letterSpacing: '1px',
-                background: 'transparent',
-                color: 'rgba(168,85,247,0.8)',
-                display: 'flex', alignItems: 'center', gap: '5px',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,0.15)'; e.currentTarget.style.borderColor = '#a855f7'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'; }}
-            >
-              <Upload size={14} /> UPLOAD ZIP
-            </button>
           </div>
 
-          {/* URL input — shown only in LIVE URL mode */}
-          {mode === 'live' && (
+          {/* GitHub repo link — shown only in GITHUB mode */}
+          {mode === 'github' && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
@@ -293,7 +258,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
                 type="text"
                 value={url}
                 onChange={e => setUrl(e.target.value)}
-                placeholder="https://target.com"
+                placeholder={mode === 'github' ? 'https://github.com/org/repo' : 'https://target.com'}
                 style={{
                   flex: 1,
                   fontFamily: "'JetBrains Mono', monospace",
@@ -307,25 +272,32 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
               />
             </motion.div>
           )}
+          {/* Upload ZIP — shown only in SANDBOX mode */}
+          {mode === 'sandbox' && (
+            <motion.button
+              onClick={() => navigate('/sandbox')}
+              disabled={isRunning}
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '0.8rem', fontWeight: 700, letterSpacing: '1px',
+                padding: '13px 24px', borderRadius: '10px',
+                border: '1px solid rgba(168,85,247,0.35)',
+                background: 'rgba(0,0,0,0.45)',
+                color: 'rgba(168,85,247,0.9)',
+                cursor: isRunning ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,0.18)'; e.currentTarget.style.borderColor = '#a855f7'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.35)'; }}
+            >
+              <Upload size={16} /> UPLOAD ZIP
+            </motion.button>
+          )}
+
           {/* CTA buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <button
-              style={{
-                fontFamily: "'Space Grotesk', 'Outfit', sans-serif",
-                fontSize: '0.95rem', fontWeight: 600,
-                color: 'rgba(255,255,255,0.65)',
-                background: 'transparent',
-                border: 'none', cursor: 'pointer',
-                letterSpacing: '0.3px',
-                padding: '13px 4px',
-                transition: 'color 0.2s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}
-            >
-              Request Info
-            </button>
-
             <motion.button
               onClick={handleDeploy}
               disabled={isRunning}
@@ -348,7 +320,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
                 transition: 'all 0.3s',
               }}
             >
-              {isRunning ? 'Agents Running...' : 'Get Started Now'}
+              {isRunning ? 'DeepAgents Running...' : 'Deploy DeepAgents'}
               {!isRunning && <ArrowRight size={17} />}
             </motion.button>
           </div>
@@ -389,7 +361,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)',
               lineHeight: 1.7, letterSpacing: '0.5px',
-            }}>We're dedicated to safeguarding your digital assets</p>
+            }}>13 oracle-guided DeepAgents that exploit, then self-patch</p>
           </div>
         </motion.div>
 
@@ -409,7 +381,7 @@ export function HeroSection({ onDeploy, isRunning }: Props) {
           }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#39ff14', boxShadow: '0 0 8px #39ff14', display: 'inline-block' }} />
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '2px' }}>
-              {isRunning ? 'PIPELINE ACTIVE' : 'SYSTEM ONLINE'}
+              {isRunning ? 'SWARM ACTIVE' : 'DEEPAGENTS ONLINE'}
             </span>
           </div>
         </motion.div>
@@ -593,7 +565,7 @@ function LockElement({ isRunning }: { isRunning: boolean }) {
           textShadow: '0 0 10px #39ff14',
           whiteSpace: 'nowrap',
           animation: 'lockGlow 1s alternate infinite',
-        }}>[ SCANNING... ]</div>
+        }}>[ SWARM ENGAGED ]</div>
       )}
     </div>
   );
