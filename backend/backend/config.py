@@ -121,10 +121,13 @@ class CyphexConfig:
             self.WORKING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "workdir")
             os.makedirs(self.WORKING_DIR, exist_ok=True)
 
-        # Set genome storage dir
+        # Set genome storage dir. Env override matters for production: the default is
+        # relative to the installed package's own directory, which is rarely where a
+        # deployed container/host wants to keep (or bake in) its genome files.
+        self.GENOME_STORAGE_DIR = os.getenv("CYPHEX_GENOME_STORAGE_DIR", self.GENOME_STORAGE_DIR)
         if not self.GENOME_STORAGE_DIR:
             self.GENOME_STORAGE_DIR = os.path.join(self.WORKING_DIR, "genomes")
-            os.makedirs(self.GENOME_STORAGE_DIR, exist_ok=True)
+        os.makedirs(self.GENOME_STORAGE_DIR, exist_ok=True)
 
 
 # Global config singleton

@@ -154,6 +154,17 @@ def main():
     watch_p.add_argument("--port", type=int, default=3004, help="Daemon port (default: 3004)")
     watch_p.add_argument("--host", default="127.0.0.1", help="Bind host")
 
+    genome_sub = sub.add_parser(
+        "genome", help="Export/import a trained behavioural genome between machines"
+    ).add_subparsers(dest="genome_command")
+    genome_export_p = genome_sub.add_parser(
+        "export", help="Bundle a target's trained genome into one portable file")
+    genome_export_p.add_argument("--target", required=True, help="The target_url `cyphex scan` used")
+    genome_export_p.add_argument("--out", required=True, help="Output .cxgenome file path")
+    genome_import_p = genome_sub.add_parser(
+        "import", help="Install a genome bundle into this machine's GENOME_STORAGE_DIR")
+    genome_import_p.add_argument("bundle", help="Path to the .cxgenome file to import")
+
     gh_p = sub.add_parser("github-hook", help="Start GitHub webhook receiver for repo-connected RASP")
     gh_p.add_argument("--port", type=int, default=3005, help="Webhook port (default: 3005)")
     gh_p.add_argument("--secret", default="", help="GitHub webhook secret for signature verification")
@@ -304,6 +315,37 @@ def main():
         print(f"  {C.DIM}The AI Council will auto-patch vulnerable source code.{C.RST}\n")
         from cyphex.daemon import run_daemon
         run_daemon(host=args.host, port=args.port)
+        return
+
+    if args.command == "genome":
+        _clear()
+        print(BANNER)
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", "backend"))
+        from config import config as cyphex_config
+        from immune.genome_bundle import export_genome, import_genome
+        if args.genome_command == "export":
+            print(f"  {C.BOLD}Exporting genome{C.RST} for {args.target}")
+            try:
+                path = export_genome(args.target, cyphex_config.GENOME_STORAGE_DIR, args.out)
+                print(f"  {C.G}[OK]{C.RST} Wrote {path}")
+                print(f"  {C.DIM}Ship this one file to production, then run "
+                      f"`cyphex genome import {path}` there.{C.RST}")
+            except FileNotFoundError as e:
+                print(f"  {C.R}[ERR]{C.RST} {e}")
+                sys.exit(1)
+        elif args.genome_command == "import":
+            print(f"  {C.BOLD}Importing genome{C.RST} from {args.bundle}")
+            try:
+                manifest = import_genome(args.bundle, cyphex_config.GENOME_STORAGE_DIR)
+                print(f"  {C.G}[OK]{C.RST} Installed genome for {manifest['target_url']} "
+                      f"into {cyphex_config.GENOME_STORAGE_DIR}")
+                print(f"  {C.DIM}`cyphex watch` will pick it up automatically.{C.RST}")
+            except (ValueError, FileNotFoundError, KeyError) as e:
+                print(f"  {C.R}[ERR]{C.RST} {e}")
+                sys.exit(1)
+        else:
+            print(f"  {C.Y}[INFO]{C.RST} Usage: cyphex genome export --target <url> --out <file.cxgenome>")
+            print(f"  {C.Y}[INFO]{C.RST}        cyphex genome import <file.cxgenome>")
         return
 
     if args.command == "github-hook":
