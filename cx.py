@@ -387,7 +387,7 @@ QUICK_HELP = f"""
 COMMANDS = [
     "/scan", "/deep", "/deepagents", "/full", "/net", "/netmap", "/netwatch",
     "/netaudit", "/watch", "/setup", "/benchmark", "/bench", "/verify", "/status", "/runs", "/doctor",
-    "/models", "/llm", "/webhook", "/github", "/version", "/history", "/clear", "/exit", "/quit", "/help",
+    "/models", "/llm", "/webhook", "/sheet", "/github", "/version", "/history", "/clear", "/exit", "/quit", "/help",
 ]
 
 def _completer(text, state):
@@ -1158,6 +1158,64 @@ def _notify():
     return sys.modules["cyphex_notify"]
 
 
+def _sheets():
+    # Loaded by path, same reason as _notify(): sys.path shadowing in this process.
+    import importlib.util
+    if "cyphex_sheets" not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            "cyphex_sheets", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cyphex", "sheets.py"))
+        sys.modules["cyphex_sheets"] = mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    return sys.modules["cyphex_sheets"]
+
+
+def _cmd_sheet(arg: str):
+    """Connect a Google Sheet (via a tiny Apps Script web app) so every
+    attack attempt — endpoint, payload, outcome, why — appends live while a
+    scan runs, same connection model as /webhook."""
+    sh = _sheets()
+    arg = arg.strip()
+
+    if arg.lower() == "setup":
+        secret = sh.start_setup()
+        print(f"\n  {C.CYAN}{C.BOLD}Connect a Google Sheet{C.RST}")
+        _dim("1. Open your sheet -> Extensions -> Apps Script.")
+        _dim("2. Delete the placeholder code and paste this in its place:")
+        print(f"\n{sh.setup_script(secret)}")
+        _dim("3. Deploy -> New deployment -> type 'Web app' -> execute as Me, access Anyone.")
+        _dim("4. Copy the web app URL (ends in /exec) and run:  /sheet <that url>")
+        return
+
+    if arg.lower().startswith("remove"):
+        which = arg[6:].strip() or "all"
+        n = sh.disconnect(which)
+        _ok(f"Disconnected {n} sheet(s).") if n else _warn("Nothing to remove. Use /sheet to see the numbers.")
+        return
+
+    if not arg:
+        conns = sh.saved()
+        print(f"\n  {C.CYAN}{C.BOLD}Sheet connections{C.RST}")
+        for i, c in enumerate(conns, 1):
+            print(f"  {C.NEON}●{C.RST} {i}. {sh.label(c['url'])}  {C.GREY}connected{C.RST}")
+        if not conns:
+            _dim("Nothing connected yet. Run /sheet setup first, then /sheet <web-app-url>.")
+        _dim("Remove:  /sheet remove [n|all]")
+        return
+
+    secret = sh.pending_secret()
+    if not secret:
+        _err("No secret on file — run /sheet setup first, then paste the URL it gives you.")
+        return
+    _spinner("Checking the sheet accepts rows…")
+    res = sh.connect(arg, secret)
+    if res["ok"]:
+        sh.clear_pending()
+        _ok(f"Connected to {res['label']}")
+        _dim("Every tested endpoint, payload and outcome will now append there while a scan runs.")
+    else:
+        _err(res["error"])
+
+
 def _cmd_webhook(arg: str):
     """Connect a Google Chat / Slack / Teams webhook so every scan reports to that space."""
     notify = _notify()
@@ -1489,6 +1547,9 @@ def _handle(line: str):
 
         case "/webhook" | "/webhooks":
             _cmd_webhook(arg)
+
+        case "/sheet" | "/sheets":
+            _cmd_sheet(arg)
 
         case "/github":
             _cmd_github(arg)

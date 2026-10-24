@@ -18,6 +18,7 @@ Tiers (based on usable VRAM/unified memory):
 """
 
 import os
+import re
 import shutil
 import subprocess
 import platform
@@ -123,6 +124,66 @@ def get_gpu_info() -> dict:
             pass
 
     return info
+
+
+def get_available_memory_gb() -> Optional[float]:
+    """Live (right-now) available system RAM in GB, or None if it can't be
+    read on this platform/sandbox — callers must then fall back to a static
+    budget rather than treat None as zero.
+
+    get_gpu_info()'s "vram_gb" is a one-time, start-of-process estimate of
+    TOTAL memory — it never reflects what Docker containers, a browser, or
+    other apps are using RIGHT NOW. On a unified-memory Mac that mismatch is
+    exactly what let CYPHEX load two 7B+ Ollama models "within budget" while
+    Docker was already using several GB, hanging the machine. This re-checks
+    the real current state every time a caller wants to know it, instead of
+    once at startup.
+    """
+    system = platform.system().lower()
+
+    if system == "darwin":
+        try:
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+            page_size = 4096
+            m = re.search(r"page size of (\d+) bytes", out)
+            if m:
+                page_size = int(m.group(1))
+            free_pages = 0
+            for key in ("Pages free", "Pages inactive", "Pages purgeable"):
+                m = re.search(rf"{key}:\s+(\d+)\.", out)
+                if m:
+                    free_pages += int(m.group(1))
+            if free_pages > 0:
+                return round(free_pages * page_size / (1024 ** 3), 2)
+        except Exception:
+            pass
+        return None
+
+    if system == "linux":
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        kb = int(line.split()[1])
+                        return round(kb / (1024 ** 2), 2)
+        except Exception:
+            pass
+        return None
+
+    if system == "windows":
+        try:
+            out = subprocess.run(
+                ["wmic", "OS", "get", "FreePhysicalMemory", "/Value"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            m = re.search(r"FreePhysicalMemory=(\d+)", out)
+            if m:
+                return round(int(m.group(1)) / (1024 ** 2), 2)
+        except Exception:
+            pass
+        return None
+
+    return None
 
 
 def _get_apple_chip() -> str:

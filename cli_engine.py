@@ -340,7 +340,7 @@ class CyphexEngine:
             return
 
         # Step 1: Get source code
-        self._step("1/9", "GETTING SOURCE CODE")
+        self._step("1/10", "GETTING SOURCE CODE")
 
         # Org-wide microservice discovery: given a single GitHub repo_url,
         # find its sibling microservices elsewhere in the same org and
@@ -365,7 +365,7 @@ class CyphexEngine:
         self._detect_microservices(self.source_dir)
 
         # Step 2: Analyze code files
-        self._step("2/9", "STATIC CODE ANALYSIS")
+        self._step("2/10", "STATIC CODE ANALYSIS")
         file_vulns = self._analyze_code_files(self.source_dir)
 
         # Augment with multi-language scanner (Semgrep + 20-language fallback)
@@ -400,7 +400,7 @@ class CyphexEngine:
             pass  # cyphex package not installed
 
         # Step 3: Deploy sandbox
-        self._step("3/9", "DEPLOYING SANDBOX")
+        self._step("3/10", "DEPLOYING SANDBOX")
 
         # Phase 3 microservice VAPT: a monorepo of >=2 services gets deployed
         # together on one Docker network and scanned service-by-service with
@@ -412,7 +412,7 @@ class CyphexEngine:
             multi_context = await self._multi_service_dynamic_scan(use_deepagents=use_deepagents)
 
         if multi_context is not None:
-            self._step("4/9", "DYNAMIC VULNERABILITY SCAN (multi-service)")
+            self._step("4/10", "DYNAMIC VULNERABILITY SCAN (multi-service)")
             self.context = multi_context
             self.context.confirmed_vulns.extend(file_vulns)
         else:
@@ -430,7 +430,7 @@ class CyphexEngine:
                 await self._run_network_scan()
 
             # Step 4: Dynamic scan (crawl + attack)
-            self._step("4/9", "DYNAMIC VULNERABILITY SCAN")
+            self._step("4/10", "DYNAMIC VULNERABILITY SCAN")
             if target_url == "offline_mode":
                 print(f"  {C.Y}[WARN] Sandbox deployment failed. Skipping dynamic scan. Proceeding with static vulnerabilities.{C.RST}")
                 self.context = ScanContext(target_url="http://offline.local")
@@ -449,15 +449,15 @@ class CyphexEngine:
             print(f"  {C.G}[OK]{C.RST} +{len(self._network_vulns)} network vulnerability findings merged")
 
         # Step 5: Build genome + evolve
-        self._step("5/9", "IMMUNE SYSTEM - BUILD GENOME")
+        self._step("5/10", "IMMUNE SYSTEM - BUILD GENOME")
         self.genome = await self._build_and_evolve(self.context, generations)
 
         # Step 6: AI Attack Simulation
-        self._step("6/9", "AI ATTACK SIMULATION - GENOME DEFENSE")
+        self._step("6/10", "AI ATTACK SIMULATION - GENOME DEFENSE")
         self._simulate_attacks()
 
         # Step 7: Report
-        self._step("7/9", "SECURITY REPORT")
+        self._step("7/10", "SECURITY REPORT")
         report = await self._print_report(time.time() - self.start_ts)
         if output_file:
             self._save_report(report, output_file)
@@ -466,7 +466,7 @@ class CyphexEngine:
 
         # Step 8: Patch workflow
         if auto_patch and self.context.confirmed_vulns:
-            self._step("8/9", "AI PATCH + VERIFY  (RAG · Council · Reflexion · Memory)")
+            self._step("8/10", "AI PATCH GENERATION  (RAG · LLM · Reflexion · Memory)")
             await self._patch_workflow()
 
         # Cleanup
@@ -493,6 +493,7 @@ class CyphexEngine:
             stop_sandbox(self.sandbox_info.get("sandbox_id", ""))
             print(f"\n  {C.G}[OK]{C.RST} Sandbox stopped.")
 
+        self._step("10/10", "COMPLETE")
         self._final_banner()
 
         # ── Visual HTML report (openable link) ──
@@ -3042,6 +3043,12 @@ class CyphexEngine:
 
     # Step 8: Patch workflow
     async def _patch_workflow(self):
+        # Printed unconditionally, before every early-return path below, so
+        # the scan always shows 10/10 steps regardless of whether anything
+        # ends up patchable — a scan that returns early here (no vulns, or
+        # none with a resolvable source location) still completed this
+        # phase, it just found nothing to verify.
+        self._step("9/10", "VERIFY + SECURITY SCORE  (Council Review · Verify Gate)")
         vulns = list(self.context.confirmed_vulns)
         if not vulns:
             print(f"  {C.G}No vulnerabilities to patch.{C.RST}")
@@ -3482,7 +3489,14 @@ class CyphexEngine:
                 console.print(f"[yellow][RAG] disabled due to indexing error: {str(e)[:80]}[/yellow]")
 
         if not patchable:
-            console.print(f"[dim]No vulns with file locations to patch.[/dim]")
+            console.print(
+                f"[yellow]No vulns with a resolvable source location to patch — "
+                f"score stays {score_before}/100 (0 of {len(vulns)} finding(s) were patchable; "
+                f"all are dynamic/runtime-only, no source file was traced).[/yellow]"
+            )
+            self._post_patch_score = score_before
+            self._post_patch_remaining = vulns
+            self._patches_applied = 0
             return
 
 

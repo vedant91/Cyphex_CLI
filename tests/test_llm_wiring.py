@@ -154,7 +154,14 @@ def test_oracle_plan_decide_mutate_all_go_to_the_hosted_llm_not_ollama(monkeypat
     """plan/decide/mutate each resolve a different LOCAL Ollama model name (qwen/llama/deepseek),
     but with a hosted LLM configured, CouncilOrchestrator._call() must route every one of them to
     the hosted provider, not Ollama — the provider itself collapses unknown names to the primary."""
+    from backend.deepagents import oracle_attack as _oracle_mod
     from backend.deepagents.oracle_attack import AttackOracle, Hypothesis, HttpRequest
+    # _resolve_model_for_role() caches role -> model in module globals for the
+    # process lifetime (correct for one real scan) — reset them so this
+    # assertion isn't at the mercy of whatever an earlier test in the same
+    # pytest run already cached for "mutator" etc.
+    monkeypatch.setattr(_oracle_mod, "_ROLE_CACHE", {})
+    monkeypatch.setattr(_oracle_mod, "_MODEL_CACHE", [])
     _hosted(monkeypatch, tmp_path)
     calls = _recorder(monkeypatch, reply=(
         '{"target_summary": "s", "primary_vulnerability_class": "SQLi", "hypotheses": [], '

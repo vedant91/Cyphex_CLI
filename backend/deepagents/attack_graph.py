@@ -5,6 +5,7 @@ Shared state across all DeepAgents in a scan session.
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Set
 import re
+import threading
 
 
 @dataclass
@@ -29,6 +30,18 @@ class AttackGraph:
     """
 
     def __init__(self):
+        # self.nodes is read/mutated by get_node(), _find_auth_endpoints()
+        # and update_from_finding() — all synchronous, but called from every
+        # DeepAgent's run() while up to 6 agents run concurrently (asyncio.
+        # gather, see cli_engine.py's GROUP_PLAN). A real "dictionary changed
+        # size during iteration" crash hit DeepSSTIAgent/DeepCMDiAgent (both
+        # in that group) during a live scan — this lock serializes every
+        # read-or-write of this shared graph the same way VRAMManager.loaded
+        # was serialized for the identical class of race.
+        # RLock, not Lock: update_from_finding() holds the lock for its whole
+        # body and calls get_node()/_find_auth_endpoints() internally, which
+        # also acquire it — a plain Lock would deadlock on that re-entry.
+        self._lock = threading.RLock()
         self.nodes: Dict[str, AttackNode] = {}
         self.edges: List[AttackEdge] = []
         self.confirmed_creds: List[Tuple[str, str, str]] = []   # (user, pwd, source_url)
@@ -43,9 +56,10 @@ class AttackGraph:
         self.current_service: str = ""
 
     def get_node(self, url: str) -> AttackNode:
-        if url not in self.nodes:
-            self.nodes[url] = AttackNode(url=url)
-        return self.nodes[url]
+        with self._lock:
+            if url not in self.nodes:
+                self.nodes[url] = AttackNode(url=url)
+            return self.nodes[url]
 
     def _extract_token(self, evidence: str) -> str:
         match = re.search(r'"(?:token|jwt)"\s*:\s*"([^"]+)"', evidence, re.I)
@@ -56,13 +70,18 @@ class AttackGraph:
     def _find_auth_endpoints(self) -> List[str]:
         """Find endpoints that likely require authentication."""
         from backend.config.dast_constants import AUTH_KEYWORDS
-        return [node for node in self.nodes if any(k in node for k in AUTH_KEYWORDS)]
+        with self._lock:
+            return [node for node in self.nodes if any(k in node for k in AUTH_KEYWORDS)]
 
     def update_from_finding(self, finding) -> List[AttackEdge]:
         """
         When one agent finds something, compute the follow-up attack chain.
         Returns new AttackEdges sorted by priority.
         """
+        with self._lock:
+            return self._update_from_finding_locked(finding)
+
+    def _update_from_finding_locked(self, finding) -> List[AttackEdge]:
         chains = []
         node = self.get_node(finding.endpoint)
         node.known_vulns.append(finding.name)

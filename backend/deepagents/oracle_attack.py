@@ -381,6 +381,11 @@ def _extract_json(text: str) -> Optional[dict]:
 # Global semaphore to serialize LLM calls and prevent Ollama queue timeouts
 _LLM_SEMAPHORE = asyncio.Semaphore(1)
 
+# How long a call waits in that single-slot queue on top of its own
+# inference budget — see _call_reasoner()'s comment for why this needs to
+# be generous under a 13-agent fan-out against one serialized model slot.
+_QUEUE_WAIT_S = 240.0
+
 
 class AttackOracle:
     """
@@ -478,11 +483,20 @@ class AttackOracle:
                     )
                 )
 
+        # Every LLM call across every DeepAgent funnels through one serialized
+        # slot (_LLM_SEMAPHORE = Semaphore(1), to prevent Ollama queue
+        # timeouts) — so the real wait a call can face is its own inference
+        # time PLUS however long the agents queued ahead of it take. A real
+        # 13-agent scan showed real inference alone taking 90-170s per call,
+        # with dozens of calls queued behind this one semaphore slot — the
+        # previous 120s queue-wait allowance was too small and abandoned
+        # most hypotheses outright. _QUEUE_WAIT_S is raised accordingly.
+        total_budget = timeout + _QUEUE_WAIT_S
         try:
-            # Add 120s to the timeout to account for waiting in the semaphore queue
-            result = await asyncio.wait_for(_run(), timeout=timeout + 120.0)
+            result = await asyncio.wait_for(_run(), timeout=total_budget)
         except asyncio.TimeoutError:
-            print(f"  [DeepAgent:{role}] timed out after {timeout}s (in queue or inference) — skipping")
+            print(f"  [DeepAgent:{role}] timed out after {total_budget:.0f}s "
+                  f"({timeout:.0f}s budget + {_QUEUE_WAIT_S:.0f}s queue wait) — skipping")
             return None
 
         if not result or not result.response:
@@ -512,7 +526,7 @@ class AttackOracle:
             role="planner",
             system=ORACLE_PLAN_SYSTEM,
             prompt=prompt,
-            timeout=90.0,
+            timeout=150.0,
         )
         if not data:
             return AttackPlan(
@@ -565,7 +579,7 @@ class AttackOracle:
             prompt=prompt,
             cwe=hypothesis.cwe,
             severity=hypothesis.severity,
-            timeout=60.0,
+            timeout=150.0,
         )
         if not data:
             return Decision(action="abandoned", thinking="ANALYST LLM unavailable", confidence=0)
@@ -591,7 +605,7 @@ class AttackOracle:
             role="mutator",
             system=ORACLE_MUTATE_SYSTEM,
             prompt=prompt,
-            timeout=45.0,  # Mutator should be fast — 45s cap
+            timeout=90.0,  # Mutator's own model is small/fast; queue wait dominates
         )
         if not data:
             return []

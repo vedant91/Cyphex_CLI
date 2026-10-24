@@ -179,6 +179,31 @@ class TestHardware:
         assert detect_mode(1.0)  == "cloud"
         assert detect_mode(0.0)  == "cloud"
 
+    def test_available_memory_returns_a_real_live_number_on_this_platform(self):
+        """get_gpu_info()'s vram_gb is a one-time TOTAL-memory estimate taken
+        at startup — it never reflects what's free right now (the real
+        incident: Docker + parallel Ollama models hanging the machine because
+        nothing re-checked actual free RAM at load time). This must return a
+        live, positive number on a real dev machine, never a static/cached
+        value and never raise."""
+        from cyphex.hardware import get_available_memory_gb
+        result = get_available_memory_gb()
+        assert result is None or (isinstance(result, float) and result > 0)
+
+    def test_available_memory_falls_back_to_none_on_unreadable_platform(self, monkeypatch):
+        from cyphex import hardware
+        monkeypatch.setattr(hardware.platform, "system", lambda: "plan9")
+        assert hardware.get_available_memory_gb() is None
+
+    def test_available_memory_never_raises_when_subprocess_fails(self, monkeypatch):
+        from cyphex import hardware
+
+        def boom(*a, **k):
+            raise OSError("no such command")
+
+        monkeypatch.setattr(hardware.subprocess, "run", boom)
+        assert hardware.get_available_memory_gb() is None  # degrades, never raises
+
 
 class TestConfig:
     """Test configuration safety."""

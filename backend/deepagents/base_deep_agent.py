@@ -10,6 +10,7 @@ Upgraded with:
 """
 import time
 import asyncio
+from datetime import datetime as _dt, timezone
 import httpx
 from rich.console import Console
 
@@ -41,10 +42,14 @@ _CONFIDENCE_THRESHOLD = 60
 
 
 class HypothesisResult:
-    def __init__(self, confirmed: bool, vuln: Vuln = None, confidence: int = 0):
+    def __init__(self, confirmed: bool, vuln: Vuln = None, confidence: int = 0, reason: str = ""):
         self.confirmed = confirmed
         self.vuln = vuln
         self.confidence = confidence
+        # Why, for the un-confirmed case — surfaced in the Google Sheets log
+        # (/sheet) so "vulnerability not found" rows say something useful
+        # instead of just "no".
+        self.reason = reason
 
 
 class BaseDeepAgent:
@@ -124,6 +129,7 @@ class BaseDeepAgent:
                 if isinstance(result, Exception):
                     console.print(f"[yellow]Hypothesis {hyp.id} errored: {result}[/yellow]")
                     continue
+                self._log_hypothesis_row(context, hyp, result)
                 if result.confirmed and result.vuln:
                     self.vulns.append(result.vuln)
                     new_edges = self.graph.update_from_finding(result.vuln)
@@ -197,6 +203,36 @@ class BaseDeepAgent:
             elapsed = time.time() - t0
             return 0, str(e), elapsed, {}
 
+    def _log_hypothesis_row(self, context: ScanContext, hyp: Hypothesis,
+                             result: "HypothesisResult") -> None:
+        """One row per tested hypothesis to every connected Google Sheet
+        (/sheet) — endpoint, payload, outcome, and why when nothing was
+        found. A no-op with zero connections, same as every other scan-time
+        integration point in this class."""
+        try:
+            from cyphex import sheets
+        except Exception:
+            return
+        if not sheets.saved():
+            return
+        req = hyp.test_request
+        row = {
+            "Timestamp": _dt.now(timezone.utc).isoformat(),
+            "Scan ID": self.scan_id,
+            "Service": getattr(self.graph, "current_service", "") or "",
+            "Agent": self.__class__.__name__,
+            "Method": req.method,
+            "Endpoint": req.path,
+            "Payload": (req.payload or req.body or "")[:500],
+            "Vulnerability": (result.vuln.name if result.vuln else hyp.vuln_type),
+            "CWE": (result.vuln.cwe if result.vuln else hyp.cwe),
+            "Severity": (result.vuln.severity if result.vuln else hyp.severity),
+            "Outcome": "confirmed" if result.confirmed else "not found",
+            "Confidence": result.confidence,
+            "Reason": (result.vuln.description if result.vuln else result.reason)[:300],
+        }
+        sheets.log_row(row)
+
     async def _probe_cross_service(self, edge, context: ScanContext) -> None:
         """Phase 2 microservice VAPT: the AttackGraph just proposed a
         cross_service_pivot edge — edge.target is a real absolute URL
@@ -267,6 +303,7 @@ class BaseDeepAgent:
         On failure, asks Oracle to mutate the payload and tries variants.
         """
         current_request = hyp.test_request
+        reason = "exhausted all attempts without a confirmed finding"
 
         for attempt in range(self.MAX_ATTEMPTS_PER_HYPOTHESIS):
             status, body, elapsed, headers = await self._http_probe(current_request)
@@ -281,7 +318,7 @@ class BaseDeepAgent:
                     f"[dim]  [{hyp.id}] {current_request.path} → HTTP {status}: "
                     f"dead route, abandoning (no Oracle call)[/dim]"
                 )
-                return HypothesisResult(False)
+                return HypothesisResult(False, reason=f"dead route (HTTP {status})")
 
             # Update ASI with observation
             self.asi.ingest_response(
@@ -310,6 +347,7 @@ class BaseDeepAgent:
                 decide_ms = (time.time() - t0) * 1000
             except Exception as e:
                 console.print(f"[red]Oracle decide failed: {e}[/red]")
+                reason = f"Oracle decide failed: {str(e)[:120]}"
                 break
 
             ui = _deep_ui()
@@ -348,7 +386,8 @@ class BaseDeepAgent:
                     return HypothesisResult(True, vuln, decision.confidence)
 
             if decision.action == "abandoned":
-                return HypothesisResult(False)
+                why = getattr(decision, "thinking", "") or "Oracle judged the response not exploitable"
+                return HypothesisResult(False, reason=f"abandoned: {why[:150]}")
 
             if decision.action == "adapt":
                 if decision.next_probe:
@@ -380,4 +419,4 @@ class BaseDeepAgent:
                         )
                         hyp.test_request = current_request
 
-        return HypothesisResult(False)
+        return HypothesisResult(False, reason=reason)

@@ -34,6 +34,7 @@ Zero API cost — runs entirely local through Ollama.
 import os
 import time
 import logging
+import httpx
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -196,6 +197,25 @@ class CyphexReasoner:
         """True if Oracle agent-reasoning is active."""
         return self.interceptor is not None
 
+    def _direct_ollama(self, model: str, prompt: str) -> str:
+        """Plain Ollama /api/generate call — the fallback this class's own
+        docstring always promised ("Falls back to direct Ollama calls if
+        agent-reasoning isn't installed") but never implemented. Without
+        it, generate() returned an EMPTY response in <1ms whenever the
+        optional agent-reasoning package wasn't installed (the common
+        case), so every DeepAgent planner call failed instantly, every
+        agent tested 0 hypotheses, and a scan looked "done" in seconds
+        without ever touching the target."""
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                r = client.post(f"{self.host}/api/generate",
+                                json={"model": model, "prompt": prompt, "stream": False})
+                r.raise_for_status()
+                return r.json().get("response", "")
+        except Exception as e:
+            logger.warning(f"Direct Ollama call failed for {model}: {e}")
+            return ""
+
     @property
     def available_strategies(self) -> list:
         """Get strategies available for current VRAM tier."""
@@ -256,13 +276,14 @@ class CyphexReasoner:
         strategy_info = ALL_STRATEGIES.get(strategy, ALL_STRATEGIES["standard"])
         start = time.time()
 
+        # Combine system + prompt once, shared by the interceptor path and
+        # the direct-Ollama fallback below.
+        full_prompt = prompt
+        if system:
+            full_prompt = f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT: "
+
         if self.interceptor:
             try:
-                # Combine system + prompt for the interceptor
-                full_prompt = prompt
-                if system:
-                    full_prompt = f"SYSTEM: {system}\n\nUSER: {prompt}\nASSISTANT: "
-
                 model_with_strategy = f"{model}+{strategy}"
                 result = self.interceptor.generate(
                     model=model_with_strategy,
@@ -290,10 +311,16 @@ class CyphexReasoner:
             except Exception as e:
                 logger.warning(f"Agent-reasoning call failed ({strategy}): {e}. Falling back.")
 
-        # Fallback: no enhanced reasoning
+        # Fallback: no enhanced reasoning (agent-reasoning not installed, or
+        # its call just failed above) — a real, unenhanced Ollama call, not
+        # an empty response. See _direct_ollama's docstring for why this
+        # matters: without it every caller here silently got nothing.
+        response_text = self._direct_ollama(model, full_prompt)
         elapsed = (time.time() - start) * 1000
+        self._call_count += 1
+        self._total_time_ms += elapsed
         return ReasoningResult(
-            response="",
+            response=response_text,
             strategy="direct",
             strategy_name="Direct (no reasoning)",
             strategy_icon="⚡",

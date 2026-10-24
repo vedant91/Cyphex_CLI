@@ -955,6 +955,7 @@ COMMAND_DECK = [
     ("/models", "", "List available local Ollama models"),
     ("/llm", "[set|test|local]", "Use your own OpenAI-compatible API key / hosted SLM instead of local Ollama"),
     ("/webhook", "[link]", "Connect Google Chat / Slack — scan updates & PR approvals go there"),
+    ("/sheet", "[setup|link]", "Connect a Google Sheet — every attack attempt appends live as it runs"),
     ("", "flags", "/webhook remove [n|all]  — or just paste the link"),
     ("/github", "[login|token|clear]", "Check or connect GitHub auth — needed for org-wide sibling discovery"),
     ("/history", "", "Recent intercepts this session"),

@@ -13,11 +13,20 @@ from backend.council.council_orchestrator import VRAMManager
 class TestVRAMManager:
 
     @pytest.fixture
-    def vram(self):
+    def vram(self, monkeypatch):
         v = VRAMManager()
         # Pin to 5.5 GB (the no-GPU fallback) so tests are deterministic
         # regardless of the host machine's physical GPU memory.
         v.VRAM_LIMIT = 5.5
+        # live_budget() also caps on actually-free system RAM (see
+        # test_live_ram_budget.py) — pin that to "plenty free" here so every
+        # pre-existing test in this file keeps testing VRAM_LIMIT alone,
+        # deterministic regardless of how much RAM is free on the machine
+        # actually running the suite.
+        monkeypatch.setattr(
+            "backend.council.council_orchestrator.VRAMManager.live_budget",
+            lambda self: self.VRAM_LIMIT,
+        )
         return v
 
     @pytest.mark.asyncio
@@ -67,8 +76,9 @@ class TestVRAMManager:
         vram.loaded["phi3:mini"] = 2.2
 
         with patch.object(vram, '_raw_call', new_callable=AsyncMock):
-            with patch.object(vram, 'unload', new_callable=AsyncMock) as mock_unload:
-                # Force the unload to actually remove from dict
+            # Internal eviction calls _unload_locked directly (not the public,
+            # lock-acquiring unload()) since the caller already holds self._lock.
+            with patch.object(vram, '_unload_locked', new_callable=AsyncMock) as mock_unload:
                 async def side_effect(model):
                     vram.loaded.pop(model, None)
                 mock_unload.side_effect = side_effect
@@ -77,3 +87,31 @@ class TestVRAMManager:
                 # Both should have been evicted to make room for 4.5 GB
                 assert mock_unload.call_count >= 1
                 assert "cyphex-patch" in vram.loaded
+
+    @pytest.mark.asyncio
+    async def test_concurrent_ensure_loaded_does_not_corrupt_dict(self, vram):
+        """Reproduces the real 'dictionary changed size during iteration' crash:
+        up to 6 DeepAgents call ensure_loaded() truly concurrently via
+        asyncio.gather, each with a real await inside the critical section.
+        Without the lock, two coroutines racing on self.loaded raised that
+        RuntimeError live during a /deep scan (DeepCMDiAgent, DeepSSTIAgent,
+        DeepPathTraversalAgent). The lock must serialize them instead."""
+        vram.VRAM_LIMIT = 3.0  # force eviction pressure across concurrent callers
+
+        async def fake_raw_call(model, prompt, stream=False):
+            await asyncio.sleep(0.01)  # real await point inside the critical section
+            return "ok"
+
+        with patch.object(vram, '_raw_call', side_effect=fake_raw_call):
+            with patch.object(VRAMManager, '_unload_locked', autospec=True) as mock_unload:
+                async def side_effect(self, model):
+                    await asyncio.sleep(0.01)
+                    self.loaded.pop(model, None)
+                mock_unload.side_effect = side_effect
+
+                models = ["cyphex-patch", "deepseek-coder:1.3b", "phi3:mini",
+                          "qwen2.5-coder:7b", "llama3.1:8b", "cyphex-sqli"]
+                await asyncio.gather(*(vram.ensure_loaded(m) for m in models))
+
+        # No RuntimeError raised means the lock held; dict must be internally consistent
+        assert sum(vram.loaded.values()) <= vram.VRAM_LIMIT
