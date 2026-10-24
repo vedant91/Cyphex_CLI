@@ -53,6 +53,15 @@ const DEFAULTS = {
   // and persists one at ~/.cyphex/api_key — copy that value here via the
   // env var, or pass { apiKey: '...' } explicitly.
   apiKey: process.env.CYPHEX_API_KEY || '',
+  // ── Genome decision gate ──
+  // The same per-endpoint behavioural genome `cyphex scan` trains, consulted live
+  // on every request via the daemon's POST /api/decide — not just this file's own
+  // hardcoded regex signatures. targetUrl must match what the scan used (it's the
+  // genome's lookup key); with no genome trained for it, /api/decide always ALLOWs,
+  // so leaving this unset just means "regex-only", not "broken".
+  genomeGate: true,
+  targetUrl: '',
+  genomeTimeoutMs: 300,   // fail OPEN past this — a slow/down daemon must never hang the app
 };
 
 // ── Attack detection patterns ───────────────────────────────────────
@@ -351,6 +360,59 @@ function sendTelemetry(daemonUrl, eventData, apiKey) {
 
 
 /**
+ * Ask the daemon's genome-backed decision gate for a verdict on this request's inputs.
+ * ONE batched call per request (not one per field — extractInputs() already found every
+ * field locally at zero cost; a network round trip per field would multiply latency).
+ *
+ * Fails OPEN: a daemon that's down, slow past genomeTimeoutMs, or returns anything
+ * unparseable resolves to the same {verdict:'ALLOW'} the daemon itself returns for an
+ * untrained target — "no opinion" is never treated as "attack". The local regex layer
+ * below still runs regardless, so this is a second opinion, not the only line of defence.
+ */
+function askGenome(config, endpoint, inputs) {
+  return new Promise((resolve) => {
+    const allow = () => resolve({ verdict: 'ALLOW', score: 0, field: null, reason: 'genome unavailable' });
+    if (!config.genomeGate) return allow();
+
+    const url = new URL('/api/decide', config.daemonUrl);
+    const postData = JSON.stringify({ target_url: config.targetUrl, endpoint, inputs });
+    const options = {
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+        ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
+      },
+      timeout: config.genomeTimeoutMs,
+    };
+
+    let settled = false;
+    const finish = (result) => { if (!settled) { settled = true; resolve(result); } };
+
+    const req = http.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          finish(parsed && parsed.verdict ? parsed : allow());
+        } catch (e) {
+          finish({ verdict: 'ALLOW', score: 0, field: null, reason: 'unparseable daemon response' });
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); finish({ verdict: 'ALLOW', score: 0, field: null, reason: 'daemon timeout' }); });
+    req.on('error', () => finish({ verdict: 'ALLOW', score: 0, field: null, reason: 'daemon unreachable' }));
+    req.write(postData);
+    req.end();
+  });
+}
+
+
+/**
  * CYPHEX RASP Express Middleware
  *
  * Usage:
@@ -378,13 +440,14 @@ function cyphexRasp(options = {}) {
   console.log(`\x1b[2m  Daemon: ${config.daemonUrl}\x1b[0m`);
   console.log(`\x1b[2m  Mode:   ${config.blockMode ? 'BLOCK + HEAL' : 'DETECT ONLY'}\x1b[0m`);
 
-  return function cyphexRaspMiddleware(req, res, next) {
+  return async function cyphexRaspMiddleware(req, res, next) {
     requestCount++;
 
     // Extract all user-controlled inputs
     const inputs = extractInputs(req);
 
-    // Check each input for attacks
+    // Layer 1: this file's own regex signatures — fast, zero network cost, unchanged.
+    // A hit here still returns 403 immediately, exactly as before this feature existed.
     for (const input of inputs) {
       const result = analyzePayload(input.value);
 
@@ -432,6 +495,41 @@ function cyphexRasp(options = {}) {
       }
     }
 
+    // Layer 2: the genome. Only reached if Layer 1 found nothing to block — this is a
+    // second opinion for what the regex signatures miss (the genome's whole point is
+    // learning per-endpoint "normal", not matching a fixed pattern list), not a
+    // duplicate check. One batched call for every extracted input on this request.
+    if (config.genomeGate && inputs.length > 0) {
+      const endpoint = (req.path || req.originalUrl || req.url || '').split('?')[0];
+      const verdict = await askGenome(config, endpoint, inputs);
+
+      if (verdict.verdict === 'BLOCK') {
+        const trace = captureStackTrace(config.repoRoot);
+        if (config.logToConsole) {
+          console.log(`\x1b[91m[CYPHEX] 🛑 Genome BLOCK on ${endpoint} (score ${verdict.score}, field ${verdict.field})\x1b[0m`);
+        }
+        sendTelemetry(config.daemonUrl, {
+          vuln_type: 'Genome Anomaly', cwe: 'CWE-Unknown',
+          payload: (inputs.find(i => i.source === verdict.field) || {}).value || '',
+          method: req.method, url: req.originalUrl || req.url, source_field: verdict.field,
+          stack_trace: trace.raw, source_file: trace.file, source_line: trace.line,
+          repo_root: config.repoRoot, confidence: verdict.score, blocked: config.blockMode,
+          timestamp: new Date().toISOString(),
+        }, config.apiKey);
+        if (config.blockMode) {
+          return res.status(403).json({
+            error: 'Request blocked by CYPHEX RASP',
+            reason: `Behavioural genome anomaly (score ${verdict.score} for ${endpoint})`,
+            blocked_field: verdict.field,
+            cyphex_id: `CYPHEX-${Date.now()}`,
+          });
+        }
+      } else if (verdict.verdict === 'CHALLENGE' && config.logToConsole) {
+        // Never blocks — an unusual-but-plausible request still gets through, just flagged.
+        console.log(`\x1b[93m[CYPHEX] ⚠ Genome CHALLENGE on ${endpoint} (score ${verdict.score}, field ${verdict.field})\x1b[0m`);
+      }
+    }
+
     next();
   };
 }
@@ -440,3 +538,4 @@ function cyphexRasp(options = {}) {
 module.exports = cyphexRasp;
 module.exports.analyzePayload = analyzePayload;
 module.exports.extractInputs = extractInputs;
+module.exports.askGenome = askGenome;

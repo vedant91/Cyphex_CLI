@@ -73,6 +73,7 @@ class CyphexConfig:
 
     # ─── Immune System / Co-Evolution ───
     GENOME_BLOCK_THRESHOLD: float = 0.7      # Anomaly score above this = BLOCK
+    GENOME_CHALLENGE_THRESHOLD: float = 0.3  # ...above this but below BLOCK = CHALLENGE (log, don't block)
     EVOLUTION_GENERATIONS: int = 10           # Default generations per run
     EVOLUTION_PAYLOADS_PER_GEN: int = 20      # Payloads per generation
     GENOME_STORAGE_DIR: str = ""              # Where to save genome state

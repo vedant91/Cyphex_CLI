@@ -72,6 +72,84 @@ try:
 except ImportError:
     pass
 
+# ── Genome-backed live decision gate (RASP calls POST /api/decide) ──
+GENOME_AVAILABLE = False
+try:
+    from backend.backend.immune.behavioral_genome import BehavioralGenome
+    from backend.backend.config import config as cyphex_config
+    GENOME_AVAILABLE = True
+except ImportError:
+    pass
+
+DECIDE_LOG: list[dict] = []
+# One genome per target_url, loaded lazily and cached for the daemon's lifetime —
+# the same trained .pkl a scan already produced, never retrained here.
+_genome_cache: dict[str, "BehavioralGenome"] = {}
+
+
+def _load_genome_for_target(target_url: str):
+    """The exact path convention cli_engine.py's scan pipeline already uses
+    (GENOME_STORAGE_DIR/genome_{md5(target_url)[:12]}), so `cyphex watch` picks
+    up whatever a prior `cyphex scan` trained for this target. Returns None if
+    nothing was ever trained for it — callers must treat that as "no opinion",
+    not as a block, since an untrained genome is not evidence of anything."""
+    if not GENOME_AVAILABLE or not target_url:
+        return None
+    if target_url in _genome_cache:
+        return _genome_cache[target_url]
+    import hashlib
+    target_hash = hashlib.md5(target_url.encode()).hexdigest()[:12]
+    genome_path = os.path.join(cyphex_config.GENOME_STORAGE_DIR, f"genome_{target_hash}")
+    genome = None
+    if os.path.exists(genome_path + ".pkl"):
+        try:
+            genome = BehavioralGenome.load(genome_path)
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Could not load genome for {target_url}: {e}[/yellow]")
+    _genome_cache[target_url] = genome  # cache the miss too — don't retry every request
+    return genome
+
+
+def decide(target_url: str, endpoint: str, inputs: list[dict]) -> dict:
+    """The live decision gate: score every extracted input against the trained
+    genome for this target and return the worst (max-score) verdict.
+
+    inputs: [{"source": "query.q", "value": "..."}, ...] — RASP's own extractInputs()
+    shape, scored as-is so "which field tripped it" survives into the verdict.
+
+    Three tiers, not binary ALLOW/BLOCK — the genome's score is continuous and collapsing
+    it to a hard rule throws away exactly the nuance a decision model is for. CHALLENGE
+    lets an unusual-but-plausible request through while still surfacing it for review,
+    instead of hard-blocking on a single questionable field.
+    """
+    genome = _load_genome_for_target(target_url)
+    if genome is None:
+        return {"verdict": "ALLOW", "score": 0.0, "field": None,
+                "reason": "no trained genome for this target — run `cyphex scan` first"}
+
+    worst_score, worst_field = 0.0, None
+    for inp in inputs or []:
+        value = inp.get("value", "")
+        if not isinstance(value, str) or not value:
+            continue
+        score = genome.score_request(endpoint, value)
+        if score > worst_score:
+            worst_score, worst_field = score, inp.get("source")
+
+    if worst_score >= cyphex_config.GENOME_BLOCK_THRESHOLD:
+        verdict = "BLOCK"
+    elif worst_score >= cyphex_config.GENOME_CHALLENGE_THRESHOLD:
+        verdict = "CHALLENGE"
+    else:
+        verdict = "ALLOW"
+
+    result = {"verdict": verdict, "score": round(worst_score, 3), "field": worst_field,
+              "endpoint": endpoint, "reason": f"genome anomaly score {worst_score:.2f} for {endpoint}"}
+    if verdict != "ALLOW":
+        DECIDE_LOG.append({**result, "target_url": target_url, "timestamp": datetime.now().isoformat()})
+        del DECIDE_LOG[:-500]  # cap memory on a long-running daemon
+    return result
+
 
 class TelemetryEvent:
     """A single attack event received from the RASP SDK."""
@@ -435,6 +513,44 @@ def create_daemon_app():
         result = await _auto_heal(event)
         return JSONResponse(result)
 
+    @app.post("/api/decide")
+    async def decide_endpoint(request: Request):
+        """
+        The live decision gate. Called by the RASP SDK on every incoming request,
+        BEFORE it decides whether to forward or block — this is a synchronous
+        pre-request check, unlike /api/telemetry/attack's fire-and-forget logging.
+
+        Expected JSON body:
+        {
+            "target_url": "http://localhost:3000",   // which genome to use
+            "endpoint": "/api/users/search",          // per-endpoint profile lookup
+            "inputs": [{"source": "query.q", "value": "' OR 1=1--"}, ...]
+        }
+
+        Returns {"verdict": "ALLOW"|"CHALLENGE"|"BLOCK", "score": 0.0-1.0, "field": "...", "reason": "..."}.
+        A target with no trained genome returns ALLOW (an untrained genome is not
+        evidence of anything) — RASP's own local regex layer still runs regardless.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+        if not GENOME_AVAILABLE:
+            return JSONResponse({"verdict": "ALLOW", "score": 0.0, "field": None,
+                                 "reason": "genome module unavailable on this daemon"})
+
+        result = decide(
+            target_url=data.get("target_url", ""),
+            endpoint=data.get("endpoint", ""),
+            inputs=data.get("inputs", []),
+        )
+        if result["verdict"] != "ALLOW":
+            icon = "🛑" if result["verdict"] == "BLOCK" else "⚠️"
+            console.print(f"[bold yellow]{icon} GENOME {result['verdict']}:[/bold yellow] "
+                          f"{result.get('endpoint')} (score {result['score']}, field {result.get('field')})")
+        return JSONResponse(result)
+
     @app.get("/api/status")
     async def status():
         """Health check and stats."""
@@ -442,9 +558,12 @@ def create_daemon_app():
             "status": "running",
             "version": "1.0.0",
             "council_available": COUNCIL_AVAILABLE,
+            "genome_available": GENOME_AVAILABLE,
             "total_events": len(HEAL_LOG),
             "healed": sum(1 for e in HEAL_LOG if e.get("status") == "healed"),
             "rejected": sum(1 for e in HEAL_LOG if e.get("status") == "rejected"),
+            "decide_blocks": sum(1 for e in DECIDE_LOG if e.get("verdict") == "BLOCK"),
+            "decide_challenges": sum(1 for e in DECIDE_LOG if e.get("verdict") == "CHALLENGE"),
             "uptime_seconds": int(time.time() - _START_TIME),
         }
 
@@ -452,6 +571,11 @@ def create_daemon_app():
     async def heal_log():
         """Return full healing history."""
         return {"events": HEAL_LOG}
+
+    @app.get("/api/decide-log")
+    async def decide_log():
+        """Return the BLOCK/CHALLENGE history from the live decision gate."""
+        return {"events": DECIDE_LOG}
 
     return app
 
