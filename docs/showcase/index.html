@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CYPHEX — Technical Project Showcase</title>
+<style>
+  @page { size: A4; margin: 0; }
+  :root { --coral:#e8473f; --ink:#14161a; --dim:#5b6270; --line:#dfe2e8; --panel:#f5f6f8; --green:#1b8a4b; --amber:#b86e00; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); font-size: 8.2pt; line-height: 1.34; }
+  .page { width: 210mm; height: 297mm; padding: 0 10mm 8mm; page-break-after: always; position: relative; overflow: hidden; background: #fff; }
+  .page:last-child { page-break-after: auto; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  code { background: var(--panel); padding: 0 3px; border-radius: 3px; }
+
+  .hero { margin: 0 -10mm 3mm; background: #0b0b0d; color: #fff; padding: 5mm 10mm 4.5mm; display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid var(--coral); }
+  .hero img { height: 15mm; image-rendering: pixelated; }
+  .hero .tag { font-size: 11pt; font-weight: 700; letter-spacing: .2px; }
+  .hero .tag span { color: var(--coral); }
+  .hero .sub { font-size: 7.6pt; color: #aab; margin-top: 1mm; }
+  .hero .r { text-align: right; font-size: 7.6pt; color: #aab; line-height: 1.5; }
+  .hero .r b { color: #fff; font-size: 9.5pt; display: block; letter-spacing: 1px; }
+  .hero.small { padding: 3.5mm 10mm; margin-bottom: 3.5mm; }
+  .hero.small > b { color: #fff; font-size: 11pt; letter-spacing: 2px; }
+
+  h2 { font-size: 9.4pt; letter-spacing: .6px; text-transform: uppercase; color: var(--coral); margin: 2.4mm 0 1.2mm; display: flex; gap: 2mm; align-items: center; }
+  h2 .n { background: var(--coral); color: #fff; border-radius: 3px; padding: 0 4px; font-size: 8pt; }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  ul { padding-left: 4mm; }
+  li { margin: .45mm 0; }
+  li b { color: #000; }
+  .cols { display: grid; gap: 3.6mm; }
+  .two { columns: 2; column-gap: 5mm; }
+  .two li { break-inside: avoid; }
+  .c2 { grid-template-columns: 1fr 1fr; }
+  .c21 { grid-template-columns: 1.15fr 1fr; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: 1.2mm; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 2mm; padding: .6mm 2mm; font-size: 7.4pt; }
+  .chip i { font-style: normal; color: var(--coral); font-weight: 700; margin-right: 1mm; }
+
+  .arch { display: grid; grid-template-columns: 1fr 5mm 1fr 5mm 1fr 5mm 1fr; align-items: stretch; row-gap: 2.4mm; }
+  .box { border: 1.2px solid #222; border-radius: 2mm; padding: 1.6mm 2mm; background: #fff; font-size: 7.4pt; line-height: 1.3; }
+  .box b { display: block; font-size: 8pt; margin-bottom: .4mm; }
+  .box.red { border-color: var(--coral); background: #fff4f3; }
+  .box.blue { border-color: #2563eb; background: #eef4ff; }
+  .box.green { border-color: var(--green); background: #effaf3; }
+  .box.dash { border-style: dashed; border-color: var(--amber); background: #fff9ec; }
+  .arr { display: flex; align-items: center; justify-content: center; color: var(--coral); font-size: 11pt; font-weight: 700; }
+  .span3 { grid-column: span 3; }
+  .span7 { grid-column: span 7; }
+
+  figure { margin: 0; }
+  figure img { width: 100%; display: block; border: 1px solid #222; border-radius: 1.4mm; background: #000; }
+  figcaption { font-size: 7pt; color: var(--dim); margin-top: .8mm; }
+  figcaption b { color: var(--ink); }
+  .shot-note { font-size: 6.8pt; color: var(--dim); font-style: italic; margin-top: .6mm; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  th, td { border: 1px solid var(--line); padding: .7mm 1.6mm; text-align: left; vertical-align: top; }
+  th { background: var(--panel); font-size: 7.2pt; text-transform: uppercase; letter-spacing: .4px; }
+  .ok { color: var(--green); font-weight: 700; }
+  .plan { color: var(--amber); font-weight: 700; }
+  .block { color: #c01818; font-weight: 700; }
+  .banner { border: 1.5px solid var(--amber); background: #fff9ec; border-radius: 2mm; padding: 1.6mm 2.6mm; font-size: 8pt; margin: 1mm 0 1.6mm; }
+  .banner b { color: var(--amber); }
+  .foot { position: absolute; left: 10mm; right: 10mm; bottom: 4mm; display: flex; justify-content: space-between; color: var(--dim); font-size: 6.8pt; border-top: 1px solid var(--line); padding-top: 1mm; }
+</style>
+</head>
+<body>
+
+<!-- ============================ PAGE 1 ============================ -->
+<section class="page">
+  <div class="hero">
+    <div style="display:flex;align-items:center;gap:6mm">
+      <img src="img/banner.png" alt="CYPHEX">
+      <div>
+        <div class="tag">Attack. Patch. <span>Prove.</span></div>
+        <div class="sub">A local-first autonomous AI security agent for your terminal</div>
+      </div>
+    </div>
+    <div class="r"><b>TECHNICAL SHOWCASE</b>github.com/vedant91/Cyphex_CLI<br>Team: Punya23 · vedant91</div>
+  </div>
+
+  <div class="cols c2">
+    <div>
+      <h2><span class="n">1</span>What CYPHEX does</h2>
+      <ul>
+        <li><b>One command</b>, <code>cx deep ./app</code>, runs a 10-phase pipeline: scan, attack, patch, prove.</li>
+        <li><b>100% local:</b> Ollama models + Docker sandbox. No cloud, no API keys, no billing.</li>
+        <li><b>13 DeepAgents</b> attack your running app in 4 parallel groups, reasoning with local LLMs.</li>
+        <li>A <b>behavioural genome</b> learns what “normal” looks like and blocks anything that isn't, including zero-days.</li>
+        <li>Local models <b>write and review patches</b>; a <b>Verify Gate</b> decides whether a fix really counts.</li>
+        <li>Every finding streams <b>live to Google Sheets and Google Chat</b>.</li>
+      </ul>
+    </div>
+    <div>
+      <h2><span class="n">2</span>Problem it solves</h2>
+      <ul>
+        <li>AI security tools say “fixed” but <b>cannot show proof</b>.</li>
+        <li>Signature-based defences <b>miss zero-day attacks</b>.</li>
+        <li>Cloud AI scanners need <b>API keys</b> and send your code off-machine.</li>
+        <li>Reports pile up; nobody gets <b>real-time updates</b> while a scan runs.</li>
+      </ul>
+      <h2><span class="n">3</span>The 10-phase run (as in the demo)</h2>
+      <div class="flow">
+        <span class="chip"><i>01</i>Get source</span><span class="chip"><i>02</i>Static analysis</span><span class="chip"><i>03</i>Deploy sandbox</span>
+        <span class="chip"><i>04</i>Dynamic scan + DeepAgents</span><span class="chip"><i>05</i>Build genome</span><span class="chip"><i>06</i>Attack simulation</span>
+        <span class="chip"><i>07</i>Security report</span><span class="chip"><i>08</i>AI patching</span><span class="chip"><i>09</i>Verify + score</span><span class="chip"><i>10</i>Complete</span>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">4</span>System architecture</h2>
+  <div class="arch">
+    <div class="box"><b>Target</b>Local folder or connected GitHub repo, copied into a working sandbox directory</div>
+    <div class="arr">→</div>
+    <div class="box"><b>Static analysis</b>Semgrep SAST finds flaws (e.g. critical SQLi CWE-89, command injection CWE-78) with file:line</div>
+    <div class="arr">→</div>
+    <div class="box green"><b>Docker sandbox</b>App is built (Dockerfile auto-generated) and served on localhost, isolated</div>
+    <div class="arr">→</div>
+    <div class="box red"><b>Red team · 13 DeepAgents</b>Plan → probe → judge → mutate loop against the live sandbox</div>
+
+    <div class="box blue span3"><b>Blue team · Behavioural genome (immune system)</b>Learns normal traffic of the app's endpoints; red-team attacks mutate, the genome retrains each generation; saved as a signed <code>.pkl</code>. Decision model scores each request: <code>≥ 0.70 → block</code>.</div>
+    <div class="arr">⇄</div>
+    <div class="box"><b>Council · 3 local models</b>Validators vote on every finding; false positives are dropped</div>
+    <div class="arr">↓</div>
+    <div class="box red"><b>Patch pipeline</b>RAG context → patcher model → 2 reviewers → Verify Gate (re-scan, compile, blast radius)</div>
+
+    <div class="box green span7"><b>Outputs</b>Terminal report with score &amp; severities · live Google Sheet rows · real-time Google Chat messages (webhook) · verified patches (and PR approval flow)</div>
+  </div>
+
+  <h2><span class="n">5</span>Demo screenshots: setup, sandbox, attack plan</h2>
+  <div class="cols c2">
+    <figure><img src="img/ready.jpg" alt=""><figcaption><b>Tool readiness 5/5</b>: Git, Docker, Ollama (5 models), Semgrep, Nuclei checked before any scan.</figcaption></figure>
+    <figure><img src="img/sandbox.jpg" alt=""><figcaption><b>Sandbox live</b>: no Dockerfile? CYPHEX writes one, builds it and serves the target at <code>localhost</code>.</figcaption></figure>
+  </div>
+  <figure style="margin-top:2mm"><img src="img/plan.jpg" alt=""><figcaption><b>DeepAgents attack plan</b>: 13 agents in 4 parallel groups (SQLi/XSS/Auth · Path traversal/CMDi/SSRF/IDOR/SSTI/XXE · Business logic · Prompt injection/Race/Mass assignment).</figcaption></figure>
+
+  <h2><span class="n">6</span>RASP guard: protection inside the app</h2>
+  <ul>
+    <li>One line of Express middleware (<code>cyphex-rasp</code>, zero dependencies) checks every request: SQLi, XSS, command injection, path traversal, SSRF.</li>
+    <li>An attack gets <b>HTTP 403</b>; the captured stack trace gives the <b>exact file and line</b> of the vulnerable handler.</li>
+    <li>The local CYPHEX daemon's AI council reads that code and <b>auto-patches it</b>: a block becomes a fix.</li>
+  </ul>
+
+  <h2><span class="n">7</span>AI &amp; tech stack</h2>
+  <ul class="two">
+    <li><b>Local LLMs (Ollama):</b> <code>qwen2.5-coder:7b</code> (planner/patcher), <code>llama3.1:8b</code> (analyst/reviewer), <code>deepseek-coder:6.7b</code> (reviewer), <code>nomic-embed-text</code> (optional memory).</li>
+    <li><b>Security tools:</b> Semgrep (SAST), Nuclei (DAST), Docker sandbox; scikit-learn isolation forest for the genome.</li>
+    <li><b>Code:</b> Python CLI (<code>cx</code>), Node/Express RASP middleware, HMAC-signed model files.</li>
+    <li><b>Integrations:</b> Google Sheets, Google Chat webhook, GitHub repo connection.</li>
+  </ul>
+
+  <div class="foot"><span>CYPHEX · Technical Project Showcase</span><span>Screenshots are from a real CYPHEX run against the “vibemart” demo shop · 1 / 3</span></div>
+</section>
+
+<!-- ============================ PAGE 2 ============================ -->
+<section class="page">
+  <div class="hero small"><b>CYPHEX · UNDER THE HOOD</b><div class="r">DeepAgents · Genome · Decision model · RASP</div></div>
+
+  <h2><span class="n">8</span>How a DeepAgent thinks: plan → adapt → breach</h2>
+  <ul class="two">
+    <li><b>Plan:</b> <code>qwen2.5-coder:7b</code> reads the attack-surface map and returns <b>ranked hypotheses</b> (up to 10 per agent), e.g. 6 SQL-injection payloads.</li>
+    <li><b>Probe:</b> the payload is sent to the sandboxed app; status, body, size and timing are compared with a baseline.</li>
+    <li><b>Decide:</b> <code>llama3.1:8b</code> judges the response: <b>confirmed / adapt / abandoned</b>, with a confidence score.</li>
+    <li><b>Adapt:</b> on <i>adapt</i> (85%, 80% …) the payload is mutated into an evasion variant and retried; dead routes are dropped without a model call.</li>
+    <li><b>Breach:</b> when the response matches the hypothesis: <span class="ok">CONFIRMED</span> (85–90% in this run) plus the evidence line.</li>
+    <li>If the app's own guard (RASP) blocks a probe at 100% confidence, the agent adapts around it.</li>
+  </ul>
+  <figure style="margin-top:1.4mm"><img src="img/hypo.jpg" alt=""><figcaption><b>Real run:</b> repeated <i>adapt</i> steps (85% → 80%), then <b>CONFIRMED (85%)</b>: response time &gt; 3.0 s matches the time-based SQLi hypothesis.</figcaption></figure>
+
+  <h2><span class="n">9</span>Genome &amp; decision model (backend)</h2>
+  <div class="cols c2">
+    <div>
+      <ul>
+        <li><b>Learns normal:</b> profiles <b>20 endpoints</b>; every input becomes a <b>15-D feature vector</b> (length, entropy, special chars, URL-encoding, SQLi-pattern score, traversal depth, …).</li>
+        <li><b>Scoring:</b> <code>max(isolation-forest, 15 heuristic rules)</code>; heuristics alone still work without scikit-learn.</li>
+        <li><b>Decision model:</b> score <b>≥ 0.70 → BLOCK</b>, else ALLOW: one bit per request. No signature needed, so unseen (zero-day) payloads still score high.</li>
+        <li><b>Co-evolution:</b> red team mutates attacks, blue team retrains: ≤ 10 generations × 20 payloads, early-stop at ≥ 99% block for 3 generations.</li>
+        <li><b>Persistence:</b> signed <code>genome_&lt;target&gt;.pkl</code> (HMAC-SHA256, tampered files refused); portable <code>.cxgenome</code> bundle.</li>
+        <li><b>Measured (README, 76 synthetic samples):</b> 91.3% recall · 97.7% precision · 3.3% FPR. Directional only.</li>
+      </ul>
+    </div>
+    <div>
+      <table>
+        <tr><th>Payload (from the demo)</th><th>Score</th><th>Decision</th></tr>
+        <tr><td class="mono">' OR 1=1--</td><td>1.000</td><td class="block">1 · BLOCK</td></tr>
+        <tr><td class="mono">&lt;script&gt;alert(1)&lt;/script&gt;</td><td>1.000</td><td class="block">1 · BLOCK</td></tr>
+        <tr><td class="mono">; cat /etc/passwd</td><td>1.000</td><td class="block">1 · BLOCK</td></tr>
+        <tr><td class="mono">{{7*7}}</td><td>0.80*</td><td class="block">1 · BLOCK</td></tr>
+        <tr><td class="mono">normal search</td><td>0.380</td><td class="ok">0 · ALLOW</td></tr>
+        <tr><td class="mono">John O'Brien</td><td>0.549</td><td class="ok">0 · ALLOW</td></tr>
+      </table>
+      <div class="shot-note">* README sample. The others are from the recorded run.</div>
+      <figure style="margin-top:1.2mm"><img src="img/genome.jpg" alt=""><figcaption><b>Genome after training:</b> 15-D vector and live scoring table.</figcaption></figure>
+    </div>
+  </div>
+
+  <h2><span class="n">10</span>AI attack simulation: does the genome really stop attacks?</h2>
+  <div class="cols c21">
+    <figure><img src="img/arena.jpg" alt=""><figcaption><b>Attack arena:</b> every attack was ALLOWED before hardening; after it, 7 of 8 are BLOCKED while normal inputs stay ALLOWED.</figcaption></figure>
+    <ul>
+      <li><b>Defense rate 7/8 (88%)</b> with <b>0 false positives</b> on benign inputs (search, apostrophe name, e-mail, number).</li>
+      <li>One miss is shown honestly: <code>; whoami</code> scored 0.694, just under the 0.70 threshold.</li>
+      <li>The result feeds the security score (24/100 before patching in this run).</li>
+    </ul>
+  </div>
+
+  <div class="foot"><span>CYPHEX · Technical Project Showcase</span><span>2 / 3</span></div>
+</section>
+
+<!-- ============================ PAGE 3 ============================ -->
+<section class="page">
+  <div class="hero small"><b>CYPHEX · PATCH, PROVE, INTEGRATE</b><div class="r">Patching · Live integrations · PayPal Sandbox plan</div></div>
+
+  <h2><span class="n">11</span>AI patching with multi-model debate, then proof</h2>
+  <ul class="two">
+    <li><b>RAG context (no embeddings):</b> code tree + security knowledge tree give each fix the function, imports and a CWE recipe.</li>
+    <li><b>Meta-reasoning</b> picks a strategy per vulnerability (self-consistency vote for critical, chain-of-thought for standard).</li>
+    <li><b>Patcher</b> <code>qwen2.5-coder:7b</code> writes fixes (6 here); <b>two reviewers</b> <code>llama3.1:8b</code> + <code>deepseek-coder:6.7b</code> vote <span class="ok">True</span>/False.</li>
+    <li><b>VRAM-aware:</b> low memory? Models load one at a time.</li>
+    <li><b>Verify Gate:</b> re-scan, syntax check, blast radius; <span class="ok">PASS</span> / <span class="block">FAIL (rolled back)</span> / <span class="plan">UNVERIFIABLE</span>, never rounded up.</li>
+  </ul>
+  <figure style="margin-top:1.2mm"><img src="img/patch.jpg" alt=""><figcaption><b>Real run:</b> both reviewer models are loaded and review the patch; the first vote is <b>True</b> (2/2 approve in this run).</figcaption></figure>
+
+  <h2><span class="n">12</span>Live integrations: Google Sheets &amp; Google Chat</h2>
+  <div class="cols c2">
+    <figure><img src="img/sheet.jpg" alt=""><figcaption><b>/sheet:</b> every endpoint, payload, CWE, severity and outcome is appended to a Sheet in real time; banner rows mark <i>SCAN START / END</i> with score change.</figcaption></figure>
+    <figure><img src="img/chat.jpg" alt=""><figcaption><b>/webhook:</b> paste a Chat webhook link; “Cyphex Buddy” posts each phase in plain English (webhook link and sidebar hidden in this image).</figcaption></figure>
+  </div>
+
+  <h2><span class="n">13</span>PayPal Sandbox integration: design</h2>
+  <div class="banner"><b>Status: planned, not yet implemented.</b> The CYPHEX repository contains no PayPal code today. This section is the integration design, kept separate from the working features above.</div>
+  <div class="cols c2">
+    <div>
+      <ul>
+        <li><b>Target:</b> a merchant checkout (like the demo shop) on the <b>PayPal Orders v2 REST API (Sandbox)</b>: create order → approve → capture.</li>
+        <li><b>Sandbox-only:</b> client ID/secret from environment variables, never committed; no live keys.</li>
+        <li><b>Test flow:</b> SAST on checkout code → Docker sandbox → DeepAgents (SQLi, IDOR, business logic, race, mass assignment) attack checkout routes → council + patcher → Verify Gate.</li>
+        <li><b>Genome gate (planned):</b> RASP in front of checkout and webhook routes scores each request and blocks ≥ 0.70 (403) before PayPal is called; payment fields (amount, currency, order id) would be added to the vector.</li>
+        <li><b>Not Genome's job:</b> PayPal webhook signature checks and amount re-validation stay in the app; CYPHEX tests that they exist.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="arch" style="grid-template-columns:1fr 4mm 1fr;row-gap:1.6mm">
+        <div class="box">Buyer / attacker</div><div class="arr">→</div>
+        <div class="box dash"><b>RASP + Genome gate</b>score → 0 allow / 1 block (planned)</div>
+        <div class="box dash span3" style="text-align:center">↓ allowed requests only</div>
+        <div class="box">Merchant checkout (Express)</div><div class="arr">→</div>
+        <div class="box dash"><b>PayPal Sandbox</b>Orders v2: create / capture</div>
+        <div class="box green span3"><b>CYPHEX scan loop (implemented)</b>sandbox → attack → patch → verify, run against the checkout code</div>
+      </div>
+      <table style="margin-top:1.6mm">
+        <tr><th>Capability</th><th>Status</th></tr>
+        <tr><td>Scan, DeepAgents, genome, decision model, RASP, council patching, Verify Gate</td><td class="ok">Implemented (demo)</td></tr>
+        <tr><td>Google Sheets live log, Google Chat webhook</td><td class="ok">Implemented (demo)</td></tr>
+        <tr><td>PayPal Sandbox adapter and test flow</td><td class="plan">Planned</td></tr>
+        <tr><td>Payment-field genome features</td><td class="plan">Planned</td></tr>
+        <tr><td>AWS WAF / Cloudflare rule export from the genome</td><td class="plan">Planned</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2><span class="n">14</span>Roadmap &amp; links</h2>
+  <ul class="two">
+    <li><b>Self-healing security:</b> RASP block → auto-patch → verify → redeploy.</li>
+    <li><b>PayPal Sandbox adapter</b> and a payment-aware genome; AWS WAF / Cloudflare rule export from the genome.</li>
+    <li><b>Code:</b> github.com/vedant91/Cyphex_CLI · github.com/Punya23/Cyphex_CLI</li>
+    <li><b>Demo video:</b> release <code>launch-video-v1</code> on either repository.</li>
+  </ul>
+
+  <div class="foot"><span>CYPHEX · Technical Project Showcase</span><span>No secrets in this document · 3 / 3</span></div>
+</section>
+</body>
+</html>
