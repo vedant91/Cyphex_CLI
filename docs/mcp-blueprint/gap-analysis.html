@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cyphex MCP Gap Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one plain-spoken reading column. Every claim sits next to its status: fixed, still open, or not checked. */
+:root{--paper:#f6f5f2;--surface:#fff;--ink:#1b1f26;--muted:#5d6470;--rule:#dad7d0;--bad:#c63d3d;--good:#2f6f4f;--warn:#9a6400;--code:#eeece7;color-scheme:light;
+--display:"IBM Plex Sans Condensed","Arial Narrow",sans-serif;--body:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#14161a;--surface:#1d2026;--ink:#e8e6e1;--muted:#9aa1ad;--rule:#333842;--bad:#ef6b62;--good:#6cc18f;--warn:#e0a84a;--code:#23272e;color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#14161a;--surface:#1d2026;--ink:#e8e6e1;--muted:#9aa1ad;--rule:#333842;--bad:#ef6b62;--good:#6cc18f;--warn:#e0a84a;--code:#23272e;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.6 var(--body)}
+.wrap{max-width:980px;margin:0 auto;padding:30px 20px 80px}
+.kicker{font:600 12px/1 var(--mono);color:var(--bad);letter-spacing:.05em}
+h1{font:700 38px/1.1 var(--display);margin:8px 0 10px}h2{font:700 26px/1.15 var(--display);margin:48px 0 6px;padding-top:12px;border-top:1px solid var(--rule)}h2 .n{color:var(--bad);font:600 15px var(--mono);margin-right:8px}
+h3{font:700 18px/1.2 var(--display);margin:22px 0 4px}p{margin:8px 0;max-width:74ch}.lede{font-size:18px;color:var(--muted)}
+.box{background:var(--surface);border:1px solid var(--rule);border-left:4px solid var(--bad);border-radius:5px;padding:12px 16px;margin:16px 0;max-width:80ch}.box.g{border-left-color:var(--good)}.box.w{border-left-color:var(--warn)}
+.box b.t{display:block;font:700 11px/1 var(--display);letter-spacing:.07em;text-transform:uppercase;color:var(--bad);margin-bottom:6px}.box.g b.t{color:var(--good)}.box.w b.t{color:var(--warn)}
+.tablewrap{overflow-x:auto;margin:14px 0}table{border-collapse:collapse;width:100%;background:var(--surface);font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--rule)}th{font:700 11.5px/1.2 var(--display);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--ink)}
+.s{font:600 10.5px/1 var(--mono);padding:3px 6px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}.s.fx{color:var(--good)}.s.op{color:var(--bad)}.s.pt{color:var(--warn)}
+code{font:.86em var(--mono);background:var(--code);padding:1px 5px;border-radius:3px}ul{max-width:76ch;padding-left:20px}li{margin:4px 0}
+figure{margin:16px 0}svg{width:100%;height:auto;display:block;background:var(--surface);border:1px solid var(--rule);border-radius:8px;color:var(--ink)}figcaption{font-size:13.5px;color:var(--muted);margin-top:6px;max-width:80ch}
+.fine{font-size:13px;color:var(--muted)}a{color:var(--bad)}
+@media (max-width:700px){h1{font-size:30px}}
+</style>
+</head>
+<body><div class="wrap">
+<div class="kicker">CYPHEX MCP · GAP ANALYSIS · AFTER THE FIRST REAL TEST ON AN OUTSIDE PROJECT</div>
+<h1>Where Cyphex MCP stands, and what makes it credible</h1>
+<p class="lede">An outside Claude session used the MCP on a real project (a backend and a frontend repo) and scored it about 4 out of 10. I checked each of its claims against the files that session left on disk. Most were right. Here is what is true, what I fixed in this pass, what is still open, and how other tools compare.</p>
+
+<div class="box"><b class="t">The short answer</b>The MCP is good at keeping an agent honest and poor at finding bugs by itself. It has no analyzer of its own, and it takes the agent's word on whether an attack worked or a fix held. Credibility comes from turning every "the agent says" into "Cyphex measured". This pass fixed the parts that were cheap to measure. The big parts, running the scanners and running the proofs, are the next build.</div>
+
+<h2><span class="n">1</span>What the first real test showed, checked against the data</h2>
+<p>I read the two job files that session wrote (<code>~/.cyphex_mcp/intel/jobs/</code>). Status is as of the end of this pass.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>What was said</th><th>What I found in the data</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>It never asked for a webhook URL</td><td>True. <code>start_scan</code> returned a recipe and a job id and went straight on. Nobody was asked anything.</td><td><span class="s fx">FIXED</span> The first call now stops and asks two questions (webhook, sandbox). It refuses to continue without the person's own words, and the report prints them.</td></tr>
+<tr><td>No sandbox was built</td><td>True. The MCP only hands over a recipe. The agent never used it, and Cyphex never ran it.</td><td><span class="s pt">PARTLY</span> The person is now asked: existing environment, create one, or code only. Cyphex still does not build or start it itself.</td></tr>
+<tr><td>The report is shallow and full of jargon</td><td>True. Terms like "council" and "Verify Gate" with no plain meaning, and no way to open or filter anything.</td><td><span class="s fx">FIXED</span> Rebuilt: a plain answer first, a "fix these first" list, how much was checked, a timeline of how Cyphex ran, filters, and a label on every fact saying who measured it.</td></tr>
+<tr><td>The genome gave no PKL file</td><td>Half true. Both <code>.pkl</code> files and the signed bundle exist in each job's <code>genome/</code> folder. Nothing told the user where, and the report showed only a hash.</td><td><span class="s fx">FIXED</span> Every file path is returned, listed in the report and logged in <code>SECURITY_LOG.md</code>.</td></tr>
+<tr><td>The genome is not usable: every normal input is "challenged"</td><td>True, and worse than stated. Both real jobs show 100% of normal inputs flagged. My own demo report hid this by showing only the "blocked" number. Cause: normal inputs score 0.37 to 0.65 on this model, but the engine's review threshold is a fixed 0.3, so everything trips it.</td><td><span class="s fx">FIXED</span> Thresholds are now set from the model's own scores and judged on inputs it was not calibrated on: 1% of normal inputs flagged, with the old 100% shown beside it. <span class="s op">STILL OPEN</span> SQL injection blocking is only 53 to 68%, and nothing is tested on real traffic yet.</td></tr>
+<tr><td>A fix is "verified" because the agent said so</td><td>True. One backend patch got PASS although its exploit was never proven on the original code. A clean replay means nothing if the attack never worked before.</td><td><span class="s fx">FIXED</span> PASS now needs a proven "fired before". <span class="s op">STILL OPEN</span> Cyphex still does not run the replay itself. It labels it "reported by the agent".</td></tr>
+<tr><td>It rated 98 of 294 routes "high trust"</td><td>True. There was no idea of coverage at all.</td><td><span class="s fx">FIXED</span> Cyphex now counts the repo's source files itself and reports how many the agent says it read. A partial route list can no longer be high trust.</td></tr>
+<tr><td>The council is one model wearing three hats</td><td>True. Same model, same blind spots.</td><td><span class="s op">STILL OPEN</span> Cannot be fixed with one model. Either use different models for reviewers or stop calling it independent.</td></tr>
+<tr><td>TypeScript patches could not be checked</td><td>True. Both TypeScript patches came back unverifiable. The compile check only knows JavaScript and Python.</td><td><span class="s op">STILL OPEN</span> Needs the repo's own typecheck and tests run on the patched copy.</td></tr>
+<tr><td>The sandbox recipe did not fit the project</td><td>True. It assumes one container running one file. Real apps are monorepos needing a database, a cache and API keys.</td><td><span class="s op">STILL OPEN</span></td></tr>
+<tr><td>It found nothing on its own</td><td>True, and the biggest gap. Every finding came from the agent reading code. The MCP contributes no detection.</td><td><span class="s op">STILL OPEN</span> See section 3.</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">2</span>What exists in the market, and what each one lacks</h2>
+<p>I searched for tools that do the same job. Most results are directory listings and vendor or fan blogs, so treat the details as unverified until you check each project's own docs.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Tool</th><th>What it is</th><th>Finds bugs itself?</th><th>Proves with a real attack?</th><th>Fixes and checks the fix?</th><th>What it lacks</th></tr></thead>
+<tbody>
+<tr><td><b>Semgrep MCP</b></td><td>Lets an agent run Semgrep scans</td><td>Yes, rule-based, code only</td><td>No</td><td>No</td><td>Static only, so many false alarms and nothing proven. One listing says the standalone repo is deprecated in favour of the Semgrep program itself.</td></tr>
+<tr><td><b>Snyk MCP</b></td><td>Part of the Snyk CLI. Scans open-source dependencies and your own code.</td><td>Yes, its own engine</td><td>No</td><td>Suggests fixes</td><td>Commercial product. Static and dependency checks only.</td></tr>
+<tr><td><b>ZAP and Burp MCP servers</b></td><td>Community wrappers that let an agent drive a real web scanner</td><td>Yes, runs real attack scans</td><td>Scanner-level evidence</td><td>No</td><td>No official ones found. Need a running target. They send live attack traffic, so they are risky to point at the wrong place.</td></tr>
+<tr><td><b>Strix</b> (open source)</td><td>Autonomous AI agents that attack an app in a Docker sandbox</td><td>Yes, agent plus tools</td><td>Yes, by design: a finding counts only if the exploit worked</td><td>Claims to suggest fixes</td><td>Needs Docker and an LLM account. One reviewer warns the evidence still needs a human to check scope and impact. Mostly a CLI, not an MCP.</td></tr>
+<tr><td><b>Claude Code security review</b></td><td>Anthropic's review command and GitHub Action</td><td>The model reads the diff</td><td>No</td><td>Suggests fixes</td><td>Per the project's own warnings (as quoted by third-party sites): not hardened against prompt injection, not a replacement for static scanners, only the changed code. No published false-alarm rate.</td></tr>
+<tr><td><b>Cyphex MCP today</b></td><td>Playbooks, grading and a report around the agent's own work</td><td><b>No.</b> The agent does it.</td><td>Only if the agent runs the attack and says so</td><td>Checks the diff and records the agent's replay</td><td>Everything in section 1 marked still open.</td></tr>
+</tbody></table></div>
+
+<div class="box g"><b class="t">What this means</b>Anyone with a real engine is either static (Semgrep, Snyk) or dynamic (ZAP, Burp). The autonomous attackers (Strix) combine an agent with a sandbox, which is the closest to Cyphex's goal. Nobody in this list sells <b>a fix that Cyphex itself re-attacked and measured</b>, with a readable audit trail kept on your own machine. That is the opening. It only works if "measured" is true, which today it is not for the attack and the replay.</div>
+
+<figure>
+<svg viewBox="0 0 960 250" role="img" aria-label="Trust ladder. Level 1 the agent says so. Level 2 Cyphex checks the structure. Level 3 Cyphex checks facts such as files exist and coverage, which is where Cyphex is today. Level 4 Cyphex runs the scanner, the attack and the replay itself. Level 5 results are published on known vulnerable apps against a baseline.">
+<g font-family="IBM Plex Sans, sans-serif" font-size="13" fill="currentColor">
+<rect x="20" y="170" width="170" height="60" rx="6" fill="none" stroke="currentColor" opacity=".5"/><text x="105" y="196" text-anchor="middle" font-weight="600">1 · Agent says so</text><text x="105" y="214" text-anchor="middle" font-size="11.5">"I found it, I fixed it"</text>
+<rect x="210" y="140" width="170" height="90" rx="6" fill="none" stroke="currentColor" opacity=".5"/><text x="295" y="166" text-anchor="middle" font-weight="600">2 · Shape checked</text><text x="295" y="184" text-anchor="middle" font-size="11.5">right fields, 3 votes,</text><text x="295" y="200" text-anchor="middle" font-size="11.5">diff is a diff</text>
+<rect x="400" y="100" width="170" height="130" rx="6" fill="var(--surface)" stroke="var(--good)" stroke-width="2.5"/><text x="485" y="126" text-anchor="middle" font-weight="600" fill="var(--good)">3 · Facts checked</text><text x="485" y="144" text-anchor="middle" font-size="11.5">file and line exist,</text><text x="485" y="160" text-anchor="middle" font-size="11.5">coverage counted,</text><text x="485" y="176" text-anchor="middle" font-size="11.5">no proof, no PASS</text><text x="485" y="214" text-anchor="middle" font-size="12" font-weight="600" fill="var(--good)">WE ARE HERE</text>
+<rect x="590" y="60" width="170" height="170" rx="6" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="6 4"/><text x="675" y="86" text-anchor="middle" font-weight="600" fill="var(--bad)">4 · Cyphex runs it</text><text x="675" y="104" text-anchor="middle" font-size="11.5">scanners find bugs,</text><text x="675" y="120" text-anchor="middle" font-size="11.5">Cyphex fires the attack,</text><text x="675" y="136" text-anchor="middle" font-size="11.5">before and after,</text><text x="675" y="152" text-anchor="middle" font-size="11.5">raw request saved</text><text x="675" y="214" text-anchor="middle" font-size="12" font-weight="600" fill="var(--bad)">NEXT BUILD</text>
+<rect x="780" y="20" width="165" height="210" rx="6" fill="none" stroke="var(--warn)" stroke-width="2" stroke-dasharray="6 4"/><text x="862" y="46" text-anchor="middle" font-weight="600" fill="var(--warn)">5 · Proven in public</text><text x="862" y="64" text-anchor="middle" font-size="11.5">Juice Shop, NodeGoat,</text><text x="862" y="80" text-anchor="middle" font-size="11.5">WebGoat: hits, misses,</text><text x="862" y="96" text-anchor="middle" font-size="11.5">false alarms vs a plain</text><text x="862" y="112" text-anchor="middle" font-size="11.5">Semgrep baseline</text><text x="862" y="214" text-anchor="middle" font-size="12" font-weight="600" fill="var(--warn)">THEN</text>
+</g></svg>
+<figcaption><b>How credible a security tool is = how much of what it says it measured itself.</b> Cyphex is on level 3. The market's trusted tools are on level 4. Level 5 is what turns a claim into a reputation.</figcaption>
+</figure>
+
+<h2><span class="n">3</span>Mimicking the Cyphex CLI: what the MCP dropped</h2>
+<p>The MCP was meant to be the CLI's engine behind an agent. I removed the engine's own analyzers early (a decision made to avoid hosting models) and kept only the orchestration. The outside review shows that was too far: the orchestration alone detects nothing. This is what the CLI has and the MCP does not yet use. File names are from the repo.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>In the Cyphex CLI</th><th>In the MCP now</th><th>Plan</th></tr></thead>
+<tbody>
+<tr><td>Static scanner with built-in rules plus Semgrep (<code>cyphex/scanner.py</code>). The README's own run shows Semgrep adding 3 findings the rules missed.</td><td>Not used. Agent reads code.</td><td>Expose it as a tool. Its results become <i>candidates</i> the agent triages. Add secret and dependency scanners the same way.</td></tr>
+<tr><td>Dynamic scanning with Nuclei and ZAP (<code>cyphex/dynamic_scanner.py</code>)</td><td>Not used</td><td>Expose as a tool against the sandbox.</td></tr>
+<tr><td>Builds and runs the target in Docker (<code>cyphex/docker_sandbox.py</code>)</td><td>Hands over a recipe only</td><td>The MCP runs it itself, after the person says yes, with detection for compose files, monorepos and databases.</td></tr>
+<tr><td>Crawler that maps routes</td><td>Agent lists routes by hand (a sample)</td><td>Extract routes from files (Nest, Next, Express, FastAPI) and mark each reviewed or not.</td></tr>
+<tr><td>Verify Gate that re-scans after a patch</td><td>Checks the diff and records the agent's replay</td><td>Cyphex re-runs the scanner and the attack on a patched copy and keeps the raw request and response.</td></tr>
+<tr><td>Genome with attack-versus-defence training rounds (<code>backend/immune</code>)</td><td>One build from the route list</td><td>Add the training rounds (they target exactly the weak SQL injection result) and calibrate on real traffic.</td></tr>
+<tr><td>Memory across runs</td><td>New: <code>SECURITY_LOG.md</code> and <code>get_history</code></td><td>Fingerprint findings so a re-scan says new, still open, fixed, or accepted risk.</td></tr>
+<tr><td>GitHub hook that opens a PR with fixes</td><td>Receiver queues a job only</td><td>Post findings as PR comments and SARIF.</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">4</span>Build order, most credibility first</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Build</th><th>Why it comes here</th><th>Size</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><b>Cyphex runs the replay.</b> The agent submits a request and what a success looks like. Cyphex applies the diff in a throwaway copy, rebuilds, fires the same request before and after, and stores both raw responses.</td><td>This single change turns "fixed" from a claim into a measurement. It is the heart of the product.</td><td>Medium</td></tr>
+<tr><td>2</td><td><b>Real analyzers as tools:</b> the engine scanner, Semgrep, a secrets scanner, a dependency scanner.</td><td>Gives the MCP its own detection. Ends "it found nothing".</td><td>Medium</td></tr>
+<tr><td>3</td><td><b>Cyphex builds the sandbox</b> after a yes: finds compose files and monorepos, starts Postgres and Redis from templates with fake secrets, waits until healthy, returns the URL.</td><td>The recipe never fits real apps, and DAST on real projects depends on it.</td><td>Large</td></tr>
+<tr><td>4</td><td><b>Run the project's own typecheck and tests</b> on the patched copy.</td><td>Fixes TypeScript and catches patches that break the app.</td><td>Medium</td></tr>
+<tr><td>5</td><td><b>Route extraction and per-route coverage.</b></td><td>Replaces pasted samples with a measured percentage.</td><td>Medium</td></tr>
+<tr><td>6</td><td><b>Benchmarks</b> on Juice Shop, NodeGoat and WebGoat against a plain Semgrep baseline. Publish hits, misses and false alarms.</td><td>Today's evidence is one demo app plus two projects that were already well hardened. Without numbers nobody should trust it.</td><td>Medium</td></tr>
+<tr><td>7</td><td><b>Two-tenant authorization tests</b> (can user A read user B's data, can a normal user act as admin).</td><td>The most common serious bug in business apps, and nothing covers it yet.</td><td>Large</td></tr>
+<tr><td>8</td><td><b>Genome training rounds</b> and calibration on real traffic.</td><td>Brings SQL injection blocking up from 53 to 68%.</td><td>Medium</td></tr>
+<tr><td>9</td><td><b>Independence:</b> different models for reviewers, or drop the claim.</td><td>Honesty.</td><td>Small</td></tr>
+<tr><td>10</td><td><b>Packaging and workflow:</b> install with <code>uvx</code> or <code>npx</code>, no fixed paths, Windows and macOS, SARIF and PR comments, changed-files-only scans, saved "accepted risk" decisions.</td><td>What decides whether teams keep it switched on.</td><td>Medium</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">5</span>Rules that make it credible</h2>
+<ul>
+<li><b>Measured beats claimed.</b> Every fact on the report says who produced it. The agent never grades itself.</li>
+<li><b>No "fixed" without a before and an after</b> that Cyphex ran. If it cannot run them, the answer is "could not verify", never PASS.</li>
+<li><b>Coverage is a number.</b> "Read 8 of 8 files, 19 of 19 routes" or "4% read". Never a vague "reviewed".</li>
+<li><b>A person decides the risky things</b> (webhook, where tests run, starting containers), and their words are on the record.</li>
+<li><b>Treat the scanned code as hostile.</b> It may contain text aimed at the agent. Cyphex only ever reads structured results from it.</li>
+<li><b>Publish the misses.</b> A benchmark page that shows what Cyphex failed to find is what makes the hits believable.</li>
+</ul>
+
+<h2><span class="n">6</span>What changed in this pass, and the limits of this analysis</h2>
+<ul>
+<li>Human-in-the-loop gate on <code>start_scan</code>, with recorded answers and a webhook URL, secret and steps when the answer is yes.</li>
+<li>A local security folder: one folder per run, <code>SECURITY_LOG.md</code> across runs, and a <code>get_history</code> tool.</li>
+<li>Genome: files returned and listed, one file per repo, thresholds calibrated, honest numbers shown.</li>
+<li>Verify Gate: PASS requires a proven baseline. Facts are labelled measured or reported.</li>
+<li>Coverage measured by Cyphex, and a partial route list can no longer be high trust.</li>
+<li>Report rebuilt. Tests: 9 core, 28 pipeline and 36 end-to-end checks pass.</li>
+<li><b>Second pass, the agents.</b> <code>deploy_agents</code> writes 20 Claude Code subagents into the project (route mapper, ten bug-class specialists, prober, four independent reviewers, patcher, two fix reviewers, agent-security auditor), each with its own prompt, tool list, guardrails and optionally its own model. Reviewers each cast one ballot without seeing the others, and the MCP tallies once three are in. A patcher proposes and two reviewers approve separately. Two agents reporting one bug are merged and both credited.</li>
+<li><b>Agent evaluation.</b> A scorecard per agent counted from what the MCP recorded: findings reported, confirmed, dismissed, proven, files read, how often a reviewer sided with the majority, how each fix ended.</li>
+<li><b>Agent security.</b> <code>audit_agent_config</code> reads a project's agent setup for risky settings (broad shell permission, an agent with every tool, an unpinned tool server, a credential in clear text, a login header over plain http). <code>plant_canary</code> plants an instruction in a scratch copy of the code and checks whether any agent obeys it. Both appear in the report.</li>
+<li><b>A genuine limit hit during the live run.</b> The prober agent that writes attack requests was stopped by Anthropic's cyber safeguards. I did not retry, reword or do its work, so the dynamic-testing stage was not run and the report says nothing was proven by attack. Anyone running this on their own should expect that stage to need either their own session or Anthropic's Cyber Verification Program.</li>
+</ul>
+<div class="box w"><b class="t">Not checked</b>I did not re-run the outside project's scan. I did not test the genome on real traffic. The market table rests on search results I could not confirm against each project's own documentation. The "4 out of 10" score is the reviewing session's opinion, not a measurement. Nothing here is committed.</div>
+
+<h2>Sources</h2>
+<p class="fine">All third-party and unverified: <a href="https://snyk.io/articles/snyk-mcp-cheat-sheet/">Snyk MCP cheat sheet</a> · <a href="https://glama.ai/mcp/servers/eiqti5mgde">Semgrep MCP listing</a> · <a href="https://themenonlab.blog/blog/strix-open-source-ai-security-testing-agent">Strix overview</a> · <a href="https://ridgesecurity.ai/blog/agentic-ai-pentest-showdown-ridgegen-vs-shannon-vs-strix/">vendor comparison of Strix and Shannon</a> · <a href="https://glama.ai/mcp/servers?query=ZAP">ZAP MCP listings</a> · <a href="https://github.com/anthropics/claude-code-security-review">Claude Code security review (repo)</a> · <a href="https://arxiv.org/pdf/2406.13352">AgentDojo paper</a> for grading by deterministic checks.</p>
+</div></body></html>

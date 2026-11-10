@@ -51,6 +51,8 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = ["openai>=1.0.0"]
+# cyphex-mcp server. Pinned <2: server.py uses the v1 FastMCP API (renamed in mcp 2.x).
+mcp = ["mcp>=1.2.0,<2"]
 reasoning = ["agent-reasoning>=1.0.8"]
 memory = ["cognee[ollama]>=1.2.0,<2.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
@@ -58,6 +60,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 cyphex = "cyphex.cli:main"
+cyphex-mcp = "cyphex_mcp.server:main"
 
 [tool.setuptools]
 # Top-level engine modules that live at the repo root (outside the cyphex/

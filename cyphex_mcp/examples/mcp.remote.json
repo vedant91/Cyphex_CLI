@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cyphex": {
+      "type": "http",
+      "url": "http://YOUR_HOST_OR_IP:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CYPHEX_MCP_TOKEN}"
+      }
+    }
+  }
+}

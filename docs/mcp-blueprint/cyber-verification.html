@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cyphex — Cyber Verification readiness</title>
+<style>
+:root{--bg:#efebe2;--sheet:#fdfcf8;--ink:#1f1e1b;--muted:#6a665d;--faint:#b4aea1;--rule:#ddd7ca;--accent:#2a4766;--ok:#2d6a3e;--med:#7a6000;--bad:#8a1f1f;--code:#f2efe6;--hl:#f6f2e8;
+--serif:Charter,"Iowan Old Style",Palatino,Georgia,serif;--sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.6 var(--serif)}
+.layout{display:grid;grid-template-columns:200px minmax(0,860px);gap:34px;max-width:1140px;margin:0 auto;padding:32px 20px 80px;justify-content:center}
+nav.toc{position:sticky;top:32px;align-self:start;font:13.5px/1.5 var(--sans)}nav.toc .brand{font:600 15px var(--serif);margin-bottom:10px}
+nav.toc a{display:block;padding:3px 0;color:var(--muted);text-decoration:none}nav.toc a:hover{color:var(--ink);text-decoration:underline}
+.sheet{background:var(--sheet);padding:52px 58px 64px;border:1px solid var(--rule);min-width:0}
+.over{font:14px var(--sans);color:var(--muted)}h1{font:400 38px/1.15 var(--serif);margin:6px 0 14px;letter-spacing:-.01em}
+.cover{border-bottom:1px solid var(--ink);padding-bottom:18px;margin-bottom:10px}
+h2{font:400 25px/1.2 var(--serif);margin:46px 0 12px;padding-top:14px;border-top:1px solid var(--rule)}h2 .n{margin-right:.35em;color:var(--accent)}h2 .n::after{content:"."}
+h3{font:600 15px var(--sans);margin:22px 0 6px}p{margin:9px 0;max-width:70ch}.lede{font-size:18px;max-width:66ch}.fine{font:13.5px/1.5 var(--sans);color:var(--muted)}
+ul,ol{max-width:72ch}li{margin:6px 0}code{font:12.5px var(--mono);background:var(--code);padding:1px 4px}
+table{border-collapse:collapse;width:100%;font:14px/1.45 var(--sans);margin:12px 0}th,td{text-align:left;vertical-align:top;padding:8px 12px 8px 0;border-bottom:1px solid var(--rule)}th{font-weight:600;color:var(--muted);border-bottom:1px solid var(--ink)}
+.tag{font:600 12px var(--sans)}.tag.ok{color:var(--ok)}.tag.med{color:var(--med)}.tag.bad{color:var(--bad)}
+.box{border-left:3px solid var(--faint);padding:2px 0 2px 16px;margin:16px 0;max-width:74ch}.box.ok{border-color:var(--ok)}.box.med{border-color:var(--med)}
+a.ext{color:var(--accent)}.chk{list-style:none;padding:0}.chk li{padding-left:26px;position:relative}.chk li::before{content:"\2610";position:absolute;left:0;color:var(--muted)}
+@media(max-width:900px){.layout{grid-template-columns:1fr}nav.toc{display:none}.sheet{padding:26px 18px}}
+@media print{body{background:#fff}.layout{display:block;padding:0}nav.toc{display:none}.sheet{border:0;padding:0}@page{size:A4;margin:16mm}h2{break-after:avoid}tr,li{break-inside:avoid}}
+</style></head><body><div class="layout">
+<nav class="toc"><div class="brand">Cyphex</div>
+<a href="#what">1 · What Cyphex is</a><a href="#ask">2 · What needs verification</a><a href="#why">3 · Why the sandbox can't exempt it</a>
+<a href="#controls">4 · Controls already in place</a><a href="#default">5 · Behaviour before verification</a><a href="#after">6 · Behaviour once verified</a>
+<a href="#packet">7 · Application checklist</a></nav>
+<main class="sheet">
+<header class="cover"><div class="over">Readiness packet · Anthropic Cyber Verification Program</div>
+<h1>Cyphex — real-time cyber safeguards</h1>
+<p class="lede">How Cyphex contains the risk of automated security testing, exactly which stage needs verification, and what to put in the application. For the person preparing the submission — not a claim of approval.</p></header>
+
+<section id="what"><h2><span class="n">1</span>What Cyphex is</h2>
+<p>Cyphex is an AI security scanner that tests a team's <b>own</b> application for vulnerabilities and writes the fixes. It ships two ways: a local command-line tool that runs on the owner's own GPUs, and a thin MCP server that hands the testing work to a host coding agent (Claude Code). It is authorized testing: the operator runs it against code they own, on a target they control, with their consent recorded at the start of every run.</p>
+<p>Most of the pipeline is reading and reasoning — mapping routes, reading code for bug classes, voting on findings, writing patches. None of that is offensive content. One stage is: proving a finding by sending a real request to the running app.</p></section>
+
+<section id="ask"><h2><span class="n">2</span>What needs verification</h2>
+<p>Only one capability: a Claude model that <b>adapts attacks in real time</b> — reads the app's response and crafts the next request — against a target inside the operator's sandbox. This is the "deep DAST" stage when it is driven by a frontier model rather than a fixed scanner.</p>
+<div class="box med"><p>Anthropic's real-time cyber safeguards stop this today, on both Sonnet and Opus, before any request is sent. That is the correct behaviour for an unverified caller. The Cyber Verification Program is the route to run it legitimately: <a class="ext" href="https://support.claude.com/en/articles/14604842-cyber-verification-program">support.claude.com/en/articles/14604842-cyber-verification-program</a>.</p></div>
+<p class="fine">Everything else in Cyphex runs unaffected without verification. This packet is only about enabling the adaptive live-attack stage.</p></section>
+
+<section id="why"><h2><span class="n">3</span>Why the sandbox cannot exempt it</h2>
+<p>A natural objection: "every request stays inside an isolated Docker network, nothing leaves the machine, so the safeguard should not fire." It does not work that way, and that is the right design:</p>
+<ul>
+<li>The safeguard judges the <b>content</b> of the work — a model authoring a working exploit — not the network it is aimed at. The same payload is dangerous whether it is pointed at a sandbox or at a production host.</li>
+<li>The classifier cannot see or verify a sandbox claim. "It's only local" is exactly what a misuse attempt would also say.</li>
+<li>So the honest path is not to argue the content is safe, nor to reword it until it passes. It is to have Anthropic verify the <b>operator</b> and the use case, and relax the safeguard for that verified party. That is what the program is for.</li>
+</ul>
+<p>Cyphex does not try other models or phrasings to get the adaptive stage through. That would be probing a safeguard. Until the operator is verified, Cyphex runs a deterministic stage instead (§5).</p></section>
+
+<section id="controls"><h2><span class="n">4</span>Controls already in place</h2>
+<p>These are the containment and consent controls a reviewer will want to see. All of them are built and tested in the MCP today.</p>
+<table><thead><tr><th>Control</th><th>What it does</th><th>Where</th></tr></thead><tbody>
+<tr><td><b>Consent gate</b></td><td>Every scan stops and asks the operator three questions (webhook? test environment? deploy agents?) and records their answer in their own words before anything is built or attacked. Nothing runs unattended unless the operator sets an explicit CI flag, which the report then states.</td><td><code>start_scan</code></td></tr>
+<tr><td><b>Sandbox isolation</b></td><td>The target runs on an internal Docker network with no internet route and no published ports; it is reachable only from a peer "attacker" container. The filesystem is read-only with tmpfs for the few writable paths. Hardened-docker and gVisor tiers.</td><td><code>sandbox_recipe</code></td></tr>
+<tr><td><b>Scope limit</b></td><td>Agents may read only the operator's repository and reach only the sandbox target. Read-only specialists have no shell and no network at all; only the patcher may write, only the live-attack runner may use the shell, and that shell talks to the sandbox target alone.</td><td>agent tool allowlists</td></tr>
+<tr><td><b>Guardrails on every agent</b></td><td>Each agent is told to treat scanned code and responses as data, never instructions; never reveal or transmit secrets; stop before any irreversible or outward action; attack only the allowed target.</td><td>guardrail block</td></tr>
+<tr><td><b>Agent-security audit</b></td><td>A dedicated auditor checks the project's own agent and tool configuration for risky settings; a planted-instruction canary tests whether any agent obeys text it only read; a call gate can score a proposed tool call allow / ask / block, logged into the report.</td><td><code>audit_agent_config</code>, <code>plant_canary</code>, <code>guard_decide</code></td></tr>
+<tr><td><b>Evidence discipline</b></td><td>Every finding is graded by deterministic checks (cited file:line is real, proof carries evidence). A patch is "verified fixed" only through the Verify Gate. The report marks each fact as measured by Cyphex or merely reported by a model.</td><td>grading, Verify Gate</td></tr>
+<tr><td><b>Audit trail</b></td><td>Every run is written to a local <code>SECURITY_LOG.md</code> and a full job record, so there is a readable history of what was tested and when.</td><td>ledger</td></tr>
+</tbody></table></section>
+
+<section id="default"><h2><span class="n">5</span>Behaviour before verification (shipping today)</h2>
+<p>The live-attack stage is <b>deterministic</b>. <code>dast_recipe(job_id)</code> returns a command that runs Nuclei — a standard third-party scanner with its own template library — from inside the sandbox. The operator runs that tool; <code>submit_dast</code> lets the MCP parse the output and mark proof itself. No model writes attack requests, so the stage is a plain tool run and is never gated.</p>
+<p>The trade-off is honest and stated in the report: a template scanner does not <i>adapt</i>. Findings it cannot reach stay "confirmed by code reading" rather than "proven by a live attack". The product is useful at this tier; verification is what unlocks the adaptive tier.</p></section>
+
+<section id="after"><h2><span class="n">6</span>Behaviour once verified</h2>
+<p>After the operator's organisation is verified, the adaptive live-attack agent can be enabled. It reads each response and crafts the next request, still bounded by every control in §4: the sandbox target only, the recorded consent, the guardrails, the audit log. Verification changes <i>who is allowed to run the stage</i>, not what the stage is allowed to touch.</p>
+<div class="box"><p>This packet does not ship an enabled adaptive attacker. That agent is switched on only after verification, and even then Anthropic's safeguard remains the authority — a flag on the operator's side cannot and does not disable it.</p></div></section>
+
+<section id="packet"><h2><span class="n">7</span>Application checklist</h2>
+<p>Gather these before applying through the program page linked in §2.</p>
+<ul class="chk">
+<li>Organisation identity and a point of contact for the security work.</li>
+<li>A one-paragraph description of Cyphex and the authorized-testing use case (§1).</li>
+<li>The specific capability requested: a Claude model adapting attacks in real time against the operator's own sandboxed applications (§2).</li>
+<li>The containment and consent controls already in place (the table in §4), with the sandbox isolation model called out.</li>
+<li>Confirmation that targets are always owned or controlled by the operator, with consent recorded per run.</li>
+<li>The audit trail you keep (<code>SECURITY_LOG.md</code> and job records), available for review.</li>
+<li>A statement that, unverified, Cyphex runs only the deterministic stage and does not attempt to bypass the safeguard (§3, §5).</li>
+</ul>
+<p class="fine">Prepared as internal readiness material. It records what Cyphex already does; it is not an approval, and submitting it does not guarantee verification. Program terms are Anthropic's.</p></section>
+</main></div></body></html>

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cyphex MCP End to End</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: six numbered boards, each one diagram plus a short brief. Colour = who runs it (red Cyphex, green host agent, blue user's edge, amber test). */
+:root{
+  --paper:#f5f4f1; --surface:#fff; --board:#fbfaf8; --ink:#1b1f26; --muted:#5a616d; --rule:#d8d5ce;
+  --mcp:#c63d3d; --mcp-s:#fbe9e7; --host:#2f6f4f; --host-s:#e7f1ea; --edge:#2b5e9e; --edge-s:#e6eef7; --test:#9a6400; --test-s:#fbf1dc;
+  --code:#edebe6;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#14161a; --surface:#1d2026; --board:#191c21; --ink:#e8e6e1; --muted:#9aa1ad; --rule:#333842;
+  --mcp:#ef6b62; --mcp-s:#3a2022; --host:#6cc18f; --host-s:#1e2a23; --edge:#7aa6dc; --edge-s:#1b2430; --test:#e0a84a; --test-s:#2e2616; --code:#23272e; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --paper:#14161a; --surface:#1d2026; --board:#191c21; --ink:#e8e6e1; --muted:#9aa1ad; --rule:#333842;
+  --mcp:#ef6b62; --mcp-s:#3a2022; --host:#6cc18f; --host-s:#1e2a23; --edge:#7aa6dc; --edge-s:#1b2430; --test:#e0a84a; --test-s:#2e2616; --code:#23272e; color-scheme:dark;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.6 var(--body)}
+.wrap{max-width:1100px;margin:0 auto;padding:30px 20px 80px}
+header.top{border-bottom:2px solid var(--ink);padding-bottom:16px}
+.kicker{font:600 12px/1 var(--mono);color:var(--mcp);letter-spacing:.05em}
+h1{font-family:var(--display);font-size:40px;line-height:1.1;margin:8px 0}
+.lede{font-size:17px;color:var(--muted);max-width:74ch;margin:0}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;font:600 12px/1 var(--mono);color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1.5px solid;margin-right:6px;vertical-align:-1px}
+.board{background:var(--board);border:1px solid var(--rule);border-radius:10px;padding:20px 22px;margin:24px 0}
+.board h2{font-family:var(--display);font-size:25px;margin:0 0 4px}
+.board h2 .n{color:var(--mcp);font:600 16px var(--mono);margin-right:9px;vertical-align:3px}
+.brief{color:var(--muted);font-size:15px;max-width:82ch;margin:0 0 4px}
+figure{margin:12px 0 4px}
+svg{width:100%;height:auto;display:block;color:var(--ink)}
+figcaption{font-size:13.5px;color:var(--muted);margin-top:8px;max-width:86ch}
+figcaption b{color:var(--ink)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.note{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--mcp);border-radius:5px;padding:11px 14px;font-size:14px}
+.note b.t{font:700 11px/1 var(--display);letter-spacing:.07em;text-transform:uppercase;color:var(--mcp);display:block;margin-bottom:5px}
+.note.g{border-left-color:var(--host)} .note.g b.t{color:var(--host)}
+.note.t{border-left-color:var(--test)} .note.t b.t{color:var(--test)}
+code{font-family:var(--mono);font-size:.85em;background:var(--code);padding:1px 5px;border-radius:3px}
+pre{font:400 13px/1.5 var(--mono);background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:10px 0}
+.tablewrap{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--surface)}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--rule)}
+th{font:700 11.5px/1.2 var(--display);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--ink)}
+.pill{font:600 10.5px/1 var(--mono);padding:3px 6px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}
+.ok{color:var(--host)} .stub{color:var(--test)} .todo{color:var(--mcp)}
+.sv{font-family:"IBM Plex Sans",sans-serif}
+@media (max-width:820px){.cols{grid-template-columns:1fr}h1{font-size:30px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="kicker">CYPHEX MCP · COMPLETE ARCHITECTURE · BUILT AND VERIFIED WHERE MARKED</div>
+  <h1>Cyphex MCP, end to end</h1>
+  <p class="lede">How the MCP is called, what it does, where the agents run, how the sandbox is hardened, how a finding becomes a verified fix, and how we test the MCP itself. Every status pill says whether it is built and verified, a stub, or still to do.</p>
+  <div class="legend">
+    <span><i style="border-color:var(--mcp);background:var(--mcp-s)"></i>Cyphex MCP</span>
+    <span><i style="border-color:var(--host);background:var(--host-s)"></i>Host agent + user's machine</span>
+    <span><i style="border-color:var(--edge);background:var(--edge-s)"></i>User's edge</span>
+    <span><i style="border-color:var(--test);background:var(--test-s)"></i>Testing</span>
+  </div>
+</header>
+
+<!-- 1 -->
+<section class="board">
+  <h2><span class="n">01</span>The big picture</h2>
+  <p class="brief">Three actors. The coding agent reasons, the user's Docker runs the target, and Cyphex hands out playbooks and runs the gates that must not be opinions.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 360" role="img" aria-label="The user's coding agent calls the Cyphex MCP over stdio or HTTP; the MCP returns playbooks and a sandbox recipe; the agent builds the sandbox on the user's own Docker and plays the deep-agent roles; the MCP runs the Verify Gate and builds the signed genome; the genome is published to the user's edge.">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12.5" fill="currentColor">
+      <circle cx="60" cy="62" r="12" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M40 96q20-26 40 0" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="60" y="118" text-anchor="middle" font-weight="600">Developer</text>
+      <rect x="150" y="30" width="210" height="150" rx="9" fill="var(--host-s)" stroke="var(--host)" stroke-width="2"/>
+      <rect x="168" y="46" width="30" height="22" rx="4" fill="none" stroke="var(--host)" stroke-width="1.8"/><path d="M174 54l5 4-5 4M183 62h8" fill="none" stroke="var(--host)" stroke-width="1.8"/>
+      <text x="212" y="62" font-weight="600" font-size="14" fill="var(--host)">Host coding agent</text>
+      <text x="168" y="92">Claude Code · Codex · Cursor</text>
+      <text x="168" y="112" font-size="11.5">its own model plays every role</text>
+      <text x="168" y="130" font-size="11.5">has the repo and a shell</text>
+      <text x="168" y="148" font-size="11.5">asks you before risky actions</text>
+      <rect x="440" y="30" width="230" height="150" rx="9" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2.5"/>
+      <path d="M460 58h22l-4 8h-14zM463 70h16v10h-16z" fill="none" stroke="var(--mcp)" stroke-width="1.8"/>
+      <text x="492" y="66" font-weight="600" font-size="14" fill="var(--mcp)">Cyphex MCP server</text>
+      <text x="460" y="96" font-size="11.5">21 tools · playbooks · grades agents</text>
+      <text x="460" y="114" font-size="11.5">sandbox recipe (gVisor or hardened)</text>
+      <text x="460" y="132" font-size="11.5">Verify Gate · genome · 2-page report</text>
+      <text x="460" y="156" font-size="11.5" fill="var(--mcp)">no model · no target runs here</text>
+      <rect x="150" y="230" width="210" height="104" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M170 262h40v18h-40zM176 256h8v6h-8zM188 256h8v6h-8zM200 256h8v6h-8z" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="224" y="270" font-weight="600" font-size="14">User's Docker</text>
+      <text x="170" y="298" font-size="11.5">sandbox: no egress, no root,</text>
+      <text x="170" y="315" font-size="11.5">target app + attack peer</text>
+      <rect x="760" y="230" width="270" height="104" rx="9" fill="var(--edge-s)" stroke="var(--edge)" stroke-width="2"/>
+      <text x="780" y="262" font-weight="600" font-size="14" fill="var(--edge)">User's edge (their choice)</text>
+      <text x="780" y="286" font-size="11.5">Docker sidecar · Cloudflare Worker · AWS</text>
+      <text x="780" y="306" font-size="11.5">runs decide(): block unseen attack shapes</text>
+      <rect x="440" y="230" width="230" height="104" rx="9" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/>
+      <text x="460" y="262" font-weight="600" font-size="14" fill="var(--mcp)">Genome</text>
+      <text x="460" y="286" font-size="11.5">signed .pkl (HMAC) in a .cxgenome</text>
+      <text x="460" y="306" font-size="11.5">edge refuses an unsigned model</text>
+      <line x1="82" y1="70" x2="148" y2="70" stroke="currentColor" stroke-width="1.6" marker-end="url(#a)"/><text x="114" y="62" text-anchor="middle" font-size="11">asks</text>
+      <line x1="360" y1="85" x2="438" y2="85" stroke="currentColor" stroke-width="1.6" marker-end="url(#a)"/><text x="399" y="77" text-anchor="middle" font-size="11">tool call</text>
+      <line x1="438" y1="130" x2="362" y2="130" stroke="currentColor" stroke-width="1.6" marker-end="url(#a)"/><text x="399" y="148" text-anchor="middle" font-size="11">playbook</text>
+      <line x1="255" y1="180" x2="255" y2="228" stroke="var(--host)" stroke-width="1.8" marker-end="url(#a)"/><text x="265" y="208" font-size="11" fill="var(--host)">builds + drives</text>
+      <line x1="555" y1="180" x2="555" y2="228" stroke="var(--mcp)" stroke-width="1.8" marker-end="url(#a)"/><text x="565" y="208" font-size="11" fill="var(--mcp)">trains from evidence</text>
+      <line x1="670" y1="282" x2="758" y2="282" stroke="var(--edge)" stroke-width="1.8" marker-end="url(#a)"/><text x="714" y="274" text-anchor="middle" font-size="11" fill="var(--edge)">publish</text>
+    </g>
+  </svg>
+  <figcaption><b>Why this shape:</b> hosting a model or a sandbox per customer is the expensive, risky part, so we host neither. The icons are generic stand-ins, not vendor logos.</figcaption>
+  </figure>
+</section>
+
+<!-- 2 -->
+<section class="board">
+  <h2><span class="n">02</span>How the MCP is called</h2>
+  <p class="brief">Two ways to reach the same server. Locally the client launches it as a child process over stdio. In the demo container it listens on HTTP. The tool calls are identical either way.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 400" role="img" aria-label="Sequence: the agent initializes a session, lists tools, calls start_scan and receives a job id, sandbox recipe and ordered playbooks, then calls get_playbook for each role, and finally verify_patch with a diff.">
+    <defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12.5" fill="currentColor">
+      <text x="170" y="26" text-anchor="middle" font-weight="600" font-size="14" fill="var(--host)">Host agent</text>
+      <text x="530" y="26" text-anchor="middle" font-weight="600" font-size="14" fill="var(--mcp)">Cyphex MCP</text>
+      <text x="890" y="26" text-anchor="middle" font-weight="600" font-size="14">User's Docker</text>
+      <line x1="170" y1="38" x2="170" y2="392" stroke="currentColor" opacity=".4" stroke-dasharray="3 4"/>
+      <line x1="530" y1="38" x2="530" y2="392" stroke="currentColor" opacity=".4" stroke-dasharray="3 4"/>
+      <line x1="890" y1="38" x2="890" y2="392" stroke="currentColor" opacity=".4" stroke-dasharray="3 4"/>
+      <line x1="170" y1="58" x2="528" y2="58" stroke="currentColor" stroke-width="1.5" marker-end="url(#b)"/><text x="350" y="51" text-anchor="middle">1 · initialize, tools/list (21 tools)</text>
+      <line x1="170" y1="96" x2="528" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#b)"/><text x="350" y="89" text-anchor="middle">2 · start_scan(stack="node")</text>
+      <line x1="528" y1="130" x2="172" y2="130" stroke="currentColor" stroke-width="1.5" marker-end="url(#b)"/><text x="350" y="123" text-anchor="middle">3 · job_id + sandbox recipe + playbook order</text>
+      <line x1="170" y1="168" x2="528" y2="168" stroke="currentColor" stroke-width="1.5" marker-end="url(#b)"/><text x="350" y="161" text-anchor="middle">4 · get_playbook("sandbox_security")</text>
+      <line x1="170" y1="206" x2="888" y2="206" stroke="var(--host)" stroke-width="1.8" marker-end="url(#b)"/><text x="530" y="199" text-anchor="middle" fill="var(--host)">5 · agent builds the sandbox locally from the recipe</text>
+      <path d="M170 240h60v22h-58" fill="none" stroke="var(--host)" stroke-width="1.5" marker-end="url(#b)"/><text x="240" y="256" fill="var(--host)">6 · plays each role, reports it with submit_result</text>
+      <line x1="170" y1="296" x2="528" y2="296" stroke="currentColor" stroke-width="1.5" marker-end="url(#b)"/><text x="350" y="289" text-anchor="middle">7 · verify_patch(job, finding, replay)</text>
+      <line x1="528" y1="330" x2="172" y2="330" stroke="var(--mcp)" stroke-width="2" marker-end="url(#b)"/><text x="350" y="323" text-anchor="middle" fill="var(--mcp)">8 · PASS / FAIL / UNVERIFIABLE</text>
+      <text x="530" y="372" text-anchor="middle" font-size="11.5" opacity=".8">UNVERIFIABLE is returned when nothing failed but a check could not run, for example no exploit replay.</text>
+    </g>
+  </svg>
+  <figcaption><b>All eight steps were run for real</b> on the bundled vulnerable app through the MCP over stdio. The result is <code>sample-report.html</code> (board 6).</figcaption>
+  </figure>
+  <div class="tablewrap"><table>
+    <thead><tr><th>How you connect</th><th>Command</th><th>Use it for</th></tr></thead>
+    <tbody>
+      <tr><td>Local, stdio</td><td><code>claude mcp add cyphex -- cyphex-mcp</code></td><td>Real use. It runs on your machine, so it can see your Docker and detect gVisor.</td></tr>
+      <tr><td>Container, HTTP</td><td><code>docker compose -f cyphex_mcp/docker-compose.demo.yml up --build</code> then connect to <code>http://localhost:8765/mcp</code></td><td>Tutorial and experiments. No Docker socket inside, so it always recommends the hardened-docker tier.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- 3 -->
+<section class="board">
+  <h2><span class="n">03</span>How the agents are deployed</h2>
+  <p class="brief">"Deploying an agent" here means handing the host model a role sheet. Nothing is installed or hosted. The MCP returns the roles, the host agent plays them in order, and each returns JSON in a fixed shape.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 330" role="img" aria-label="Playbook pipeline: sandbox_security, recon, deep SAST, deep DAST, a council of three to four reviewers, and a patch crew of one patcher and two reviewers, ending at the Verify Gate. All roles are played by the host agent's model; the Verify Gate runs in the MCP.">
+    <defs><marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12" fill="currentColor" text-anchor="middle">
+      <rect x="14" y="24" width="1032" height="190" rx="10" fill="var(--host-s)" stroke="var(--host)" stroke-dasharray="6 4" stroke-width="1.6"/>
+      <text x="530" y="46" font-weight="600" font-size="13.5" fill="var(--host)">The host agent's own model plays every box in this band</text>
+      <g stroke="currentColor" fill="var(--surface)">
+        <rect x="30" y="64" width="130" height="62" rx="6"/><rect x="180" y="64" width="110" height="62" rx="6"/><rect x="310" y="64" width="110" height="62" rx="6"/><rect x="440" y="64" width="110" height="62" rx="6"/>
+        <rect x="570" y="64" width="200" height="140" rx="6"/><rect x="790" y="64" width="240" height="140" rx="6"/>
+      </g>
+      <text x="95" y="88" font-weight="600">Sandbox security</text><text x="95" y="106" font-size="11">hardening checklist</text>
+      <text x="235" y="88" font-weight="600">Recon</text><text x="235" y="106" font-size="11">map endpoints</text>
+      <text x="365" y="88" font-weight="600">Deep SAST</text><text x="365" y="106" font-size="11">read the code</text>
+      <text x="495" y="88" font-weight="600">Deep DAST</text><text x="495" y="106" font-size="11">prove in sandbox</text>
+      <text x="670" y="88" font-weight="600">Council: 3 to 4 personas</text>
+      <g fill="none" stroke="currentColor"><circle cx="610" cy="130" r="24"/><circle cx="670" cy="130" r="24"/><circle cx="730" cy="130" r="24"/></g>
+      <text x="610" y="134" font-size="10">skeptic</text><text x="670" y="134" font-size="10">exploit</text><text x="730" y="134" font-size="10">dataflow</text>
+      <text x="670" y="178" font-size="11">majority confirms, or it is dropped</text>
+      <text x="910" y="88" font-weight="600">Patch crew: 1 patch, 2 review</text>
+      <g fill="none" stroke="currentColor"><rect x="810" y="108" width="62" height="36" rx="5"/><rect x="884" y="108" width="62" height="36" rx="5"/><rect x="958" y="108" width="62" height="36" rx="5"/></g>
+      <text x="841" y="131" font-size="11">Patcher</text><text x="915" y="131" font-size="11">Review A</text><text x="989" y="131" font-size="11">Review B</text>
+      <text x="910" y="178" font-size="11">diff returned only if both approve</text>
+      <g stroke="currentColor" stroke-width="1.5"><line x1="160" y1="95" x2="178" y2="95" marker-end="url(#c)"/><line x1="290" y1="95" x2="308" y2="95" marker-end="url(#c)"/><line x1="420" y1="95" x2="438" y2="95" marker-end="url(#c)"/><line x1="550" y1="95" x2="568" y2="95" marker-end="url(#c)"/><line x1="770" y1="134" x2="788" y2="134" marker-end="url(#c)"/></g>
+      <rect x="560" y="250" width="320" height="60" rx="8" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/>
+      <text x="720" y="276" font-weight="600" font-size="13.5" fill="var(--mcp)">Verify Gate (runs in the MCP)</text>
+      <text x="720" y="296" font-size="11">re-run exploit · compiles · no suppression · blast radius</text>
+      <line x1="910" y1="204" x2="800" y2="248" stroke="currentColor" stroke-width="1.5" marker-end="url(#c)"/>
+      <rect x="30" y="250" width="440" height="60" rx="8" fill="var(--mcp-s)" stroke="var(--mcp)"/>
+      <text x="250" y="276" font-weight="600" fill="var(--mcp)">Guardrails go in front of every role</text>
+      <text x="250" y="296" font-size="11">scanned text is data · no secrets out · no network but the sandbox · ask before risky</text>
+    </g>
+  </svg>
+  <figcaption><b>Why this replaces hosting models:</b> the roles are the same ones the old local pipeline used (agents, council, patch crew), but the thinking comes from the model the user already pays for. Only the last box is machine code.</figcaption>
+  </figure>
+</section>
+
+<!-- 4 -->
+<section class="board">
+  <h2><span class="n">04</span>The sandbox, hardened</h2>
+  <p class="brief">The old sandbox gave the target the default network, so a compromised app could phone home. The new recipe removes that route and adds a second tier when the user's Docker supports gVisor.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 290" role="img" aria-label="Sandbox tiers: auto-detect runs docker info; if runsc is present the gVisor tier gives the target its own user-space kernel; otherwise hardened-docker applies capability drop, no-new-privileges, default seccomp, read-only root, non-root user and limits. Both tiers sit on an internal network with no route to the internet, with an attack peer on the same network.">
+    <defs><marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12" fill="currentColor">
+      <rect x="14" y="100" width="170" height="64" rx="7" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/>
+      <text x="99" y="126" text-anchor="middle" font-weight="600" fill="var(--mcp)">Auto-detect</text><text x="99" y="146" text-anchor="middle" font-size="11">docker info → runtimes</text>
+      <rect x="260" y="30" width="250" height="96" rx="7" fill="var(--host-s)" stroke="var(--host)" stroke-width="2"/>
+      <text x="385" y="54" text-anchor="middle" font-weight="600" fill="var(--host)">Tier: gVisor (runsc)</text>
+      <text x="385" y="76" text-anchor="middle" font-size="11">own user-space kernel for the target</text>
+      <text x="385" y="94" text-anchor="middle" font-size="11">+ everything in hardened tier</text>
+      <text x="385" y="112" text-anchor="middle" font-size="11" opacity=".8">used when runsc is registered</text>
+      <rect x="260" y="150" width="250" height="110" rx="7" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+      <text x="385" y="172" text-anchor="middle" font-weight="600">Tier: hardened-docker (default)</text>
+      <text x="385" y="192" text-anchor="middle" font-size="11">cap_drop ALL · no-new-privileges</text>
+      <text x="385" y="208" text-anchor="middle" font-size="11">default seccomp ON · read-only root</text>
+      <text x="385" y="224" text-anchor="middle" font-size="11">non-root · 512 MB · 200 pids</text>
+      <text x="385" y="246" text-anchor="middle" font-size="11" opacity=".8">shares the host kernel</text>
+      <rect x="590" y="30" width="450" height="230" rx="9" fill="none" stroke="var(--edge)" stroke-width="2" stroke-dasharray="7 5"/>
+      <text x="815" y="54" text-anchor="middle" font-weight="600" fill="var(--edge)">internal network: no gateway, no route to the internet</text>
+      <rect x="620" y="90" width="170" height="90" rx="7" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="705" y="118" text-anchor="middle" font-weight="600">Target app</text><text x="705" y="138" text-anchor="middle" font-size="11">source copied in at build</text><text x="705" y="154" text-anchor="middle" font-size="11">never bind-mounted</text>
+      <rect x="850" y="90" width="170" height="90" rx="7" fill="var(--test-s)" stroke="var(--test)" stroke-width="1.6"/><text x="935" y="118" text-anchor="middle" font-weight="600">Attack peer</text><text x="935" y="138" text-anchor="middle" font-size="11">curl · python · agents</text><text x="935" y="154" text-anchor="middle" font-size="11">same network only</text>
+      <line x1="850" y1="135" x2="792" y2="135" stroke="currentColor" stroke-width="1.6" marker-end="url(#d)"/>
+      <text x="815" y="226" text-anchor="middle" font-size="11.5" fill="var(--mcp)">a compromised target cannot call out ✕</text>
+      <text x="815" y="246" text-anchor="middle" font-size="11" opacity=".8">torn down with docker compose down -v after every job</text>
+      <line x1="184" y1="120" x2="258" y2="84" stroke="currentColor" stroke-width="1.5" marker-end="url(#d)"/><line x1="184" y1="146" x2="258" y2="196" stroke="currentColor" stroke-width="1.5" marker-end="url(#d)"/>
+      <line x1="510" y1="100" x2="588" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#d)"/><line x1="510" y1="200" x2="588" y2="170" stroke="currentColor" stroke-width="1.5" marker-end="url(#d)"/>
+    </g>
+  </svg>
+  <figcaption><b>Tested on Docker:</b> ports published from an internal network are unreachable from the host, so probes come from the attacker peer, and the target's own outbound request fails. A read-only root also crashes apps that write at startup, so the recipe takes a <code>writable_paths</code> list (tmpfs). <b>Honest limit:</b> hardened-docker still shares the host kernel, so a kernel bug could escape it. gVisor narrows that. A true microVM (Firecracker) needs KVM and its own supervisor, so it is a later hosted tier, not something a laptop recipe can emit. The reference projects behind this checklist: google/gvisor, firecracker-microvm/firecracker, kubernetes-sigs/agent-sandbox, opensandbox-group/OpenSandbox.</figcaption>
+  </figure>
+</section>
+
+<!-- 5 -->
+<section class="board">
+  <h2><span class="n">05</span>Genome and agent security</h2>
+  <p class="brief">The scan teaches a behavioural model what normal traffic looks like. That model ships to the user's edge, where it blocks shapes it has never seen, which is how a zero-day with no signature still gets stopped. Agent security rides in the same server as guardrails and one gate tool.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 250" role="img" aria-label="Genome flow: scan evidence trains a model, the model is saved as a pkl and HMAC signed, bundled as a cxgenome with a decide wrapper, deployed to a Docker sidecar, Cloudflare Worker or AWS, where each request is scored and blocked if it is an unseen shape. Separately, guard_decide checks agent tool calls for the lethal trifecta.">
+    <defs><marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12" fill="currentColor" text-anchor="middle">
+      <rect x="14" y="30" width="140" height="64" rx="7" fill="none" stroke="currentColor"/><text x="84" y="58" font-weight="600">Scan evidence</text><text x="84" y="76" font-size="11">normal + attack</text>
+      <rect x="184" y="30" width="150" height="64" rx="7" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/><text x="259" y="58" font-weight="600" fill="var(--mcp)">Train + sign</text><text x="259" y="76" font-size="11">genome.pkl + HMAC</text>
+      <rect x="364" y="30" width="150" height="64" rx="7" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/><text x="439" y="58" font-weight="600" fill="var(--mcp)">Bundle</text><text x="439" y="76" font-size="11">.cxgenome + decide.py</text>
+      <rect x="544" y="14" width="210" height="46" rx="7" fill="var(--edge-s)" stroke="var(--edge)" stroke-width="1.8"/><text x="649" y="42" font-weight="600" fill="var(--edge)">Docker sidecar</text>
+      <rect x="544" y="68" width="210" height="46" rx="7" fill="var(--edge-s)" stroke="var(--edge)" stroke-width="1.8"/><text x="649" y="96" font-weight="600" fill="var(--edge)">Cloudflare Worker / AWS</text>
+      <rect x="800" y="30" width="240" height="84" rx="7" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="920" y="56" font-weight="600" fill="var(--edge)">decide(request)</text><text x="920" y="76" font-size="11">ALLOW · SUSPECT · BLOCK</text><text x="920" y="96" font-size="11" fill="var(--mcp)">unseen shape → blocked</text>
+      <g stroke="currentColor" stroke-width="1.5"><line x1="154" y1="62" x2="182" y2="62" marker-end="url(#e)"/><line x1="334" y1="62" x2="362" y2="62" marker-end="url(#e)"/><line x1="514" y1="50" x2="542" y2="37" marker-end="url(#e)"/><line x1="514" y1="76" x2="542" y2="91" marker-end="url(#e)"/><line x1="754" y1="62" x2="798" y2="72" marker-end="url(#e)"/></g>
+      <line x1="14" y1="140" x2="1040" y2="140" stroke="currentColor" opacity=".3"/>
+      <rect x="14" y="156" width="1026" height="80" rx="8" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="1.6"/>
+      <text x="527" y="182" font-weight="600" font-size="13.5" fill="var(--mcp)">Agent security add-on: guard_decide(tool, args, tainted)</text>
+      <text x="527" y="204" font-size="11.5">block when one call has all three: untrusted content in context + sensitive data + an outward channel (the lethal trifecta)</text>
+      <text x="527" y="222" font-size="11.5">ask a human when two are present · allow otherwise · deterministic, so the same call always gets the same answer</text>
+    </g>
+  </svg>
+  <figcaption><b>Security of the model file itself:</b> a .pkl is pickle, so loading a swapped file would run attacker code. The edge wrapper checks the HMAC first and refuses to load on mismatch.</figcaption>
+  </figure>
+</section>
+
+<!-- 6 -->
+<section class="board">
+  <h2><span class="n">06</span>How it is tested, end to end</h2>
+  <p class="brief">Two separate questions. First, does the MCP itself work? Second, does a scan through the MCP find and fix real bugs? The first is built and passing. The second is the next phase.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 230" role="img" aria-label="Test ladder: unit self-checks on the stdlib core, container build and MCP handshake smoke test, a run against the bundled vulnerable demo app with Playwright proof, then public benchmarks on Juice Shop, DVWA and WebGoat, then agent red-team evals.">
+    <defs><marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12" fill="currentColor" text-anchor="middle">
+      <g fill="var(--host-s)" stroke="var(--host)" stroke-width="2"><rect x="14" y="40" width="190" height="110" rx="8"/><rect x="224" y="40" width="190" height="110" rx="8"/><rect x="434" y="40" width="190" height="110" rx="8"/></g>
+      <g fill="var(--test-s)" stroke="var(--test)" stroke-width="1.6"><rect x="644" y="40" width="190" height="110" rx="8"/><rect x="854" y="40" width="190" height="110" rx="8"/></g>
+      <text x="109" y="66" font-weight="600" fill="var(--host)">1 · Unit checks</text><text x="109" y="90" font-size="11">58 pass: graders, Verify Gate,</text><text x="109" y="106" font-size="11">report, webhook, sandbox tiers</text><text x="109" y="134" font-size="11" font-weight="600" fill="var(--host)">BUILT · VERIFIED</text>
+      <text x="319" y="66" font-weight="600" fill="var(--host)">2 · Container smoke</text><text x="319" y="90" font-size="11">image builds, server starts,</text><text x="319" y="106" font-size="11">handshake, 6 tools, start_scan</text><text x="319" y="134" font-size="11" font-weight="600" fill="var(--host)">BUILT · VERIFIED</text>
+      <text x="529" y="66" font-weight="600" fill="var(--host)">3 · Demo app run</text><text x="529" y="90" font-size="11">15 findings, 10 proven, 3 fixed</text><text x="529" y="106" font-size="11">and verified, in a Docker sandbox</text><text x="529" y="134" font-size="11" font-weight="600" fill="var(--host)">BUILT · VERIFIED</text>
+      <text x="739" y="66" font-weight="600" fill="var(--test)">4 · Public benchmarks</text><text x="739" y="90" font-size="11">Juice Shop · DVWA · WebGoat</text><text x="739" y="106" font-size="11">publish precision + false positives</text><text x="739" y="134" font-size="11" font-weight="600" fill="var(--test)">TO DO</text>
+      <text x="949" y="66" font-weight="600" fill="var(--test)">5 · Agent red-team</text><text x="949" y="90" font-size="11">canary secrets + egress sinkhole,</text><text x="949" y="106" font-size="11">attack success rate scorecard</text><text x="949" y="134" font-size="11" font-weight="600" fill="var(--test)">TO DO</text>
+      <g stroke="currentColor" stroke-width="1.5"><line x1="204" y1="95" x2="222" y2="95" marker-end="url(#f)"/><line x1="414" y1="95" x2="432" y2="95" marker-end="url(#f)"/><line x1="624" y1="95" x2="642" y2="95" marker-end="url(#f)"/><line x1="834" y1="95" x2="852" y2="95" marker-end="url(#f)"/></g>
+      <text x="530" y="190" font-size="12">Rule: a patch counts as fixed only when the exploit that worked before now fails on the rebuilt target.</text>
+      <text x="530" y="210" font-size="11.5" opacity=".8">A fix whose exploit cannot be replayed stays UNVERIFIABLE, as one SQL injection fix did in the demo run.</text>
+    </g>
+  </svg>
+  <figcaption><b>What was actually run:</b> rungs 1 to 3. The demo run drove the real MCP server over stdio against the bundled vulnerable app, probed it from the attacker peer, patched four findings, replayed the exploits on the rebuilt app, and built a genome with scikit-learn. Rungs 4 and 5 have not been started.</figcaption>
+  </figure>
+  <div class="cols">
+    <div class="note g"><b class="t">Try it yourself</b>
+<pre>python3 -m cyphex_mcp.tests.test_core
+docker compose -f cyphex_mcp/docker-compose.demo.yml up --build
+# connect an MCP client to http://localhost:8765/mcp</pre></div>
+    <div class="note t"><b class="t">Status table</b>
+      <span class="pill ok">built</span> playbooks, graders, Verify Gate, sandbox tiers, genome build and eval, report, webhook receiver, demo container<br>
+      <span class="pill stub">untested</span> the GitHub Actions workflow and the headless agent run<br>
+      <span class="pill todo">to do</span> Playwright proof for browser-side bugs, benchmarks, agent red-team suite, a gVisor run</div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="board">
+  <h2><span class="n">07</span>From a GitHub push to the report</h2>
+  <p class="brief">A webhook can record that code landed, but it cannot scan: the MCP has no model. So a CI runner starts a headless agent, the agent calls the MCP, and the MCP grades every step and writes the report.</p>
+  <figure>
+  <svg class="sv" viewBox="0 0 1060 250" role="img" aria-label="GitHub sends a signed push or merged pull request event to the Cyphex webhook, which verifies the signature and queues a job. A CI runner starts a headless agent connected to the Cyphex MCP, which scans the checked-out code, submits each role's result, and the MCP grades them and writes a two-page report served by the webhook or uploaded by CI.">
+    <defs><marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+    <g font-size="12" fill="currentColor" text-anchor="middle">
+      <rect x="14" y="30" width="150" height="70" rx="8" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="89" y="58" font-weight="600">GitHub</text><text x="89" y="78" font-size="11">push to main or</text><text x="89" y="92" font-size="11">merged PR</text>
+      <rect x="204" y="30" width="190" height="70" rx="8" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/><text x="299" y="54" font-weight="600" fill="var(--mcp)">Webhook receiver</text><text x="299" y="72" font-size="11">checks X-Hub-Signature-256</text><text x="299" y="88" font-size="11">forged event → 401 · queues a job</text>
+      <rect x="434" y="30" width="200" height="70" rx="8" fill="var(--host-s)" stroke="var(--host)" stroke-width="2"/><text x="534" y="54" font-weight="600" fill="var(--host)">CI runner</text><text x="534" y="72" font-size="11">headless agent: claude -p</text><text x="534" y="88" font-size="11">checks out the whole repo</text>
+      <rect x="674" y="30" width="190" height="70" rx="8" fill="var(--mcp-s)" stroke="var(--mcp)" stroke-width="2"/><text x="769" y="54" font-weight="600" fill="var(--mcp)">Cyphex MCP</text><text x="769" y="72" font-size="11">submit_result → graders</text><text x="769" y="88" font-size="11">verify_patch · build_genome</text>
+      <rect x="904" y="30" width="142" height="70" rx="8" fill="var(--test-s)" stroke="var(--test)" stroke-width="2"/><text x="975" y="54" font-weight="600" fill="var(--test)">Report</text><text x="975" y="72" font-size="11">one HTML file,</text><text x="975" y="88" font-size="11">prints on 2 pages</text>
+      <g stroke="currentColor" stroke-width="1.6"><line x1="164" y1="65" x2="202" y2="65" marker-end="url(#g)"/><line x1="394" y1="65" x2="432" y2="65" marker-end="url(#g)"/><line x1="634" y1="65" x2="672" y2="65" marker-end="url(#g)"/><line x1="864" y1="65" x2="902" y2="65" marker-end="url(#g)"/></g>
+      <rect x="14" y="130" width="1032" height="104" rx="8" fill="var(--surface)" stroke="currentColor" opacity=".9"/>
+      <text x="530" y="154" font-weight="600" font-size="13">What the report shows</text>
+      <text x="530" y="176" font-size="11.5">verdict and funnel (candidate → council confirmed → proven by exploit → patched → verified fixed)</text>
+      <text x="530" y="194" font-size="11.5">what each agent did and how far to trust it · every finding with its evidence, vote and patch · false alarms removed</text>
+      <text x="530" y="212" font-size="11.5">what was NOT proven or could not be checked · genome block and false-block rates, untuned</text>
+    </g>
+  </svg>
+  <figcaption><b>Status:</b> the receiver, the signature check, the queueing and the report were run for real; a signed push was accepted and a forged one rejected. The CI workflow that starts the headless agent (<code>webhook.workflow_yaml()</code>) was written but has not been run against GitHub, and the receiver does not itself start a run.</figcaption>
+  </figure>
+</section>
+
+</div>
+</body>
+</html>

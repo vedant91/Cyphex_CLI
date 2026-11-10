@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "cyphex": {
+      "type": "stdio",
+      "command": "/home/getaweblpwinubt26/.cyphex_mcp/venv/bin/python",
+      "args": ["-m", "cyphex_mcp.server"],
+      "env": {
+        "PYTHONPATH": "/home/getaweblpwinubt26/Cyphex_CLI",
+        "CYPHEX_DATA_DIR": "/home/getaweblpwinubt26/.cyphex_mcp/intel"
+      }
+    }
+  }
+}
