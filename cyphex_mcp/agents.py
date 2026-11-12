@@ -45,6 +45,15 @@ SPECIALISTS = {
     "ai": ("flaws in the app's own AI features (OWASP LLM01, LLM02, LLM06; CWE-1427)", "user text concatenated into prompts, model output used as code, SQL or shell, tool-calling endpoints with no per-user checks, secrets or other users' data placed in the prompt, unbounded output or spend. If the app has no AI feature, say so and return an empty list"),
 }
 
+# Add-on specialists: deployed only when the host profiles the app and sees the signal (get_playbook("profile")).
+# Same shape and read-only posture as the base specialists; the roster is a baseline + what the app actually needs.
+ADDONS = {
+    "jailbreak": ("LLM jailbreak and prompt-leak (OWASP LLM01/LLM07)", "system-prompt extraction, instruction override planted in user content, tool-call abuse via crafted prompts, model output used without a trust boundary, other users' data or secrets placed into a prompt"),
+    "payment": ("payment and billing tampering (CWE-840)", "price, quantity, currency or discount taken from the client, ad spend or budget not re-checked server-side, payment-provider webhooks whose signature is not verified, races on balance or credit"),
+    "idor": ("broken object-level authorization / IDOR (CWE-639)", "a record read or written by an id from the URL or body with no ownership check, sequential or guessable ids, a lookup missing tenant scoping"),
+}
+_ALL_SPEC = {**SPECIALISTS, **ADDONS}
+
 _SEVERITY = ("Severity: critical = remote code execution or full data access with no login; high = serious data exposure or "
              "takeover that needs little; medium = real but needs conditions or limited impact; low = hardening gap.")
 
@@ -55,7 +64,7 @@ def _submit_line(name: str, role: str, payload: str, model: str) -> str:
 
 
 def _specialist(key: str, model: str) -> dict:
-    cls, where = SPECIALISTS[key]
+    cls, where = _ALL_SPEC[key]
     name = f"cyphex-{key}"
     body = f"""You are the {key} specialist, one of several independent security agents in a Cyphex scan. You work alone in your own context and never see the other agents' work. Stay on your bug class: {cls}.
 
@@ -223,11 +232,13 @@ def _model_for(name: str, models: str) -> str:
     return _MIXED.get(name, "sonnet")
 
 
-def roster(models: str = "single") -> list[dict]:
+def roster(models: str = "single", addons: tuple = ()) -> list[dict]:
     """models: 'single' = every agent inherits the session's model; 'mixed' = the council and
-    the reviewers run on different Claude models, specialists on Sonnet."""
+    the reviewers run on different Claude models, specialists on Sonnet.
+    addons: extra specialist keys from ADDONS, chosen by profiling the app (get_playbook("profile"))."""
+    extra = [k for k in (addons or []) if k in ADDONS]
     agents = [_recon(_model_for("cyphex-recon", models))]
-    agents += [_specialist(k, _model_for(f"cyphex-{k}", models)) for k in SPECIALISTS]
+    agents += [_specialist(k, _model_for(f"cyphex-{k}", models)) for k in list(SPECIALISTS) + extra]
     agents.append(_prober(_model_for("cyphex-prober", models)))
     agents += [_council(k, _model_for(f"cyphex-{k}", models)) for k in _LENSES]
     agents.append(_patcher(_model_for("cyphex-patcher", models)))
@@ -248,7 +259,7 @@ def agent_file(a: dict) -> str:
     return "\n".join(fm) + "\n" + MARKER + "\n" + a["body"]
 
 
-def deploy(project_path: str, models: str = "single") -> dict:
+def deploy(project_path: str, models: str = "single", addons: tuple = ()) -> dict:
     """Write the roster into <project_path>/.claude/agents/. Never overwrites a file that does
     not carry our marker, so a person's own agents are safe."""
     root = Path(project_path)
@@ -257,7 +268,7 @@ def deploy(project_path: str, models: str = "single") -> dict:
     dest = root / ".claude" / "agents"
     dest.mkdir(parents=True, exist_ok=True)
     written, skipped = [], []
-    for a in roster(models):
+    for a in roster(models, addons):
         p = dest / f"{a['name']}.md"
         if p.exists() and MARKER not in p.read_text():
             skipped.append(a["name"])
@@ -277,12 +288,13 @@ def remove(project_path: str) -> dict:
     return {"removed": gone}
 
 
-def plan(job_id: str, repo_path: str, target_url: str, sandbox: str, models: str = "single") -> dict:
+def plan(job_id: str, repo_path: str, target_url: str, sandbox: str, models: str = "single", addons: tuple = ()) -> dict:
     """The run, stage by stage. Stages with several agents are launched together in one
     message so they run at the same time."""
-    ra = {a["name"]: a for a in roster(models)}
+    extra = [k for k in (addons or []) if k in ADDONS]
+    ra = {a["name"]: a for a in roster(models, addons)}
     ctx = f"job_id={job_id} repo_path={repo_path}" + (f" target_url={target_url}" if target_url else "")
-    spec = [f"cyphex-{k}" for k in SPECIALISTS]
+    spec = [f"cyphex-{k}" for k in list(SPECIALISTS) + extra]
     council = [f"cyphex-{k}" for k in _LENSES]
     stages = [
         (1, "Map the app", False, ["cyphex-recon"], "Wait for it: the specialists use its route list."),

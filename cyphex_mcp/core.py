@@ -44,6 +44,16 @@ _FINDING_SCHEMA = {
 }
 
 PLAYBOOKS: dict[str, dict] = {
+    "profile": {
+        "role": "Before deploying agents, read the app to decide WHICH extra agents it needs, so the roster "
+                "fits this app instead of a fixed list. Read package.json/requirements, the routes and the main "
+                "modules. Judge: does it call an LLM or generate AI content? does it handle money, billing, ad "
+                "spend or checkout? does it expose records by id across users or tenants? Return the add-ons that "
+                "the code actually shows.",
+        "returns": {"addons": ["zero or more of: jailbreak (LLM/prompt features), payment (money, billing, ad spend), idor (multi-user records fetched by id)"],
+                    "why": "one short line per add-on: the signal in the code that justifies it"},
+        "rule": "The ten base specialists always run. Add an agent only when the code shows the signal; never pad the roster.",
+    },
     "recon": {
         "role": "Map the target: list routes/endpoints, input parameters, auth "
                 "boundaries and the data store. Do not judge severity yet. The "

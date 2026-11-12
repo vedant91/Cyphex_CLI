@@ -368,6 +368,20 @@ def test_dast_ingest_marks_findings_proven_from_scanner_output_not_a_model():
     assert "nuclei" in r["command"] and "model" not in r["command"].lower() and r["say"]
 
 
+def test_roster_adapts_to_the_app_with_addons():
+    from cyphex_mcp import agents, core
+    assert "profile" in core.PLAYBOOKS  # the profiling playbook exists
+    base = {a["name"] for a in agents.roster("single")}
+    assert "cyphex-jailbreak" not in base and len([n for n in base if n.startswith("cyphex-")]) == 20  # fixed baseline
+    picked = {a["name"] for a in agents.roster("single", ("jailbreak", "payment", "bogus"))}
+    assert "cyphex-jailbreak" in picked and "cyphex-payment" in picked and "cyphex-bogus" not in picked  # add-ons added, junk ignored
+    work = Path(tempfile.mkdtemp())
+    agents.deploy(str(work), "single", ("jailbreak",))
+    assert (work / ".claude" / "agents" / "cyphex-jailbreak.md").exists()  # the add-on agent is deployed
+    plan = agents.plan("j", "/r", "", "skip", "single", ("jailbreak",))
+    assert "cyphex-jailbreak" in plan["stages"][1]["agents"]  # and it runs in the specialist stage
+
+
 def test_targeted_prober_proves_a_finding_from_a_real_payload_hit():
     from cyphex_mcp import dast, probe_kit
     probe_kit._selftest()  # the payload classifier reacts to canned responses with no network
