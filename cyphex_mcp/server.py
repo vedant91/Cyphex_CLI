@@ -273,9 +273,10 @@ def build_server():
         AI/LLM features, ["payment"] for billing or ad-spend, ["idor"] for multi-tenant records.
         adaptive=True gives the prober an extra step: for findings the fixed tools could not prove, it crafts and
         sends its own requests to the sandbox target, reading each response and iterating (non-destructive,
-        sandbox-only). This authors attacks, so on Claude it is gated by the cyber safeguard (use the Cyber
-        Verification Program); the MCP is model-agnostic and it runs on a host model without that gate. Leave it
-        False for the deterministic, never-gated stage. This writes files into the
+        sandbox-only). The adaptive step is model-authored; run it only against systems the operator owns or is authorized to test.
+        Whether it runs depends on the host model's provider policy - on a Claude host it is subject to
+        Anthropic's cyber safeguards (Cyber Verification Program); other providers set their own terms. Leave
+        it False for the deterministic stage that runs on any host. This writes files into the
         person's project, so human_words must quote their yes. Never overwrites an
         agent file you did not get from Cyphex. Claude Code loads agent files at the
         start of a session: if the Agent tool does not know them yet, run /agents or restart."""
