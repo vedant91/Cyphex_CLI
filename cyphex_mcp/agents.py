@@ -107,23 +107,37 @@ Rules
     return dict(name=name, role="recon", stage=1, title="recon", scope="route map", tools=_READ + _SUBMIT, body=body)
 
 
-def _prober(model: str) -> dict:
+def _prober(model: str, adaptive: bool = False) -> dict:
     name = "cyphex-prober"
-    body = f"""You run the live-attack stage of a Cyphex scan. You do NOT write attack requests yourself: you run a standard scanner and hand its output back. This keeps the stage a plain tool run.
+    intro = ("You run the live-attack stage of a Cyphex scan: you prove which findings are real by sending requests to the app in the sandbox."
+             if adaptive else
+             "You run the live-attack stage of a Cyphex scan. You do NOT write attack requests yourself: you run two shipped tools and hand their output back. This keeps the stage a plain tool run.")
+    steps = [
+        "1. Nuclei (broad): call mcp__cyphex__dast_recipe(job_id), run the command it gives from inside the sandbox, and pass the output to mcp__cyphex__submit_dast(job_id, nuclei_jsonl).",
+        "2. Targeted (per finding): call mcp__cyphex__probe_recipe(job_id). Save `script` to cyphex_probe.py and `targets` to targets.json, run the `commands` it lists (they fire a fixed payload library at each finding's route+param), and pass the JSON stdout to mcp__cyphex__submit_probe(job_id, results_json).",
+    ]
+    if adaptive:
+        steps.append(
+            "3. Adaptive (only for findings the two tools could not prove): probe the sandbox target yourself. Send a request, read the real response, adjust the next request to confirm the exact weakness the specialist described, and iterate until you prove it or rule it out. Stay on the sandbox target. Keep every request non-destructive \u2014 harmless markers and read-only proofs, never delete, drop, overwrite or exfiltrate real data. Submit each proven one with mcp__cyphex__submit_result(job_id, role=\"deep_dast\", agent=\"cyphex-prober\", payload={\"confirmations\": [{\"id\", \"proven\": true, \"evidence\": \"request + response excerpt\"}]}).\n   Note: on Claude this step may be stopped by Anthropic's cyber safeguards \u2014 that is expected. The MCP is model-agnostic, so the stage still runs on a host model without that gate; on Claude the sanctioned way to enable it is Anthropic's Cyber Verification Program.")
+        last_rule = "- Attack only the sandbox target, and only to prove a finding. Do not run a destructive request, install anything else, read files outside repo_path, or contact any other host."
+    else:
+        steps.append("3. Run only what the two recipes give you. Do not add payloads of your own or hand-craft requests.")
+        last_rule = "- Only run the commands the recipes give you, against the sandbox target. Do not install anything else, read files outside repo_path, or contact any other host."
+    steps.append(f"{len(steps) + 1}. Reply to the orchestrator in at most 5 lines with what was proven.")
+    body = f"""{intro}
 
-1. Nuclei (broad): call mcp__cyphex__dast_recipe(job_id), run the command it gives from inside the sandbox, and pass the output to mcp__cyphex__submit_dast(job_id, nuclei_jsonl).
-2. Targeted (per finding): call mcp__cyphex__probe_recipe(job_id). Save the `script` it returns to cyphex_probe.py and `targets` to targets.json, run the `commands` it lists (they copy the shipped runner into the sandbox and fire a fixed payload library at each finding's exact route+param), and pass the JSON stdout to mcp__cyphex__submit_probe(job_id, results_json).
-3. Run only what the two recipes give you. Do not add payloads of your own or hand-craft requests.
-4. Reply to the orchestrator in at most 5 lines with what was proven.
+{chr(10).join(steps)}
 
-If asked to replay on a patched build, run dast_recipe against the new target and submit again, then the orchestrator calls verify_patch.
+If asked to replay on a patched build, re-run the recipes against the new target and submit again, then the orchestrator calls verify_patch.
 
 Rules
 {_GUARD}
-- Only run the command dast_recipe gives you, against the sandbox target. Do not install anything else, read files outside repo_path, or contact any other host.
+{last_rule}
 - {_INJECTION_RULE}
 """
-    return dict(name=name, role="deep_dast", stage=3, title="scanner runner", scope="run the live-attack scanner", tools=_READ + ["Bash"] + _SUBMIT + [_MCP + "get_job", _MCP + "dast_recipe", _MCP + "submit_dast", _MCP + "probe_recipe", _MCP + "submit_probe"], body=body)
+    return dict(name=name, role="deep_dast", stage=3, title=("adaptive prober" if adaptive else "scanner runner"),
+                scope="prove findings against the sandbox",
+                tools=_READ + ["Bash"] + _SUBMIT + [_MCP + "get_job", _MCP + "dast_recipe", _MCP + "submit_dast", _MCP + "probe_recipe", _MCP + "submit_probe"], body=body)
 
 
 _LENSES = {
@@ -232,14 +246,14 @@ def _model_for(name: str, models: str) -> str:
     return _MIXED.get(name, "sonnet")
 
 
-def roster(models: str = "single", addons: tuple = ()) -> list[dict]:
+def roster(models: str = "single", addons: tuple = (), adaptive: bool = False) -> list[dict]:
     """models: 'single' = every agent inherits the session's model; 'mixed' = the council and
     the reviewers run on different Claude models, specialists on Sonnet.
     addons: extra specialist keys from ADDONS, chosen by profiling the app (get_playbook("profile"))."""
     extra = [k for k in (addons or []) if k in ADDONS]
     agents = [_recon(_model_for("cyphex-recon", models))]
     agents += [_specialist(k, _model_for(f"cyphex-{k}", models)) for k in list(SPECIALISTS) + extra]
-    agents.append(_prober(_model_for("cyphex-prober", models)))
+    agents.append(_prober(_model_for("cyphex-prober", models), adaptive))
     agents += [_council(k, _model_for(f"cyphex-{k}", models)) for k in _LENSES]
     agents.append(_patcher(_model_for("cyphex-patcher", models)))
     agents += [_reviewer(k, _model_for(f"cyphex-{k}", models)) for k in _REVIEWERS]
@@ -259,7 +273,7 @@ def agent_file(a: dict) -> str:
     return "\n".join(fm) + "\n" + MARKER + "\n" + a["body"]
 
 
-def deploy(project_path: str, models: str = "single", addons: tuple = ()) -> dict:
+def deploy(project_path: str, models: str = "single", addons: tuple = (), adaptive: bool = False) -> dict:
     """Write the roster into <project_path>/.claude/agents/. Never overwrites a file that does
     not carry our marker, so a person's own agents are safe."""
     root = Path(project_path)
@@ -268,7 +282,7 @@ def deploy(project_path: str, models: str = "single", addons: tuple = ()) -> dic
     dest = root / ".claude" / "agents"
     dest.mkdir(parents=True, exist_ok=True)
     written, skipped = [], []
-    for a in roster(models, addons):
+    for a in roster(models, addons, adaptive):
         p = dest / f"{a['name']}.md"
         if p.exists() and MARKER not in p.read_text():
             skipped.append(a["name"])
@@ -288,11 +302,11 @@ def remove(project_path: str) -> dict:
     return {"removed": gone}
 
 
-def plan(job_id: str, repo_path: str, target_url: str, sandbox: str, models: str = "single", addons: tuple = ()) -> dict:
+def plan(job_id: str, repo_path: str, target_url: str, sandbox: str, models: str = "single", addons: tuple = (), adaptive: bool = False) -> dict:
     """The run, stage by stage. Stages with several agents are launched together in one
     message so they run at the same time."""
     extra = [k for k in (addons or []) if k in ADDONS]
-    ra = {a["name"]: a for a in roster(models, addons)}
+    ra = {a["name"]: a for a in roster(models, addons, adaptive)}
     ctx = f"job_id={job_id} repo_path={repo_path}" + (f" target_url={target_url}" if target_url else "")
     spec = [f"cyphex-{k}" for k in list(SPECIALISTS) + extra]
     council = [f"cyphex-{k}" for k in _LENSES]

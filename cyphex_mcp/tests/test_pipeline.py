@@ -368,6 +368,14 @@ def test_dast_ingest_marks_findings_proven_from_scanner_output_not_a_model():
     assert "nuclei" in r["command"] and "model" not in r["command"].lower() and r["say"]
 
 
+def test_prober_adaptive_mode_is_opt_in_and_flags_the_safeguard():
+    from cyphex_mcp import agents
+    det = next(a for a in agents.roster("single") if a["name"] == "cyphex-prober")
+    adp = next(a for a in agents.roster("single", (), True) if a["name"] == "cyphex-prober")
+    assert "Adaptive (only" not in det["body"] and "do not add payloads" in det["body"].lower()  # default stays deterministic
+    assert "Adaptive (only" in adp["body"] and "non-destructive" in adp["body"] and "Cyber Verification" in adp["body"]  # opt-in, guardrailed, honest
+
+
 def test_roster_adapts_to_the_app_with_addons():
     from cyphex_mcp import agents, core
     assert "profile" in core.PLAYBOOKS  # the profiling playbook exists

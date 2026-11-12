@@ -263,14 +263,19 @@ def build_server():
                 "patch": ({"diff": f["patch"]["diff"], "reviews": f["patch"].get("reviews", []), "verify": (f["patch"].get("verify") or {}).get("verdict")} if f.get("patch") else None)}
 
     @mcp.tool()
-    def deploy_agents(project_path: str, models: str = "single", human_words: str = "", job_id: str = "", addons: list | None = None) -> dict:
+    def deploy_agents(project_path: str, models: str = "single", human_words: str = "", job_id: str = "", addons: list | None = None, adaptive: bool = False) -> dict:
         """Write the Cyphex agents (route mapper, ten bug-class specialists, prober, four
         independent reviewers, patcher, two fix reviewers, agent-security auditor) into
         <project_path>/.claude/agents/ as Claude Code subagents, each with its own
         tool allowlist and guardrails. models: 'single' (all on the session's model) or
         'mixed' (reviewers on different Claude models). addons: extra specialist keys the app needs,
         chosen by profiling it first (get_playbook("profile")) — e.g. ["jailbreak"] for an app with
-        AI/LLM features, ["payment"] for billing or ad-spend, ["idor"] for multi-tenant records. This writes files into the
+        AI/LLM features, ["payment"] for billing or ad-spend, ["idor"] for multi-tenant records.
+        adaptive=True gives the prober an extra step: for findings the fixed tools could not prove, it crafts and
+        sends its own requests to the sandbox target, reading each response and iterating (non-destructive,
+        sandbox-only). This authors attacks, so on Claude it is gated by the cyber safeguard (use the Cyber
+        Verification Program); the MCP is model-agnostic and it runs on a host model without that gate. Leave it
+        False for the deterministic, never-gated stage. This writes files into the
         person's project, so human_words must quote their yes. Never overwrites an
         agent file you did not get from Cyphex. Claude Code loads agent files at the
         start of a session: if the Agent tool does not know them yet, run /agents or restart."""
@@ -282,11 +287,12 @@ def build_server():
             return {"status": "needs_human_yes", "do_this": f"STOP. Tell the person you are about to write about 20 small agent files into {project_path}/.claude/agents/, "
                                                            "that they can delete them any time with remove_agents, and wait for their yes. Then call again with human_words."}
         addons = [a for a in (addons or []) if a in agents.ADDONS]
-        res = agents.deploy(project_path, models, tuple(addons))
+        res = agents.deploy(project_path, models, tuple(addons), adaptive)
         if job_id:
             job = ledger.load_job(job_id)
             job["addons"] = addons
-            for a in agents.roster(models, tuple(addons)):
+            job["adaptive"] = bool(adaptive)
+            for a in agents.roster(models, tuple(addons), adaptive):
                 job.setdefault("roster", {})[a["name"]] = {"role": a["role"], "model": a["model"], "tools": a["tools"], "deployed": True,
                                                             "reported": job.get("roster", {}).get(a["name"], {}).get("reported", 0)}
             job.setdefault("decisions", {})["deploy_words"] = human_words[:300]
@@ -306,13 +312,13 @@ def build_server():
         job = ledger.load_job(job_id)
         d = job.get("decisions") or {}
         target = d.get("sandbox_url") or ("http://target:3000" if d.get("sandbox") == "create" else "")
-        return agents.plan(job_id, job.get("repo_path", ""), target, d.get("sandbox", ""), "mixed" if d.get("agents") == "deploy-mixed" else "single", tuple(job.get("addons", [])))
+        return agents.plan(job_id, job.get("repo_path", ""), target, d.get("sandbox", ""), "mixed" if d.get("agents") == "deploy-mixed" else "single", tuple(job.get("addons", [])), bool(job.get("adaptive")))
 
     @mcp.tool()
     def get_agent_prompt(name: str, job_id: str = "", repo_path: str = "", target_url: str = "") -> dict:
         """The full instructions of one Cyphex agent. Use as the prompt of a general-purpose
         subagent when Claude Code has not loaded the deployed agent files yet."""
-        a = next((x for x in agents.roster("single", tuple(agents.ADDONS)) if x["name"] == name), None)
+        a = next((x for x in agents.roster("single", tuple(agents.ADDONS), True) if x["name"] == name), None)
         if a is None:
             return {"error": f"no agent {name!r}", "available": [x["name"] for x in agents.roster("single", tuple(agents.ADDONS))]}
         ctx = f"\n\nYour inputs: job_id={job_id} repo_path={repo_path}" + (f" target_url={target_url}" if target_url else "")
