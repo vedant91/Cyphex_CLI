@@ -38,6 +38,9 @@ _FINDING_SCHEMA = {
     "severity": "critical | high | medium | low",
     "why": "str — one sentence, grounded in the code you read",
     "reachable": "bool — is the sink reachable from untrusted input",
+    "route": "str, optional — the HTTP path that reaches this sink (e.g. /orders/export), so the live prober can fire at it",
+    "method": "str, optional — GET or POST",
+    "param": "str, optional — the request parameter that carries the tainted input",
 }
 
 PLAYBOOKS: dict[str, dict] = {
@@ -55,7 +58,8 @@ PLAYBOOKS: dict[str, dict] = {
         "role": "Reason over the source like a senior reviewer. For each place "
                 "untrusted input reaches a dangerous sink (query, shell, file "
                 "path, template, redirect), emit a candidate finding. Read the "
-                "code; do not pattern-match blindly.",
+                "code; do not pattern-match blindly. Where the sink is reachable over HTTP, "
+                "also give the route, method and param, so the live prober can fire payloads at that exact entry point.",
         "returns": {"findings": [_FINDING_SCHEMA],
                     "files_reviewed": ["repo-relative paths you actually read; the MCP "
                                        "counts the repo's source files itself and reports coverage"]},
@@ -521,4 +525,5 @@ TOOL_SURFACE = [
     "get_finding", "deploy_agents", "remove_agents", "get_orchestration_plan",
     "get_agent_prompt", "audit_agent_config", "plant_canary",
     "publish_genome", "guard_decide", "get_progress", "dast_recipe", "submit_dast",
+    "probe_recipe", "submit_probe",
 ]

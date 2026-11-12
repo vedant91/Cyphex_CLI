@@ -230,6 +230,29 @@ def build_server():
         return out
 
     @mcp.tool()
+    def probe_recipe(job_id: str, target_url: str = "") -> dict:
+        """Targeted live-attack recipe: fire the shipped per-CWE payload library at each finding that
+        carries a route and parameter, inside the sandbox. More than Nuclei — it hits the exact entry
+        point a specialist flagged. No model authors the payloads. Run the commands, then submit_probe."""
+        job = ledger.load_job(job_id)
+        d = job.get("decisions") or {}
+        url = target_url or d.get("sandbox_url") or ("http://target:3000" if d.get("sandbox") == "create" else "")
+        if not url:
+            return {"error": "no target to attack; the sandbox was skipped, so findings stay 'confirmed by code reading'."}
+        return dast.probe_recipe(job, url, f"cyphex-sandbox-{job_id}.yml" if d.get("sandbox") == "create" else "")
+
+    @mcp.tool()
+    def submit_probe(job_id: str, results_json: str) -> dict:
+        """Ingest the targeted prober's output. The MCP marks each finding proven from the real
+        request/response (measured by Cyphex). Pass the JSON stdout from the probe_recipe commands."""
+        res = dast.ingest_probe(results_json)
+        if res.get("error"):
+            return res
+        out = ledger.submit_result(job_id, "deep_dast", {"confirmations": res["confirmations"]}, "cyphex-probe", "targeted")
+        out["say"] = f"The targeted prober proved {res['proven']} of {len(res['confirmations'])} tested finding(s) with a real request."
+        return out
+
+    @mcp.tool()
     def get_finding(job_id: str, finding_id: str) -> dict:
         """One finding in full: where, why, who found it, the attack evidence, the
         review votes and the fix with its diff. Reviewers and the patcher read this."""

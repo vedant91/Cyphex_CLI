@@ -30,7 +30,7 @@ DIFF = ("--- a/src/t.js\n+++ b/src/t.js\n@@ -1,3 +1,3 @@\n const a = 1;\n"
 EXPECTED_TOOLS = {"start_scan", "get_playbook", "sandbox_recipe", "submit_result", "verify_patch",
                   "build_genome", "get_report", "get_job", "get_history", "guard_decide", "publish_genome",
                   "get_finding", "deploy_agents", "remove_agents", "get_orchestration_plan", "get_agent_prompt",
-                  "audit_agent_config", "plant_canary", "get_progress", "dast_recipe", "submit_dast"}
+                  "audit_agent_config", "plant_canary", "get_progress", "dast_recipe", "submit_dast", "probe_recipe", "submit_probe"}
 results = []
 
 
@@ -59,7 +59,7 @@ async def main(cfg_path: str, server: str):
                 return json.loads(res.content[0].text)
 
             tools = {t.name for t in (await s.list_tools()).tools}
-            step("server starts from the config and lists all 21 tools", tools == EXPECTED_TOOLS, f"missing {EXPECTED_TOOLS - tools}" if tools != EXPECTED_TOOLS else "")
+            step("server starts from the config and lists all 23 tools", tools == EXPECTED_TOOLS, f"missing {EXPECTED_TOOLS - tools}" if tools != EXPECTED_TOOLS else "")
 
             # human in the loop: the first call must stop and ask, and must not create a job
             ask = await call("start_scan", stack="node", repo_path=str(repo))

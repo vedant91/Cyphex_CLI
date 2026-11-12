@@ -359,7 +359,7 @@ def submit_result(job_id: str, role: str, payload: dict, agent: str = "", model:
     who = agent or role
     merged = {}  # submitted id -> id kept, when another agent already reported the same bug
     for f in effects.get("findings", []):
-        basic = {k: f.get(k) for k in ("id", "cwe", "file", "line", "severity", "why", "reachable", "snippet")}
+        basic = {k: f.get(k) for k in ("id", "cwe", "file", "line", "severity", "why", "reachable", "snippet", "route", "method", "param")}
         dup = next((o for o in job["findings"].values() if o["id"] == f["id"] or _same_finding(o, f)), None)
         if dup:
             merged[f["id"]] = dup["id"]

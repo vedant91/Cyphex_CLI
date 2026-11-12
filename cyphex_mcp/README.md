@@ -64,7 +64,9 @@ needs both. Two agents reporting the same bug are merged, and both are credited.
 
 The live-attack (deep DAST) stage is **deterministic**: `dast_recipe(job_id)` returns a Nuclei command, the
 host runs that standard scanner against the sandbox target, and `submit_dast(job_id, jsonl)` lets the MCP parse
-the output and mark proof itself (measured by Cyphex, not reported by a model). No Claude model authors attack
+the output and mark proof itself (measured by Cyphex, not reported by a model). `probe_recipe`/`submit_probe` add a
+targeted pass: a fixed per-CWE payload library (shipped as `probe_kit.py`) fired at the exact route+param each
+specialist flagged - more than generic Nuclei, still no model-authored payloads. No Claude model authors attack
 requests, so the stage is a plain tool run and is never gated by a safety classifier. Findings a scanner cannot
 reach stay "confirmed by code reading"; the report says which is which.
 

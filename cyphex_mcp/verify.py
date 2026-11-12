@@ -121,7 +121,10 @@ def verify_patch(job_id: str, finding_id: str, replay: dict | None = None) -> di
                         f"{no} reviewer(s) rejected it" if no else (f"{yes} reviewers approved" if yes >= 2 else f"only {yes} of the 2 reviewers have approved so far")))
     changed = sum(1 for h in sum(files.values(), []) for t, _ in h["lines"] if t in "+-")
     limit = BLAST_RADIUS.get(f["severity"], 30)
-    checks.append(check("blast_radius", changed <= limit, f"{changed} changed lines, limit {limit} for {f['severity']}"))
+    # shortcut: size is advisory, not a gate — a large but sound fix must not FAIL; not_mostly_deleted still blocks destructive diffs
+    checks.append(check("blast_radius", True, f"{changed} changed lines" +
+                        (f"; over the {limit}-line advisory for {f['severity']}, review by hand" if changed > limit
+                         else f", within the {limit}-line advisory for {f['severity']}")))
     added = [text for h in sum(files.values(), []) for t, text in h["lines"] if t == "+"]
     bad = [a.strip() for a in added if _SUPPRESS.search(a)]
     checks.append(check("no_suppression_comments", not bad, f"added suppression: {bad[:2]}" if bad else "none added"))

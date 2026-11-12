@@ -25,6 +25,7 @@ NAMES = {
     "ai": ("AI features agent", "checks how the app's own AI features handle user text"),
     "prober": ("prober", "runs a standard scanner against the running app to see which findings actually work"),
     "nuclei": ("scanner", "runs a standard scanner against the running app"),
+    "probe": ("targeted prober", "fires known payloads at each finding route and parameter it flagged"),
     "skeptic": ("skeptic reviewer", "tries to show each finding is a false alarm"),
     "exploiter": ("exploit reviewer", "works out whether an attacker could really use each finding"),
     "dataflow": ("data-flow reviewer", "follows the input from entry to use to see if anything stops it"),

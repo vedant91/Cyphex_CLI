@@ -68,6 +68,23 @@ def _prove(j):
     ledger.submit_result(j["job_id"], "deep_dast", {"confirmations": [{"id": FIND["id"], "proven": True, "evidence": "GET /t?id=1 OR 1=1 returned every row"}]})
 
 
+def test_blast_radius_is_advisory_not_a_fail():
+    # The review: 3 of 4 sound patches FAILed only for being over a flat line cap. Size is now a warning.
+    j = _job()
+    repo = Path(ledger.load_job(j["job_id"])["repo_path"])
+    (repo / "src" / "big.js").write_text("".join(f"const x{i} = {i};\n" for i in range(60)))
+    find = {"id": "low-big-1", "cwe": "CWE-1", "file": "src/big.js", "line": 1, "severity": "low", "why": "x", "snippet": "const x0 = 0;"}
+    ledger.submit_result(j["job_id"], "deep_sast", {"findings": [find]})
+    hunk = "".join((f"-const x{i} = {i};\n+const x{i} = {i + 100};\n" if i < 16 else f" const x{i} = {i};\n") for i in range(60))
+    diff = "--- a/src/big.js\n+++ b/src/big.js\n@@ -1,60 +1,60 @@\n" + hunk  # 32 changed > 30 low-limit, only 16 of 60 lines touched
+    ledger.submit_result(j["job_id"], "patch_crew", {"finding_id": "low-big-1", "diff": diff,
+        "reviews": [{"reviewer": "r0", "approved": True}, {"reviewer": "r1", "approved": True}]})
+    res = verify.verify_patch(j["job_id"], "low-big-1")
+    br = [c for c in res["checks"] if c["name"] == "blast_radius"][0]
+    assert br["ok"] is True and "advisory" in br["detail"] and "32 changed" in br["detail"], br
+    assert res["verdict"] != "FAIL"  # a large but clean patch is no longer failed for size alone
+
+
 def test_verify_pass_fail_unverifiable():
     j = _job()
     _with_patch(j)
@@ -349,6 +366,23 @@ def test_dast_ingest_marks_findings_proven_from_scanner_output_not_a_model():
     assert ledger.proof_level(ledger.load_job(j["job_id"])["findings"]["cmdi-export"]) == "proven"
     r = dast.recipe("http://target:3000", "c.yml")
     assert "nuclei" in r["command"] and "model" not in r["command"].lower() and r["say"]
+
+
+def test_targeted_prober_proves_a_finding_from_a_real_payload_hit():
+    from cyphex_mcp import dast, probe_kit
+    probe_kit._selftest()  # the payload classifier reacts to canned responses with no network
+    j = _job()
+    find = dict(FIND, id="sqli-orders-1", route="/orders", method="GET", param="id")
+    ledger.submit_result(j["job_id"], "deep_sast", {"findings": [find]}, agent="cyphex-sqli")
+    job = ledger.load_job(j["job_id"])
+    assert job["findings"]["sqli-orders-1"]["route"] == "/orders" and job["findings"]["sqli-orders-1"]["param"] == "id"  # entry point persisted
+    rec = dast.probe_recipe(job, "http://target:3000", "cyphex-sandbox-x.yml")
+    assert rec["has_targets"] and rec["targets"][0]["cwe"] == "CWE-89" and "def run(base" in rec["script"]
+    # the runner would emit this after firing the SLEEP payload; the MCP marks proof itself
+    out = dast.ingest_probe('{"results": [{"id": "sqli-orders-1", "proven": true, "evidence": "fired SLEEP(3) at GET /orders?id -> sql_time proven"}]}')
+    assert out["proven"] == 1
+    r = ledger.submit_result(j["job_id"], "deep_dast", {"confirmations": out["confirmations"]}, "cyphex-probe", "targeted")
+    assert r["summary"]["proven"] == 1 and ledger.proof_level(ledger.load_job(j["job_id"])["findings"]["sqli-orders-1"]) == "proven"
 
 
 def test_narration_says_who_is_working_and_who_is_still_pending():

@@ -102,10 +102,10 @@ def _prober(model: str) -> dict:
     name = "cyphex-prober"
     body = f"""You run the live-attack stage of a Cyphex scan. You do NOT write attack requests yourself: you run a standard scanner and hand its output back. This keeps the stage a plain tool run.
 
-1. Call mcp__cyphex__dast_recipe with the job_id to get the exact command. It runs Nuclei (a standard third-party scanner) against the app from inside the sandbox.
-2. Run that command exactly as given. Do not add payloads of your own and do not hand-craft requests.
-3. Pass the scanner's full output to mcp__cyphex__submit_dast(job_id, nuclei_jsonl). The MCP parses it and decides what is proven.
-4. Reply to the orchestrator in at most 5 lines with what the scanner proved.
+1. Nuclei (broad): call mcp__cyphex__dast_recipe(job_id), run the command it gives from inside the sandbox, and pass the output to mcp__cyphex__submit_dast(job_id, nuclei_jsonl).
+2. Targeted (per finding): call mcp__cyphex__probe_recipe(job_id). Save the `script` it returns to cyphex_probe.py and `targets` to targets.json, run the `commands` it lists (they copy the shipped runner into the sandbox and fire a fixed payload library at each finding's exact route+param), and pass the JSON stdout to mcp__cyphex__submit_probe(job_id, results_json).
+3. Run only what the two recipes give you. Do not add payloads of your own or hand-craft requests.
+4. Reply to the orchestrator in at most 5 lines with what was proven.
 
 If asked to replay on a patched build, run dast_recipe against the new target and submit again, then the orchestrator calls verify_patch.
 
@@ -114,7 +114,7 @@ Rules
 - Only run the command dast_recipe gives you, against the sandbox target. Do not install anything else, read files outside repo_path, or contact any other host.
 - {_INJECTION_RULE}
 """
-    return dict(name=name, role="deep_dast", stage=3, title="scanner runner", scope="run the live-attack scanner", tools=_READ + ["Bash"] + _SUBMIT + [_MCP + "get_job", _MCP + "dast_recipe", _MCP + "submit_dast"], body=body)
+    return dict(name=name, role="deep_dast", stage=3, title="scanner runner", scope="run the live-attack scanner", tools=_READ + ["Bash"] + _SUBMIT + [_MCP + "get_job", _MCP + "dast_recipe", _MCP + "submit_dast", _MCP + "probe_recipe", _MCP + "submit_probe"], body=body)
 
 
 _LENSES = {
