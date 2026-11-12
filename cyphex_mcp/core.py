@@ -485,11 +485,32 @@ def validate_human_answers(ans: dict | None) -> tuple[dict | None, list[str]]:
         errs.append("sandbox is 'existing' so sandbox_url (the running app's http(s) URL) is required")
     words = str(ans.get("human_words", "")).strip()
     if len(words) < 3:
-        errs.append("human_words must quote what the person actually said")
+        errs.append("human_words is missing: put what the person actually said, quoted, INSIDE the human_answers object "
+                    "(it is not a separate argument)")
     if errs:
         return None, errs
     return {"webhook": ans["webhook"], "sandbox": ans["sandbox"], "sandbox_url": url if ans["sandbox"] == "existing" else "",
             "agents": ans["agents"], "human_words": words[:500]}, []
+
+
+# What a complete answer looks like, returned whenever one is rejected so the host never has to guess the shape.
+ANSWER_SHAPE = {"webhook": "yes|no", "sandbox": "existing|create|skip", "sandbox_url": "<only when sandbox is existing>",
+                "agents": "deploy-mixed|deploy-same|inline", "human_words": "<the person's own reply, quoted>"}
+
+
+def setup_questions(remote: bool = False) -> list[dict]:
+    """The three questions. Over HTTP the server cannot write agent files, so the agents question says how they really run."""
+    if not remote:
+        return SETUP_QUESTIONS
+    qs = [dict(q) for q in SETUP_QUESTIONS]
+    a = next(q for q in qs if q["id"] == "agents")
+    a["question"] = ("Cyphex works best as a team of separate agents (route mapper, ten bug-class specialists, a prober, four "
+                     "independent reviewers, a patcher with two reviewers, an agent-security auditor). This server cannot write "
+                     "agent files, so they run as separate subagents launched from prompts the server supplies. How do you want them run?")
+    a["options"] = {"deploy-mixed": "run the team as subagents, with the reviewers on different Claude models (needs those models on your plan)",
+                    "deploy-same": "run the team as subagents, all on the model you are using now",
+                    "inline": "no subagents: one session plays every role in turn (weaker, no independent reviewers)"}
+    return qs
 
 
 # Tool surface advertised to the host agent. server.py turns each into an MCP

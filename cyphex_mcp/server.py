@@ -10,11 +10,12 @@ core — imports and self-tests without the dependency installed.
 """
 from __future__ import annotations
 
+import functools
 import hmac
 import os
 import sys
 
-from . import agent_security, agents, core, dast, genome_bridge, ledger, narrate, report, verify
+from . import agent_security, agents, core, dast, genome_bridge, ledger, narrate, report, status, verify
 
 
 class _Bearer:
@@ -54,6 +55,8 @@ def build_server():
         "4) Keep the person informed in plain English the whole time: before each stage say which agents are starting and what each "
         "looks for (the plan's `say_before`), and whenever a tool result has a `say` field, tell the person that sentence right away. "
         "Never wait to be asked what is happening; if they ask for status, call get_progress. "
+        "Every scan tool result starts with a `status_line`: show it at the top of each reply, and give the person the "
+        "`status_url` once (when present) so they can watch the scan live in a browser. "
         "5) Afterwards call verify_patch for each fix, build_genome, then get_report with out_path set to cyphex-report.html in the "
         "project root. Finish by telling the person the verdict, where the report is, which findings were proven by a real attack and "
         "which come only from reading code, and anything that could not be verified."))
@@ -61,6 +64,21 @@ def build_server():
     # server, not theirs, and a caller-chosen out_path would let them write files here.
     # So remote mode ignores both and returns the report inline instead.
     remote = os.environ.get("CYPHEX_MCP_TRANSPORT", "stdio") != "stdio"
+
+    # Every tool result that belongs to a scan gets a one-line status (and, locally, a link to the live page) on top.
+    _tool = mcp.tool
+
+    def _tool_with_banner(*a, **k):
+        register = _tool(*a, **k)
+
+        def deco(fn):
+            @functools.wraps(fn)
+            def wrapped(*args, **kw):
+                return status.with_banner(fn(*args, **kw), fn, args, kw, remote)
+            return register(wrapped)
+        return deco
+
+    mcp.tool = _tool_with_banner
 
     @mcp.tool()
     def start_scan(stack: str = "node", port: int = 3000,
@@ -73,7 +91,8 @@ def build_server():
         returns three questions (GitHub webhook? where tests run? deploy the agent team?) that you must put to the
         person at the keyboard and wait for. Never answer them yourself. Call again
         with human_answers={"webhook": "yes|no", "sandbox": "existing|create|skip",
-        "sandbox_url": "<only if existing>", "human_words": "<what they said>"}.
+        "sandbox_url": "<only if existing>", "agents": "deploy-mixed|deploy-same|inline",
+        "human_words": "<their reply, quoted>"}: all five go INSIDE human_answers; human_words is not a separate argument.
         Then it returns a job_id, how to get a running app to test (their URL, or a
         local Docker recipe), and the roles to run, starting with sandbox_security.
         Report every role's output with submit_result. repo_path lets the MCP check
@@ -92,7 +111,8 @@ def build_server():
                 return {"status": "needs_human_answers",
                         "do_this": "STOP. Ask the person these questions in plain words and wait for their reply. "
                                    "Do not choose for them. Then call start_scan again with human_answers.",
-                        "ask_the_human": core.SETUP_QUESTIONS, "problems": problems}
+                        "ask_the_human": core.setup_questions(remote), "problems": problems,
+                        "call_again_with": {"human_answers": core.ANSWER_SHAPE}}
         if job_id:
             job = ledger.load_job(job_id)
             job.update(status="running", stack=stack, repo_path=repo_path or job["repo_path"], decisions=decisions)
@@ -116,10 +136,17 @@ def build_server():
             out["note"] = "No running app: skip deep_dast. Findings stay 'confirmed' (code reading), never 'proven'."
         out["say"] = ("The scan is set up. " + {"create": "A Docker sandbox will be built so the app can be attacked safely. ",
                       "existing": f"The app at {decisions['sandbox_url']} will be attacked. ", "skip": "No app will be attacked, so findings come from reading the code. "}[decisions["sandbox"]]
-                      + ("Next the agent team is deployed." if decisions["agents"].startswith("deploy") else "Next each role is played in turn."))
+                      + (("Next each agent is launched from a prompt this server supplies." if remote else "Next the agent team is deployed.")
+                         if decisions["agents"].startswith("deploy") else "Next each role is played in turn."))
         out["run_in_order"] = order
         out["then"] = ["verify_patch for each patch", "build_genome", "get_report"]
-        if decisions["agents"].startswith("deploy"):
+        if decisions["agents"].startswith("deploy") and remote:
+            out["agents_next"] = ("deploy_agents is not available over HTTP (it would write files on the server): do NOT call it. "
+                                  "Call get_orchestration_plan(job_id), then launch each agent as a general-purpose subagent whose prompt "
+                                  "is get_agent_prompt(name, job_id, repo_path=<the project's absolute path on YOUR machine>, target_url). "
+                                  "The plan's own prompt has no repo_path over HTTP, so add yours. Stages with several agents go out together "
+                                  "in one message; you only orchestrate and call verify_patch, build_genome and get_report.")
+        elif decisions["agents"].startswith("deploy"):
             out["agents_next"] = ("Call deploy_agents(project_path=<the folder that holds .claude>, models='" +
                                   ("mixed" if decisions["agents"] == "deploy-mixed" else "single") +
                                   "', job_id=...), then get_orchestration_plan(job_id) and launch each stage with your Agent tool. "
@@ -223,7 +250,9 @@ def build_server():
         agent file you did not get from Cyphex. Claude Code loads agent files at the
         start of a session: if the Agent tool does not know them yet, run /agents or restart."""
         if remote:
-            return {"error": "deploy_agents writes files on the server's disk, so it is disabled over HTTP. Run the MCP locally."}
+            return {"error": "deploy_agents writes files on the server's disk, so it is disabled over HTTP. Skip it: call "
+                             "get_orchestration_plan(job_id) and launch each agent as a general-purpose subagent using "
+                             "get_agent_prompt(name, job_id, repo_path=<your project path>) as its prompt. (Or run the MCP locally.)"}
         if os.environ.get("CYPHEX_UNATTENDED") != "1" and len(human_words.strip()) < 3:
             return {"status": "needs_human_yes", "do_this": f"STOP. Tell the person you are about to write about 20 small agent files into {project_path}/.claude/agents/, "
                                                            "that they can delete them any time with remove_agents, and wait for their yes. Then call again with human_words."}
